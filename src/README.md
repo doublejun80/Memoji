@@ -1,8 +1,8 @@
-# 📝 BlockNote
+# 📝 Memoji 2.0
 
 <div align="center">
 
-**Notion 스타일의 블록 기반 메모 앱**
+**Typora식 Markdown 편집과 로컬 Gemma AI를 갖춘 오프라인 노트 앱**
 
 _오프라인 우선, VDI 호환, 키보드 중심의 데스크톱 메모 애플리케이션_
 
@@ -16,11 +16,12 @@ _오프라인 우선, VDI 호환, 키보드 중심의 데스크톱 메모 애플
 
 ## ✨ 핵심 특징
 
-BlockNote는 Tauri를 사용한 크로스 플랫폼 데스크톱 메모 애플리케이션입니다. 모든 데이터를 로컬에 저장하여 완전한 오프라인 작업이 가능하며, VDI 환경에서도 안전하게 사용할 수 있습니다.
+Memoji는 Tauri를 사용한 크로스 플랫폼 데스크톱 노트 애플리케이션입니다. 모든 데이터를 로컬에 저장하여 완전한 오프라인 작업이 가능하며, VDI 환경에서도 안전하게 사용할 수 있습니다.
 
 ### 🎯 주요 기능
 
-- **📄 마크다운 에디터**: 실시간 미리보기가 포함된 강력한 마크다운 편집기
+- **📄 Milkdown Markdown 에디터**: Typora처럼 작성 즉시 서식으로 렌더링되는 편집기
+- **📊 GFM 표 편집**: Markdown table 저장/복원과 표 편집 UI
 - **📅 날짜별 메모 관리**: 달력 기반 직관적인 날짜별 메모 시스템
 - **🏷️ 태그 시스템**: #태그를 통한 빠른 분류 및 검색 (한글 완벽 지원)
 - **🔍 고급 검색**: 전체 텍스트, 태그, 접두사 검색 지원
@@ -109,8 +110,8 @@ sudo apt install libwebkit2gtk-4.0-dev build-essential curl wget file libssl-dev
 ### 1️⃣ 프로젝트 클론
 
 ```bash
-git clone https://github.com/your-username/blocknote.git
-cd blocknote
+git clone https://github.com/your-username/memoji.git
+cd memoji
 ```
 
 ### 2️⃣ 환경 설정
@@ -176,7 +177,7 @@ npm run tauri:build -- --target aarch64-apple-darwin    # macOS Apple Silicon
 ## 📁 프로젝트 구조
 
 ```
-blocknote/
+memoji/
 ├── 🎨 Frontend
 │   ├── App.tsx                    # 메인 애플리케이션 컴포넌트
 │   ├── components/                # React 컴포넌트들
@@ -215,7 +216,7 @@ blocknote/
 
 ## ⌨️ 키보드 단축키
 
-BlockNote는 키보드 중심의 워크플로우를 제공합니다:
+Memoji는 키보드 중심의 워크플로우를 제공합니다:
 
 | 단축키   | 기능                       |
 | -------- | -------------------------- |
@@ -223,11 +224,11 @@ BlockNote는 키보드 중심의 워크플로우를 제공합니다:
 | `Ctrl+F` | 검색 포커스                |
 | `Escape` | 검색 초기화                |
 | `Ctrl+S` | 수동 저장 (자동 저장 기본) |
-| `Ctrl+E` | 편집/미리보기 모드 토글    |
+| `Ctrl+E` | 즉시 편집/Markdown 원문 전환 |
 
 ## 🏷️ 태그 시스템
 
-BlockNote의 강력한 태그 시스템을 활용하세요:
+Memoji의 태그 시스템을 활용하세요:
 
 - **태그 생성**: `#태그명`으로 자동 인식
 - **한글 지원**: `#할일`, `#아이디어`, `#프로젝트` 등
@@ -372,7 +373,7 @@ cargo build
 
 ## 🤝 기여하기
 
-BlockNote는 오픈소스 프로젝트입니다. 기여를 환영합니다!
+Memoji는 오픈소스 프로젝트입니다. 기여를 환영합니다!
 
 ### 기여 프로세스
 
@@ -407,7 +408,7 @@ BlockNote는 오픈소스 프로젝트입니다. 기여를 환영합니다!
 
 <div align="center">
 
-**BlockNote로 더 나은 메모 경험을 만들어보세요! 🚀**
+**Memoji로 더 나은 로컬 노트 경험을 만들어보세요! 🚀**
 
 ⭐ 이 프로젝트가 도움이 되었다면 별표를 눌러주세요!
 

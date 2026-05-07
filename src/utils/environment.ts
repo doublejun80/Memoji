@@ -15,12 +15,5 @@ export const getEnvironment = () => {
 
 // Log environment info
 export const logEnvironmentInfo = () => {
-  const env = getEnvironment();
-  console.log('🔧 Environment Info:', {
-    'Browser': env.isBrowser,
-    'Tauri': env.isTauri,
-    'Development': env.isDevelopment,
-    'Web Mode': env.isWeb,
-    'Desktop Mode': env.isDesktop
-  });
+  return getEnvironment();
 };

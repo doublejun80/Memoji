@@ -113,18 +113,15 @@ H:\Apps\Memoji\data\memoji.db 파일을 복사
 
 설정 → 앱 제목에서 원하는 이름으로 변경 가능
 
-### **2. AI 도우미 설정**
+### **2. 로컬 AI 도우미 설정**
 
-설정 → LLM Provider에서 API 키 입력:
+설정 → 로컬 Gemma AI에서 모델 상태를 확인합니다.
 
-**지원하는 Provider:**
-- ✅ **OpenAI** (gpt-4o-mini)
-- ✅ **Anthropic Claude** (claude-3-5-sonnet)
-- ✅ **Google Gemini** (gemini-2.0-flash-exp)
-- ✅ **Ollama** (로컬 - API 키 불필요)
-- ✅ **LM Studio** (로컬 - API 키 불필요)
+**필요한 파일:**
+- `resources\models\gemma-4-e2b-it-q4.gguf`
+- `resources\models\tokenizer.json`
 
-**주의:** VDI 환경에서는 네트워크 제한으로 인해 외부 API (OpenAI, Anthropic, Gemini)를 사용하지 못할 수 있습니다.
+**주의:** AI 도우미는 로컬 GGUF 파일만 사용하며 네트워크 추론을 수행하지 않습니다.
 
 ### **3. 데이터 저장 위치 확인**
 
@@ -141,8 +138,8 @@ H:\Apps\Memoji\data\memoji.db 파일을 복사
 
 ### **권장 사양**
 - OS: Windows 11 (64-bit)
-- RAM: 8GB
-- 디스크: 500MB 여유 공간
+- RAM: 8GB 이상
+- 디스크: 앱 500MB 이상, 모델 파일용 4GB 이상 추가
 
 ---
 
@@ -171,11 +168,7 @@ H:\Apps\Memoji\data\memoji.db 파일을 복사
 
 ### **1. 네트워크 제한**
 
-VDI 환경에서는 외부 네트워크 접근이 제한될 수 있습니다:
-- ❌ OpenAI API 사용 불가
-- ❌ Anthropic Claude API 사용 불가
-- ❌ Google Gemini API 사용 불가
-- ✅ 로컬 메모 작성/저장은 정상 작동
+Memoji는 메모 저장과 로컬 AI 도우미에 네트워크 추론을 사용하지 않습니다. VDI 네트워크가 제한되어도 로컬 메모 작성/저장은 정상 작동합니다.
 
 ### **2. 데이터 백업**
 
@@ -215,7 +208,7 @@ H:\Apps\Memoji\data\memoji.db → 안전한 위치로 복사
 
 ### **Q: AI 도우미가 작동하지 않아요**
 
-**A:** VDI 환경에서는 네트워크 제한으로 외부 API 사용이 불가능할 수 있습니다.
+**A:** 설정 → 로컬 Gemma AI에서 GGUF 모델 경로, `tokenizer.json`, AVX-512 런타임 감지 상태를 확인하세요.
 
 ---
 
@@ -231,4 +224,3 @@ Memoji가 VDI 환경에서 안전하게 작동하도록 설정되었습니다.
 - ✅ 로컬 메모 작성/저장
 
 **즐거운 메모 작성 되세요! 📝**
-

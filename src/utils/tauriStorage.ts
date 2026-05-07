@@ -1,4 +1,5 @@
 import { Page } from '../types';
+import { normalizePage } from './pageModel';
 
 // Dynamic import for Tauri API to handle environments where it's not available
 let invoke: any = null;
@@ -13,7 +14,7 @@ const initTauri = async () => {
       return true;
     }
   } catch (error) {
-    console.log('Tauri not available, using localStorage fallback');
+    // Web preview mode uses localStorage instead of Tauri commands.
   }
   return false;
 };
@@ -30,17 +31,14 @@ class TauriStorage {
     
     if (this.isTauriAvailable && invoke) {
       try {
-        console.log('🚀 Initializing Tauri database...');
         await invoke('init_database');
         this.isInitialized = true;
-        console.log('✅ Tauri database initialized successfully');
       } catch (error) {
         console.warn('⚠️ Failed to initialize Tauri database, falling back to localStorage:', error);
         this.isInitialized = false;
         this.isTauriAvailable = false;
       }
     } else {
-      console.log('💾 Using localStorage for data persistence (web mode)');
       this.isInitialized = false;
       this.isTauriAvailable = false;
     }
@@ -55,33 +53,28 @@ class TauriStorage {
 
     if (this.isInitialized && this.isTauriAvailable && invoke) {
       try {
-        console.log('📖 tauriStorage.getPages - Tauri에서 로드 시도');
         const tauriPages = await invoke<any[]>('get_pages');
-        console.log('📖 Tauri에서 로드된 페이지 수:', tauriPages.length);
 
         // Convert snake_case from Tauri to camelCase
         const pages = tauriPages.map(p => {
-          console.log(`  - Tauri 페이지 "${p.title}":`, {
-            tags: p.tags,
-            tagsType: typeof p.tags
-          });
-
-          return {
+          return normalizePage({
             id: p.id,
             title: p.title,
             icon: p.icon,
             parentId: p.parent_id,
+            projectParentId: p.project_parent_id ?? p.parent_id,
+            projectIndex: p.project_index,
+            dateKey: p.date_key,
             content: p.content,
             createdAt: p.created_at,
             updatedAt: p.updated_at,
             type: p.type,
             tags: p.tags,
             order: p.order
-          };
+          });
         });
 
         const migratedPages = this.migratePages(pages);
-        console.log('📖 마이그레이션 후 페이지 수:', migratedPages.length);
         return migratedPages;
       } catch (error) {
         console.error('❌ Tauri에서 페이지 로드 실패:', error);
@@ -89,63 +82,51 @@ class TauriStorage {
     }
 
     // Fallback to localStorage
-    console.log('📖 tauriStorage.getPages - localStorage에서 로드');
     const saved = localStorage.getItem('blocknote-pages');
-    console.log('📖 localStorage 원본 데이터:', saved?.substring(0, 500));
+    let pages: any[] = [];
 
-    const pages = saved ? JSON.parse(saved) : [];
-    console.log('📖 localStorage에서 로드된 페이지 수:', pages.length);
-
-    pages.forEach((p: any) => {
-      console.log(`  - localStorage 페이지 "${p.title}":`, {
-        tags: p.tags,
-        tagsType: typeof p.tags,
-        tagsIsArray: Array.isArray(p.tags),
-        전체객체: p
-      });
-    });
+    if (saved) {
+      try {
+        pages = JSON.parse(saved);
+      } catch (error) {
+        console.error('Failed to parse saved localStorage pages:', error);
+        pages = [];
+      }
+    }
 
     const migratedPages = this.migratePages(pages);
-    console.log('📖 마이그레이션 후:', migratedPages.map(p => ({ title: p.title, tags: p.tags })));
 
     return migratedPages;
   }
 
   // 기존 페이지를 새로운 구조로 마이그레이션
   private migratePages(pages: any[]): Page[] {
-    return pages.map((page: any, index: number) => ({
-      ...page,
-      type: page.type || 'page', // 기본값은 'page'
-      tags: page.tags || [], // 기본값은 빈 배열
-      order: page.order !== undefined ? page.order : index, // 기본값은 인덱스
-      content: page.content || '' // 기존 마이그레이션 유지
-    }));
+    return pages.map((page: any, index: number) => normalizePage(page, index));
   }
 
   async savePage(page: Page): Promise<void> {
-    console.log('💾 tauriStorage.savePage 호출:', page.title);
-    console.log('  - content 길이:', page.content?.length || 0);
-    console.log('  - content 미리보기:', page.content?.substring(0, 50) || '(empty)');
-
     await this.init();
 
     if (this.isInitialized && this.isTauriAvailable && invoke) {
       try {
         // Convert camelCase to snake_case for Tauri
+        const normalizedPage = normalizePage(page);
         const tauriPage = {
-          id: page.id,
-          title: page.title,
-          icon: page.icon,
-          parent_id: page.parentId,
-          content: page.content,
-          created_at: page.createdAt,
-          updated_at: page.updatedAt,
-          type: page.type,
-          tags: page.tags,
-          order: page.order
+          id: normalizedPage.id,
+          title: normalizedPage.title,
+          icon: normalizedPage.icon,
+          parent_id: normalizedPage.projectParentId,
+          project_parent_id: normalizedPage.projectParentId,
+          project_index: normalizedPage.projectIndex,
+          date_key: normalizedPage.dateKey,
+          content: normalizedPage.content,
+          created_at: normalizedPage.createdAt,
+          updated_at: normalizedPage.updatedAt,
+          type: normalizedPage.type,
+          tags: normalizedPage.tags,
+          order: normalizedPage.order
         };
         await invoke('save_page', { page: tauriPage });
-        console.log('✅ Tauri DB에 저장 완료');
         return;
       } catch (error) {
         console.error('❌ Tauri 저장 실패, localStorage로 fallback:', error);
@@ -153,22 +134,29 @@ class TauriStorage {
     }
 
     // Fallback to localStorage
+    const normalizedPage = normalizePage(page);
     const pages = await this.getLocalStoragePages();
-    const existingIndex = pages.findIndex(p => p.id === page.id);
+    const existingIndex = pages.findIndex(p => p.id === normalizedPage.id);
 
     if (existingIndex >= 0) {
-      pages[existingIndex] = page;
+      pages[existingIndex] = normalizedPage;
     } else {
-      pages.push(page);
+      pages.push(normalizedPage);
     }
 
     localStorage.setItem('blocknote-pages', JSON.stringify(pages));
-    console.log('✅ localStorage에 저장 완료');
   }
 
   private getLocalStoragePages(): Page[] {
     const saved = localStorage.getItem('blocknote-pages');
-    return saved ? JSON.parse(saved) : [];
+    if (!saved) return [];
+
+    try {
+      return JSON.parse(saved);
+    } catch (error) {
+      console.error('Failed to parse saved localStorage pages:', error);
+      return [];
+    }
   }
 
   async deletePage(pageId: string): Promise<void> {
@@ -192,13 +180,19 @@ class TauriStorage {
   }
 
   private getAllChildPageIds(pageId: string, allPages: Page[]): string[] {
-    const result = [pageId];
-    const children = allPages.filter(page => page.parentId === pageId);
-    
-    children.forEach(child => {
-      result.push(...this.getAllChildPageIds(child.id, allPages));
-    });
-    
+    const result: string[] = [];
+    const visited = new Set<string>();
+
+    const collect = (id: string) => {
+      if (visited.has(id)) return;
+      visited.add(id);
+      result.push(id);
+      allPages
+        .filter(page => page.projectParentId === id || page.parentId === id)
+        .forEach(child => collect(child.id));
+    };
+
+    collect(pageId);
     return result;
   }
 

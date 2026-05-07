@@ -3,9 +3,13 @@ import { Page } from '../types';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { Search, FileText, AlignLeft, Tag, X } from 'lucide-react';
-import { TagRenderer } from './TagRenderer';
-import { formatDateKey } from '../utils/dateUtils';
 import AIChatAssistant from './AIChatAssistant';
+import {
+  SearchFilter,
+  SearchResult,
+  searchPages,
+  splitHighlightedText,
+} from '../utils/searchIndex';
 
 interface RightPanelProps {
   pages: Page[];
@@ -17,16 +21,8 @@ interface RightPanelProps {
   datesWithPages: string[];
   currentPage?: Page | null;
   onInsertText?: (text: string) => void;
+  onReplaceText?: (targetText: string, replacementText: string) => boolean;
 }
-
-interface SearchResult {
-  page: Page;
-  relevance: number;
-  matchedContent: string;
-  matchType: 'title' | 'content' | 'tag';
-}
-
-type SearchFilter = 'all' | 'title' | 'content' | 'tags';
 
 export const RightPanel: React.FC<RightPanelProps> = ({
   pages,
@@ -37,7 +33,8 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   selectedDate,
   datesWithPages,
   currentPage,
-  onInsertText
+  onInsertText,
+  onReplaceText
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -46,142 +43,8 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
   // 검색 실행
   const performSearch = (query: string, filter: SearchFilter) => {
-    console.log('🔍 performSearch 호출');
-    console.log('  - query:', query);
-    console.log('  - filter:', filter);
-    console.log('  - pages 개수:', pages.length);
-
-    if (!query.trim()) {
-      setSearchResults([]);
-      return;
-    }
-
-    const searchTerms = query.toLowerCase().split(' ').filter(term => term.length > 0);
-    console.log('  - searchTerms:', searchTerms);
-
-    const results: SearchResult[] = [];
-
-    pages.forEach(page => {
-      console.log(`\n📄 페이지 검사: "${page.title}"`);
-      console.log('  - tags:', page.tags);
-
-      let relevance = 0;
-      let matchedContent = '';
-      let matchType: 'title' | 'content' | 'tag' = 'content';
-
-      console.log(`  🔍 필터 확인: filter="${filter}"`);
-      console.log(`    - 제목 검색 조건: ${filter === 'all' || filter === 'title'}`);
-      console.log(`    - 내용 검색 조건: ${filter === 'all' || filter === 'content'}`);
-      console.log(`    - 태그 검색 조건: ${filter === 'all' || filter === 'tags'}`);
-
-      // 제목 검색 (태그 필터일 때는 제외)
-      if (filter === 'all' || filter === 'title') {
-        console.log('  📝 제목 검색 실행');
-        const titleLower = page.title.toLowerCase();
-        const titleMatches = searchTerms.filter(term => titleLower.includes(term)).length;
-        if (titleMatches > 0) {
-          relevance += titleMatches * 3;
-          matchedContent = page.title;
-          matchType = 'title';
-          console.log('    ✅ 제목 매칭');
-        }
-      }
-
-      // 내용 검색 (태그 필터일 때는 제외)
-      if (filter === 'all' || filter === 'content') {
-        console.log('  📄 내용 검색 실행');
-
-        // 콘텐츠에서 #태그 패턴 제거 후 검색
-        const contentWithoutTags = page.content.replace(/#[\w가-힣\u4e00-\u9fff]+/g, '');
-        const contentLower = contentWithoutTags.toLowerCase();
-
-        console.log('    - 원본 콘텐츠:', page.content.substring(0, 50));
-        console.log('    - 태그 제거 후:', contentWithoutTags.substring(0, 50));
-
-        const contentMatches = searchTerms.filter(term => contentLower.includes(term)).length;
-        if (contentMatches > 0) {
-          relevance += contentMatches;
-          if (!matchedContent) {
-            // 첫 검색어 위치에서 10글자만 표시
-            const firstMatch = searchTerms.find(term => contentLower.includes(term));
-            if (firstMatch) {
-              const index = contentLower.indexOf(firstMatch);
-              const start = index;
-              const end = Math.min(contentWithoutTags.length, index + 10);
-              matchedContent = contentWithoutTags.slice(start, end) + '...';
-              matchType = 'content';
-              console.log('    ✅ 내용 매칭 (태그 제외)');
-            }
-          }
-        } else {
-          console.log('    ❌ 내용 매칭 실패 (태그 제외 후)');
-        }
-      }
-
-      // 태그 검색 (# 기호 무시)
-      if (filter === 'all' || filter === 'tags') {
-        console.log('  🏷️ 태그 검색 시작');
-        console.log('    - page.tags:', page.tags);
-        console.log('    - page.tags 타입:', typeof page.tags);
-        console.log('    - page.tags.length:', page.tags?.length);
-
-        const tagMatches = page.tags.filter(tag => {
-          const matched = searchTerms.some(term => {
-            // # 기호를 제거하고 비교
-            const cleanTag = tag.replace(/^#/, '').toLowerCase();
-            const cleanTerm = term.replace(/^#/, '').toLowerCase();
-            const result = cleanTag.includes(cleanTerm);
-
-            console.log(`    - 비교: "${tag}" (clean: "${cleanTag}") vs "${term}" (clean: "${cleanTerm}") → ${result}`);
-            return result;
-          });
-          return matched;
-        }).length;
-
-        console.log('    - tagMatches:', tagMatches);
-
-        if (tagMatches > 0) {
-          relevance += tagMatches * 2;
-          if (!matchedContent) {
-            matchedContent = page.tags.map(t => t.startsWith('#') ? t : '#' + t).join(', ');
-            matchType = 'tag';
-          }
-          console.log('    ✅ 태그 매칭 성공! relevance:', relevance);
-        } else {
-          console.log('    ❌ 태그 매칭 실패');
-        }
-      }
-
-      if (relevance > 0) {
-        console.log(`  ✅ 페이지 "${page.title}" 매칭됨! relevance: ${relevance}, matchType: ${matchType}`);
-        results.push({
-          page,
-          relevance,
-          matchedContent: matchedContent || page.content.slice(0, 100) + '...',
-          matchType
-        });
-      } else {
-        console.log(`  ❌ 페이지 "${page.title}" 매칭 안 됨`);
-      }
-    });
-
-    console.log('\n📊 검색 결과 요약:');
-    console.log('  - 총 매칭된 페이지:', results.length);
-    console.log('  - 결과:', results.map(r => r.page.title));
-
-    results.sort((a, b) => b.relevance - a.relevance);
-    setSearchResults(results.slice(0, 20));
+    setSearchResults(searchPages(pages, query, filter, 20));
   };
-
-  // 페이지 로드 시 태그 정보 출력
-  useEffect(() => {
-    console.log('📚 RightPanel - 전체 페이지 태그 정보:');
-    pages.forEach(page => {
-      if (page.tags && page.tags.length > 0) {
-        console.log(`  - "${page.title}": tags =`, page.tags);
-      }
-    });
-  }, [pages]);
 
   // 검색어 변경 시 실시간 검색
   useEffect(() => {
@@ -199,20 +62,16 @@ export const RightPanel: React.FC<RightPanelProps> = ({
     }
   }, [isOpen]);
 
-  // 검색어 하이라이트
-  const highlightText = (text: string, query: string) => {
-    if (!query.trim()) return text;
-    
-    const searchTerms = query.toLowerCase().split(' ').filter(term => term.length > 0);
-    let highlightedText = text;
-    
-    searchTerms.forEach(term => {
-      const regex = new RegExp(`(${term})`, 'gi');
-      highlightedText = highlightedText.replace(regex, '<mark class="bg-yellow-200 dark:bg-yellow-800">$1</mark>');
-    });
-    
-    return highlightedText;
-  };
+  const renderHighlightedText = (text: string) =>
+    splitHighlightedText(text, searchQuery).map((part, index) =>
+      part.match ? (
+        <mark key={index} className="bg-yellow-200 dark:bg-yellow-800">
+          {part.text}
+        </mark>
+      ) : (
+        <React.Fragment key={index}>{part.text}</React.Fragment>
+      )
+    );
 
   const handleSelectPage = (page: Page) => {
     onPageSelect(page);
@@ -289,19 +148,13 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1 mb-0.5">
-                    <h3
-                      className="font-medium text-[10px] truncate text-sidebar-foreground leading-[1.3]"
-                      dangerouslySetInnerHTML={{
-                        __html: highlightText(result.page.title, searchQuery)
-                      }}
-                    />
+                    <h3 className="font-medium text-[10px] truncate text-sidebar-foreground leading-[1.3]">
+                      {renderHighlightedText(result.page.title)}
+                    </h3>
                   </div>
-                  <p
-                    className="text-[10px] text-sidebar-foreground/60 line-clamp-1 mb-0.5 leading-[1.3]"
-                    dangerouslySetInnerHTML={{
-                      __html: highlightText(result.matchedContent, searchQuery)
-                    }}
-                  />
+                  <p className="text-[10px] text-sidebar-foreground/60 line-clamp-1 mb-0.5 leading-[1.3]">
+                    {renderHighlightedText(result.matchedContent)}
+                  </p>
                   {result.page.tags.length > 0 && (
                     <div className="flex flex-wrap gap-0.5 mt-0.5">
                       {result.page.tags.slice(0, 2).map((tag, tagIndex) => (
@@ -344,10 +197,10 @@ export const RightPanel: React.FC<RightPanelProps> = ({
       <div className="flex-1 border-t border-sidebar-border overflow-hidden">
         <AIChatAssistant
           onInsertText={onInsertText}
+          onReplaceText={onReplaceText}
           currentPageContent={currentPage?.content}
         />
       </div>
     </div>
   );
 };
-

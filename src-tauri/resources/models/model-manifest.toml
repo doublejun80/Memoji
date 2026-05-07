@@ -1,0 +1,44 @@
+[model]
+family = "Gemma"
+variant = "Gemma 4 E2B IT"
+architecture = "gemma4"
+default_file = "gemma-4-e2b-it-q4.gguf"
+tokenizer_file = "tokenizer.json"
+default_context = 2048
+max_context = 4096
+source_repo = "ggml-org/gemma-4-E2B-it-GGUF"
+
+[[candidates]]
+name = "Gemma 4 E2B IT Q4_0"
+repo = "unsloth/gemma-4-E2B-it-GGUF"
+file = "gemma-4-E2B-it-Q4_0.gguf"
+sha256 = "9c4c1d48a462f7f883b28984ac4f42d366c9c573434eab68553e0f38bf7eb50c"
+notes = "Validated local Candle target. Copy or rename to gemma-4-e2b-it-q4.gguf."
+
+[[tokenizers]]
+name = "Gemma 4 E2B tokenizer"
+repo = "google/gemma-4-E2B-it"
+file = "tokenizer.json"
+sha256 = "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f"
+notes = "Required by the current tokenizers-based frontend to the local Candle backend."
+
+[[candidates]]
+name = "Gemma 4 E2B IT UD-Q4_K_XL"
+repo = "unsloth/gemma-4-E2B-it-GGUF"
+file = "gemma-4-E2B-it-UD-Q4_K_XL.gguf"
+sha256 = "419691b8dd007300fe1e9706a01c3400296043e94753fda8556121bab943530f"
+notes = "Practical VDI target candidate. Copy or rename to gemma-4-e2b-it-q4.gguf."
+
+[[candidates]]
+name = "Gemma 4 E2B IT Q8_0"
+repo = "ggml-org/gemma-4-E2B-it-GGUF"
+file = "gemma-4-e2b-it-Q8_0.gguf"
+sha256 = "12d878964d21f1779dea15abeee048855151b27089fe98b32c628f85740933f3"
+notes = "Higher quality, higher memory use."
+
+[[candidates]]
+name = "Gemma 4 E2B IT BF16"
+repo = "ggml-org/gemma-4-E2B-it-GGUF"
+file = "gemma-4-E2B-it-bf16.gguf"
+sha256 = "422dccfc1049b8691e36f2cd6e036e3dd33e9b8ae17b2521016abab776ffa630"
+notes = "Reference precision. Not recommended for VDI CPU deployment."

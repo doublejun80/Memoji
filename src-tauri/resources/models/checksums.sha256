@@ -1,0 +1,15 @@
+# Known Gemma 4 E2B GGUF checksums.
+# Verify downloaded files with sha256sum before renaming/copying them here.
+#
+# Validated local Candle target:
+# 9c4c1d48a462f7f883b28984ac4f42d366c9c573434eab68553e0f38bf7eb50c  gemma-4-E2B-it-Q4_0.gguf
+# cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f  tokenizer.json
+#
+# Recommended VDI-friendly candidate:
+# 419691b8dd007300fe1e9706a01c3400296043e94753fda8556121bab943530f  gemma-4-E2B-it-UD-Q4_K_XL.gguf
+#
+# Official ggml-org Q8_0:
+# 12d878964d21f1779dea15abeee048855151b27089fe98b32c628f85740933f3  gemma-4-e2b-it-Q8_0.gguf
+#
+# Official ggml-org BF16:
+# 422dccfc1049b8691e36f2cd6e036e3dd33e9b8ae17b2521016abab776ffa630  gemma-4-E2B-it-bf16.gguf

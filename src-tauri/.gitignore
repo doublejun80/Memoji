@@ -2,3 +2,7 @@
 # will have compiled files and executables
 /target/
 /gen/schemas
+/resources/models/*.gguf
+/resources/models/*.bin
+/resources/models/*.safetensors
+/resources/models/tokenizer.json

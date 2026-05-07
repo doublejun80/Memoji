@@ -7,6 +7,9 @@ import { cn } from "./utils";
 
 // Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const;
+const CSS_TOKEN_UNSAFE_CHARS = /[^a-zA-Z0-9_-]/g;
+const CSS_VALUE_UNSAFE_CHARS = /[;{}<>]/;
+const CSS_VALUE_ALLOWED_CHARS = /^[a-zA-Z0-9#%.,()\s+\-/]*$/;
 
 export type ChartConfig = {
   [k in string]: {
@@ -78,28 +81,54 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
     return null;
   }
 
+  const chartId = id.replace(CSS_TOKEN_UNSAFE_CHARS, "");
+  const cssText = Object.entries(THEMES)
+    .map(([theme, prefix]) => {
+      const variables = colorConfig
+        .map(([key, itemConfig]) => {
+          const color =
+            itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ||
+            itemConfig.color;
+          const safeKey = key.replace(CSS_TOKEN_UNSAFE_CHARS, "");
+          const safeColor =
+            typeof color === "string" ? sanitizeCssColorValue(color) : null;
+
+          return safeKey && safeColor
+            ? `  --color-${safeKey}: ${safeColor};`
+            : null;
+        })
+        .filter(Boolean)
+        .join("\n");
+
+      return variables
+        ? `${prefix} [data-chart=${chartId}] {\n${variables}\n}\n`
+        : "";
+    })
+    .join("\n");
+
+  if (!chartId || !cssText.trim()) {
+    return null;
+  }
+
   return (
-    <style
-      dangerouslySetInnerHTML={{
-        __html: Object.entries(THEMES)
-          .map(
-            ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
-${colorConfig
-  .map(([key, itemConfig]) => {
-    const color =
-      itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ||
-      itemConfig.color;
-    return color ? `  --color-${key}: ${color};` : null;
-  })
-  .join("\n")}
-}
-`,
-          )
-          .join("\n"),
-      }}
-    />
+    <style>
+      {cssText}
+    </style>
   );
+};
+
+const sanitizeCssColorValue = (value: string) => {
+  const trimmed = value.trim();
+
+  if (
+    !trimmed ||
+    CSS_VALUE_UNSAFE_CHARS.test(trimmed) ||
+    !CSS_VALUE_ALLOWED_CHARS.test(trimmed)
+  ) {
+    return null;
+  }
+
+  return trimmed;
 };
 
 const ChartTooltip = RechartsPrimitive.Tooltip;

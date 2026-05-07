@@ -1,18 +1,55 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Page } from '../types';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from './ui/alert-dialog';
-import { Plus, ChevronRight, ChevronDown, MoreHorizontal, Trash2, Edit2, ArrowUp, ArrowDown, FolderPlus } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger
+} from './ui/alert-dialog';
+import {
+  ArrowDown,
+  ArrowUp,
+  CalendarDays,
+  ChevronDown,
+  ChevronRight,
+  Edit2,
+  FolderPlus,
+  FolderTree,
+  MoreHorizontal,
+  Plus,
+  Trash2
+} from 'lucide-react';
 import { CalendarWidget } from './CalendarWidget';
 import { toLocalISOString } from '../utils/dateUtils';
+import { getProjectIndexPages, getProjectParentId } from '../utils/pageModel';
+
+const EMOJI_PALETTE = ['📝', '📄', '📌', '✅', '💡', '📚', '📅', '💼', '🚀', '⭐', '🔥', '🎯', '🔎', '🧠', '🛠️', '📊', '🔐', '🏠', '📁', '🙂'];
+const INDEX_ITEM_ROW_CLASS = 'group flex items-center gap-1 rounded px-1 py-2 hover:bg-accent';
+const INDEX_ITEM_BUTTON_CLASS = 'flex min-w-0 flex-1 items-center gap-2 text-left';
+const INDEX_LIST_STYLE: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '4px'
+};
+const INDEX_ITEM_STYLE: React.CSSProperties = {
+  minHeight: '42px'
+};
 
 interface SidebarProps {
   pages: Page[];
+  dailyPages: Page[];
   currentPage: Page | null;
   onPageSelect: (page: Page) => void;
-  onPageCreate: (title: string, parentId?: string) => void;
-  onFolderCreate: (title: string, parentId?: string) => void;
+  onDailyPageCreate: (title: string) => void;
+  onProjectPageCreate: (title: string, parentId?: string) => void;
+  onProjectFolderCreate: (title: string, parentId?: string) => void;
   onPageUpdate: (page: Page) => void;
   onPageDelete: (pageId: string) => void;
   onPageMove: (pageId: string, direction: 'up' | 'down') => void;
@@ -23,35 +60,55 @@ interface SidebarProps {
   onInsertText?: (text: string) => void;
 }
 
+type SidebarIndex = 'daily' | 'project';
+
 export const Sidebar: React.FC<SidebarProps> = ({
   pages,
+  dailyPages,
   currentPage,
   onPageSelect,
-  onPageCreate,
-  onFolderCreate,
+  onDailyPageCreate,
+  onProjectPageCreate,
+  onProjectFolderCreate,
   onPageUpdate,
   onPageDelete,
   onPageMove,
   onDateSelect,
   selectedDate,
-  datesWithPages,
-  onClose,
-  onInsertText
+  datesWithPages
 }) => {
   const [expandedPages, setExpandedPages] = useState<Set<string>>(new Set());
   const [editingPage, setEditingPage] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [emojiMenuPage, setEmojiMenuPage] = useState<string | null>(null);
+  const [activeIndex, setActiveIndex] = useState<SidebarIndex>('daily');
+  const [isWideLayout, setIsWideLayout] = useState(false);
+  const sidebarRef = useRef<HTMLDivElement>(null);
+
+  const projectPages = useMemo(() => getProjectIndexPages(pages), [pages]);
+
+  useEffect(() => {
+    if (!sidebarRef.current) return;
+
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      setIsWideLayout(entry.contentRect.width >= 520);
+    });
+
+    resizeObserver.observe(sidebarRef.current);
+    return () => resizeObserver.disconnect();
+  }, []);
 
   const toggleExpanded = (pageId: string) => {
-    const newExpanded = new Set(expandedPages);
-    if (newExpanded.has(pageId)) {
-      newExpanded.delete(pageId);
-    } else {
-      newExpanded.add(pageId);
-    }
-    setExpandedPages(newExpanded);
+    setExpandedPages(prev => {
+      const next = new Set(prev);
+      if (next.has(pageId)) {
+        next.delete(pageId);
+      } else {
+        next.add(pageId);
+      }
+      return next;
+    });
   };
 
   const startEditing = (page: Page) => {
@@ -83,68 +140,272 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return `${month}월 ${date}일(${dayName})`;
   };
 
-  const handleMenuClick = (pageId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleMenuClick = (pageId: string, event: React.MouseEvent) => {
+    event.stopPropagation();
     setOpenMenu(openMenu === pageId ? null : pageId);
+    setEmojiMenuPage(null);
   };
 
-  const handleMenuAction = (action: () => void) => {
-    action();
-    setOpenMenu(null);
+  const updatePageIcon = (page: Page, icon: string) => {
+    onPageUpdate({
+      ...page,
+      icon,
+      updatedAt: toLocalISOString(new Date())
+    });
+    setEmojiMenuPage(null);
   };
 
-  // Close menu when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setOpenMenu(null);
-      }
-    };
+  const getProjectChildren = (parentId: string | null) => (
+    projectPages.filter(page => getProjectParentId(page) === parentId)
+  );
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, []);
+  const renderEmojiButton = (page: Page) => (
+    <span className="relative flex-shrink-0">
+      <button
+        type="button"
+        className="h-5 w-5 rounded text-xs hover:bg-accent flex items-center justify-center"
+        title="이모지 변경"
+        onMouseDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setEmojiMenuPage(emojiMenuPage === page.id ? null : page.id);
+          setOpenMenu(null);
+        }}
+      >
+        {page.icon || '📝'}
+      </button>
+      {emojiMenuPage === page.id && (
+        <div
+          className="absolute left-0 top-6 z-50 grid w-44 grid-cols-5 gap-1 rounded-md border bg-popover p-2 shadow-lg"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+        >
+          {EMOJI_PALETTE.map((icon) => (
+            <button
+              key={icon}
+              type="button"
+              className="h-7 w-7 rounded text-sm hover:bg-accent"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                updatePageIcon(page, icon);
+              }}
+            >
+              {icon}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
 
-  const renderPageTree = (parentId: string | null = null, level: number = 0) => {
-    const childPages = pages.filter(page => page.parentId === parentId);
-    
-    return childPages.map((page, index) => {
-      const hasChildren = pages.some(p => p.parentId === page.id);
+  const renderDailyIndex = () => (
+    <section className="flex h-full min-h-0 flex-col">
+      <div className="border-b border-sidebar-border px-3 py-2">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="truncate text-sm font-medium text-sidebar-foreground" title={formatDate()}>
+            {formatDate()}
+          </h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onDailyPageCreate('새 페이지')}
+            className="h-7 w-7 p-0"
+            title="날짜 기준 페이지 만들기"
+            aria-label="날짜 기준 페이지 만들기"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        {dailyPages.length === 0 ? (
+          <div className="px-2 py-6 text-center">
+            <p className="mb-3 text-xs text-muted-foreground">이 날짜의 페이지가 없습니다</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onDailyPageCreate('새 페이지')}
+              className="h-7 text-xs"
+            >
+              <Plus className="mr-1 h-3 w-3" />
+              날짜 페이지
+            </Button>
+          </div>
+        ) : (
+          <div style={INDEX_LIST_STYLE}>
+            {dailyPages.map(page => {
+              const isSelected = currentPage?.id === page.id;
+              const isEditing = editingPage === page.id;
+              const isMenuOpen = openMenu === page.id;
+
+              return (
+                <div
+                  key={page.id}
+                  className={`${INDEX_ITEM_ROW_CLASS} ${isSelected ? 'bg-accent' : ''}`}
+                  style={INDEX_ITEM_STYLE}
+                >
+                  <div
+                    className={`${INDEX_ITEM_BUTTON_CLASS} cursor-pointer`}
+                    onClick={() => onPageSelect(page)}
+                  >
+                    <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center text-xs">
+                      {page.icon || '📄'}
+                    </span>
+                    {isEditing ? (
+                      <Input
+                        value={editTitle}
+                        onChange={(event) => setEditTitle(event.target.value)}
+                        onBlur={finishEditing}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') finishEditing();
+                          if (event.key === 'Escape') {
+                            setEditingPage(null);
+                            setEditTitle('');
+                          }
+                        }}
+                        className="h-5 px-1 py-0 text-xs"
+                        autoFocus
+                        onClick={(event) => event.stopPropagation()}
+                      />
+                    ) : (
+                      <span className="min-w-0 flex-1 truncate text-xs text-sidebar-foreground">
+                        {page.title}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className={`relative flex-shrink-0 transition-opacity ${isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="flex h-6 w-6 items-center justify-center p-1 hover:bg-accent"
+                      onClick={(event) => handleMenuClick(page.id, event)}
+                      title="페이지 메뉴"
+                      aria-label="페이지 메뉴"
+                    >
+                      <MoreHorizontal className="h-3 w-3" />
+                    </Button>
+
+                    {isMenuOpen && (
+                      <div
+                        className="absolute right-0 top-7 z-50 flex items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-2 shadow-lg"
+                        onMouseDown={(event) => {
+                          event.stopPropagation();
+                        }}
+                      >
+                        <button
+                          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-sm p-0 transition-colors hover:bg-accent hover:text-accent-foreground"
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            startEditing(page);
+                          }}
+                          title="수정"
+                          aria-label="수정"
+                        >
+                          <Edit2 className="h-4 w-4" strokeWidth={1.35} />
+                        </button>
+
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <button
+                              className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-sm p-0 transition-colors hover:bg-accent hover:text-destructive"
+                              onMouseDown={(event) => {
+                                event.stopPropagation();
+                              }}
+                              title="삭제"
+                              aria-label="삭제"
+                            >
+                              <Trash2 className="h-4 w-4" strokeWidth={1.35} />
+                            </button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>페이지 삭제</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                '{page.title}' 페이지를 정말 삭제하시겠습니까?<br />
+                                이 작업은 되돌릴 수 없습니다.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel onClick={() => setOpenMenu(null)}>취소</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => {
+                                  onPageDelete(page.id);
+                                  setOpenMenu(null);
+                                }}
+                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                              >
+                                삭제
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="flex-shrink-0 border-t border-sidebar-border p-3">
+        <CalendarWidget
+          onDateSelect={onDateSelect}
+          selectedDate={selectedDate}
+          datesWithPages={datesWithPages}
+        />
+      </div>
+    </section>
+  );
+
+  const renderProjectTree = (parentId: string | null = null, level: number = 0): React.ReactNode => {
+    const children = getProjectChildren(parentId);
+
+    return children.map((page, index) => {
+      const childPages = getProjectChildren(page.id);
+      const hasChildren = childPages.length > 0;
       const isExpanded = expandedPages.has(page.id);
       const isSelected = currentPage?.id === page.id;
       const isEditing = editingPage === page.id;
-      const canMoveUp = index > 0;
-      const canMoveDown = index < childPages.length - 1;
       const isMenuOpen = openMenu === page.id;
+      const canMoveUp = index > 0;
+      const canMoveDown = index < children.length - 1;
 
       return (
         <div key={page.id} className="relative">
           <div
-            className={`group flex items-center gap-1 py-0.5 px-1 rounded hover:bg-accent cursor-pointer ${
+            className={`${INDEX_ITEM_ROW_CLASS} ${
               isSelected ? 'bg-accent' : ''
             }`}
-            style={{ paddingLeft: `${6 + level * 12}px` }}
+            style={{ ...INDEX_ITEM_STYLE, paddingLeft: `${6 + level * 12}px` }}
           >
-            {hasChildren && (
+            {hasChildren ? (
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-4 w-4 p-0 hover:bg-transparent"
-                onClick={(e) => {
-                  e.stopPropagation();
+                onClick={(event) => {
+                  event.stopPropagation();
                   toggleExpanded(page.id);
                 }}
+                title={isExpanded ? '접기' : '펼치기'}
+                aria-label={isExpanded ? '접기' : '펼치기'}
               >
                 {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
               </Button>
+            ) : (
+              <div className="w-4 flex-shrink-0" />
             )}
-            
-            {!hasChildren && <div className="w-4" />}
-            
+
             <div
-              className="flex items-center gap-2 flex-1 min-w-0"
+              className="flex min-w-0 flex-1 cursor-pointer items-center gap-2"
               onClick={() => {
                 if (page.type === 'folder') {
                   toggleExpanded(page.id);
@@ -153,105 +414,104 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 }
               }}
             >
-              <span className="text-xs">{page.icon}</span>
+              {renderEmojiButton(page)}
+
               {isEditing ? (
                 <Input
                   value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
+                  onChange={(event) => setEditTitle(event.target.value)}
                   onBlur={finishEditing}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') finishEditing();
-                    if (e.key === 'Escape') {
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') finishEditing();
+                    if (event.key === 'Escape') {
                       setEditingPage(null);
                       setEditTitle('');
                     }
                   }}
-                  className="h-5 text-xs py-0 px-1"
+                  className="h-5 px-1 py-0 text-xs"
                   autoFocus
-                  onClick={(e) => e.stopPropagation()}
+                  onClick={(event) => event.stopPropagation()}
                 />
               ) : (
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs truncate">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs text-sidebar-foreground">
                     {page.title}
                   </div>
                 </div>
               )}
             </div>
 
-            <div className={`transition-opacity relative ${isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} ref={menuRef}>
+            <div className={`relative transition-opacity ${isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-6 w-6 p-1 hover:bg-accent flex items-center justify-center"
-                onClick={(e) => handleMenuClick(page.id, e)}
+                className="flex h-6 w-6 items-center justify-center p-1 hover:bg-accent"
+                onClick={(event) => handleMenuClick(page.id, event)}
+                title="페이지 메뉴"
+                aria-label="페이지 메뉴"
               >
                 <MoreHorizontal className="h-3 w-3" />
               </Button>
 
               {isMenuOpen && (
                 <div
-                  ref={menuRef}
-                  className="absolute right-0 top-7 bg-popover border border-border rounded-md shadow-lg py-2.5 px-2.5 z-50 flex items-center gap-0.7"
-                  onMouseDown={(e: React.MouseEvent) => {
-                    e.stopPropagation();
+                  className="absolute right-0 top-7 z-50 flex items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-2 shadow-lg"
+                  onMouseDown={(event) => {
+                    event.stopPropagation();
                   }}
                 >
-                  {/* 수정 버튼 */}
                   <button
-                    className="h-7 w-7 p-0 hover:bg-accent hover:text-accent-foreground transition-colors rounded-sm flex-shrink-0 flex items-center justify-center"
-                    onMouseDown={(e: React.MouseEvent) => {
-                      e.preventDefault();
-                      e.stopPropagation();
+                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-sm p-0 transition-colors hover:bg-accent hover:text-accent-foreground"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
                       startEditing(page);
-                      setOpenMenu(null);
                     }}
                     title="수정"
+                    aria-label="수정"
                   >
-                    <Edit2 className="h-5 w-5" strokeWidth={1.2} />
+                    <Edit2 className="h-4 w-4" strokeWidth={1.35} />
                   </button>
 
-                  {/* 페이지 추가 버튼 */}
                   <button
-                    className="h-7 w-7 p-0 hover:bg-accent hover:text-accent-foreground transition-colors rounded-sm flex-shrink-0 flex items-center justify-center"
-                    onMouseDown={(e: React.MouseEvent) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onPageCreate('하위 페이지', page.id);
+                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-sm p-0 transition-colors hover:bg-accent hover:text-accent-foreground"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onProjectPageCreate('하위 페이지', page.id);
+                      setExpandedPages(prev => new Set(prev).add(page.id));
                       setOpenMenu(null);
                     }}
                     title="하위 페이지 추가"
+                    aria-label="하위 페이지 추가"
                   >
-                    <Plus className="h-5 w-5" strokeWidth={1.2} />
+                    <Plus className="h-4 w-4" strokeWidth={1.35} />
                   </button>
 
-                  {/* 폴더 추가 버튼 */}
                   <button
-                    className="h-7 w-7 p-0 hover:bg-accent hover:text-accent-foreground transition-colors rounded-sm flex-shrink-0 flex items-center justify-center"
-                    onMouseDown={(e: React.MouseEvent) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onFolderCreate('하위 폴더', page.id);
+                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-sm p-0 transition-colors hover:bg-accent hover:text-accent-foreground"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onProjectFolderCreate('하위 폴더', page.id);
+                      setExpandedPages(prev => new Set(prev).add(page.id));
                       setOpenMenu(null);
                     }}
                     title="하위 폴더 추가"
+                    aria-label="하위 폴더 추가"
                   >
-                    <FolderPlus className="h-5 w-5" strokeWidth={1.2} />
+                    <FolderPlus className="h-4 w-4" strokeWidth={1.35} />
                   </button>
 
-                  {/* 구분선 */}
-                  <div className="h-5 w-px bg-border mx-0.5 flex-shrink-0" />
+                  <div className="mx-0.5 h-5 w-px flex-shrink-0 bg-border" />
 
-                  {/* 위로 이동 버튼 */}
                   <button
-                    className={`h-7 w-7 p-0 transition-colors rounded-sm flex-shrink-0 flex items-center justify-center ${
-                      canMoveUp
-                        ? 'hover:bg-accent hover:text-accent-foreground'
-                        : 'opacity-30 cursor-not-allowed'
+                    className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-sm p-0 transition-colors ${
+                      canMoveUp ? 'hover:bg-accent hover:text-accent-foreground' : 'cursor-not-allowed opacity-30'
                     }`}
-                    onMouseDown={(e: React.MouseEvent) => {
-                      e.preventDefault();
-                      e.stopPropagation();
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
                       if (canMoveUp) {
                         onPageMove(page.id, 'up');
                         setOpenMenu(null);
@@ -259,20 +519,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     }}
                     disabled={!canMoveUp}
                     title="위로 이동"
+                    aria-label="위로 이동"
                   >
-                    <ArrowUp className="h-5 w-5" strokeWidth={1.5} />
+                    <ArrowUp className="h-4 w-4" strokeWidth={1.55} />
                   </button>
 
-                  {/* 아래로 이동 버튼 */}
                   <button
-                    className={`h-7 w-7 p-0 transition-colors rounded-sm flex-shrink-0 flex items-center justify-center ${
-                      canMoveDown
-                        ? 'hover:bg-accent hover:text-accent-foreground'
-                        : 'opacity-30 cursor-not-allowed'
+                    className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-sm p-0 transition-colors ${
+                      canMoveDown ? 'hover:bg-accent hover:text-accent-foreground' : 'cursor-not-allowed opacity-30'
                     }`}
-                    onMouseDown={(e: React.MouseEvent) => {
-                      e.preventDefault();
-                      e.stopPropagation();
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
                       if (canMoveDown) {
                         onPageMove(page.id, 'down');
                         setOpenMenu(null);
@@ -280,38 +538,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     }}
                     disabled={!canMoveDown}
                     title="아래로 이동"
+                    aria-label="아래로 이동"
                   >
-                    <ArrowDown className="h-5 w-5" strokeWidth={1.5} />
+                    <ArrowDown className="h-4 w-4" strokeWidth={1.55} />
                   </button>
 
-                  {/* 구분선 */}
-                  <div className="h-5 w-px bg-border mx-0.5 flex-shrink-0" />
+                  <div className="mx-0.5 h-5 w-px flex-shrink-0 bg-border" />
 
-                  {/* 삭제 버튼 */}
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
                       <button
-                         className="h-7 w-7 p-0 hover:bg-accent hover:text-destructive transition-colors rounded-sm flex-shrink-0 flex items-center justify-center"
-                        onMouseDown={(e: React.MouseEvent) => {
-                          e.stopPropagation();
+                        className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-sm p-0 transition-colors hover:bg-accent hover:text-destructive"
+                        onMouseDown={(event) => {
+                          event.stopPropagation();
                         }}
                         title="삭제"
+                        aria-label="삭제"
                       >
-                        <Trash2 className="h-5 w-5" strokeWidth={1.2} />
+                        <Trash2 className="h-4 w-4" strokeWidth={1.35} />
                       </button>
                     </AlertDialogTrigger>
                     <AlertDialogContent>
                       <AlertDialogHeader>
                         <AlertDialogTitle>페이지 삭제</AlertDialogTitle>
                         <AlertDialogDescription>
-                          '{page.title}' 페이지를 정말 삭제하시겠습니까?<br/>
-                          이 작업은 되돌릴 수 없습니다.
+                          '{page.title}' 페이지를 정말 삭제하시겠습니까?<br />
+                          하위 페이지도 함께 삭제되며, 이 작업은 되돌릴 수 없습니다.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
-                        <AlertDialogCancel onClick={() => {
-                          setOpenMenu(null);
-                        }}>취소</AlertDialogCancel>
+                        <AlertDialogCancel onClick={() => setOpenMenu(null)}>취소</AlertDialogCancel>
                         <AlertDialogAction
                           onClick={() => {
                             onPageDelete(page.id);
@@ -329,86 +585,125 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
 
-          {hasChildren && isExpanded && renderPageTree(page.id, level + 1)}
+          {hasChildren && isExpanded && (
+            <div className="mt-1" style={INDEX_LIST_STYLE}>
+              {renderProjectTree(page.id, level + 1)}
+            </div>
+          )}
         </div>
       );
     });
   };
 
-  return (
-    <div className="w-full border-r border-border bg-sidebar flex flex-col h-full">
-      {/* 날짜별 메모 섹션 - 상단 flex-1 (나머지 공간) */}
-      <div className="flex flex-col flex-1 min-h-0 border-b border-sidebar-border">
-        {/* Header */}
-        <div className="px-3 py-2 border-b border-sidebar-border h-[52px] flex items-center flex-shrink-0">
-          <div className="flex items-center justify-between w-full gap-2">
-            <h2 className="text-sm font-medium text-sidebar-foreground whitespace-nowrap" title={formatDate()}>
-              📅 {formatDate()}
-            </h2>
-            <div className="flex items-center gap-1 flex-shrink-0">
+  const renderProjectIndex = () => (
+    <section className="flex h-full min-h-0 flex-col">
+      <div className="border-b border-sidebar-border px-3 py-2">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="truncate text-sm font-medium text-sidebar-foreground">
+            프로젝트/사건
+          </h2>
+          <div className="flex flex-shrink-0 items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onProjectFolderCreate('새 폴더')}
+              className="h-7 w-7 p-0"
+              title="폴더 만들기"
+              aria-label="폴더 만들기"
+            >
+              <FolderPlus className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onProjectPageCreate('새 프로젝트 페이지')}
+              className="h-7 w-7 p-0"
+              title="프로젝트 페이지 만들기"
+              aria-label="프로젝트 페이지 만들기"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        {projectPages.length === 0 ? (
+          <div className="px-2 py-6 text-center">
+            <p className="mb-3 text-xs text-muted-foreground">프로젝트 페이지가 없습니다</p>
+            <div className="flex flex-col gap-2">
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
-                onClick={() => onFolderCreate('새 폴더')}
-                className="h-7 w-7 p-0"
-                title="폴더 만들기"
+                onClick={() => onProjectFolderCreate('첫 번째 폴더')}
+                className="h-7 text-xs"
               >
-                📁
+                <FolderPlus className="mr-1 h-3 w-3" />
+                폴더
               </Button>
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
-                onClick={() => onPageCreate('새 페이지')}
-                className="h-7 w-7 p-0"
-                title="페이지 만들기"
+                onClick={() => onProjectPageCreate('첫 번째 프로젝트 페이지')}
+                className="h-7 text-xs"
               >
-                <Plus className="h-3 w-3" />
+                <Plus className="mr-1 h-3 w-3" />
+                프로젝트 페이지
               </Button>
             </div>
           </div>
-        </div>
-
-        {/* Pages */}
-        <div className="flex-1 overflow-y-auto p-2">
-          {pages.length === 0 ? (
-            <div className="text-center py-6">
-              <div>
-                <p className="text-xs text-muted-foreground mb-2">페이지가 없습니다</p>
-                <div className="flex flex-col gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => onFolderCreate('첫 번째 폴더')}
-                    className="text-xs h-6"
-                  >
-                    📁 폴더 만들기
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => onPageCreate('첫 번째 페이지')}
-                    className="text-xs h-6"
-                  >
-                    <Plus className="h-3 w-3 mr-1" />
-                    페이지 만들기
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            renderPageTree()
-          )}
-        </div>
+        ) : (
+          <div style={INDEX_LIST_STYLE}>
+            {renderProjectTree()}
+          </div>
+        )}
       </div>
+    </section>
+  );
 
-      {/* 달력 섹션 - 하단 고정 높이 */}
-      <div className="flex flex-col h-[280px] flex-shrink-0 p-3">
-        <CalendarWidget
-          onDateSelect={onDateSelect}
-          selectedDate={selectedDate}
-          datesWithPages={datesWithPages}
-        />
-      </div>
+  return (
+    <div ref={sidebarRef} className="h-full w-full border-r border-border bg-sidebar">
+      {isWideLayout ? (
+        <div
+          className="grid h-full min-h-0"
+          style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)' }}
+        >
+          <div className="min-w-0 border-r border-sidebar-border">
+            {renderDailyIndex()}
+          </div>
+          <div className="min-w-0">
+            {renderProjectIndex()}
+          </div>
+        </div>
+      ) : (
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="flex gap-1 border-b border-sidebar-border p-2">
+            <button
+              type="button"
+              className={`flex h-8 min-w-0 flex-1 items-center justify-center gap-1 rounded-md text-xs transition-colors ${
+                activeIndex === 'daily' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60'
+              }`}
+              onClick={() => setActiveIndex('daily')}
+            >
+              <CalendarDays className="h-3.5 w-3.5" />
+              데일리
+            </button>
+            <button
+              type="button"
+              className={`flex h-8 min-w-0 flex-1 items-center justify-center gap-1 rounded-md text-xs transition-colors ${
+                activeIndex === 'project' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60'
+              }`}
+              onClick={() => setActiveIndex('project')}
+            >
+              <FolderTree className="h-3.5 w-3.5" />
+              프로젝트
+            </button>
+          </div>
+          <div className="min-h-0 flex-1">
+            {activeIndex === 'daily' ? renderDailyIndex() : renderProjectIndex()}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

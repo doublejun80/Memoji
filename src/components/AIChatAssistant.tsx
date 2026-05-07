@@ -1,522 +1,406 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
-
-// ================================================================== //
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 타입 및 헬퍼 함수 정의 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ //
-// ================================================================== //
-// NOTE: These were moved from external files to fix compilation errors.
-
-/**
- * Defines the structure for a Language Learning Model (LLM) provider.
- */
-interface LLMProvider {
-  id: string;
-  name: string;
-  apiKey: string | null;
-  enabled: boolean;
-  type: 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'lm-studio';
-  apiUrl?: string;
-}
-
-/**
- * Gets the base API URL for a given LLM provider.
- * @param provider The LLMProvider object.
- * @returns The base URL for API calls.
- */
-const getProviderApiUrl = (provider: LLMProvider): string => {
-  if (provider.apiUrl) {
-    return provider.apiUrl;
-  }
-  const defaultUrls: Record<string, string> = {
-    openai: 'https://api.openai.com/v1',
-    anthropic: 'https://api.anthropic.com/v1',
-    gemini: 'https://generativelanguage.googleapis.com',
-    ollama: 'http://localhost:11434',
-    'lm-studio': 'http://localhost:1234/v1'
-  };
-  return defaultUrls[provider.type] || '';
-};
-
-// ================================================================== //
-// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ 타입 및 헬퍼 함수 정의 ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ //
-// ================================================================== //
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { SendHorizontal } from 'lucide-react';
+import {
+  isLocalAiReady,
+  LOCAL_AI_SETTINGS_CHANGED_EVENT,
+  localAiModelLabel,
+  localAiStateHelp,
+  localAiStateLabel,
+  LocalAiGenerateResponse,
+  LocalAiGenerateStreamChunk,
+  LocalAiStatus,
+  readLocalAiMaxNewTokens,
+} from '../types/localAi';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  replaceTarget?: string;
 }
 
 interface AIChatAssistantProps {
   onInsertText?: (text: string) => void;
+  onReplaceText?: (targetText: string, replacementText: string) => boolean;
   currentPageContent?: string;
+}
+
+interface GenerateOptions {
+  includePageContext?: boolean;
+  replaceTarget?: string;
 }
 
 const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
   onInsertText,
+  onReplaceText,
   currentPageContent
 }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [providers, setProviders] = useState<LLMProvider[]>([]);
-  const [selectedProvider, setSelectedProvider] = useState<string>('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isLoadingModel, setIsLoadingModel] = useState(false);
+  const [status, setStatus] = useState<LocalAiStatus | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [maxNewTokens, setMaxNewTokens] = useState(readLocalAiMaxNewTokens);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const isGeneratingRef = useRef(false);
+  const isLoadingModelRef = useRef(false);
+  const isComposingRef = useRef(false);
+  const didRequestAutoLoadRef = useRef(false);
 
-  // Provider 로드 및 실시간 업데이트
+  const refreshStatus = useCallback(async () => {
+    try {
+      const nextStatus = await invoke<LocalAiStatus>('local_ai_status');
+      setStatus(nextStatus);
+      setStatusError(null);
+    } catch (error) {
+      setStatusError(String(error));
+    }
+  }, []);
+
   useEffect(() => {
-    const loadProviders = () => {
-      const savedProviders = localStorage.getItem('llm-providers');
-      if (savedProviders) {
-        const parsed = JSON.parse(savedProviders) as LLMProvider[];
-        setProviders(parsed);
-
-        // 현재 선택된 provider가 유효한지 확인
-        const currentProvider = parsed.find(p => p.id === selectedProvider);
-        const isLocalLLM = currentProvider?.type === 'ollama' || currentProvider?.type === 'lm-studio';
-        const needsApiKey = !isLocalLLM;
-
-        if (!currentProvider || !currentProvider.enabled || (needsApiKey && !currentProvider.apiKey)) {
-          // 활성화된 첫 번째 provider 선택
-          const enabledProvider = parsed.find(p => {
-            const isLocal = p.type === 'ollama' || p.type === 'lm-studio';
-            return p.enabled && (isLocal || p.apiKey);
-          });
-          if (enabledProvider) {
-            setSelectedProvider(enabledProvider.id);
-          }
-        }
+    refreshStatus();
+    const interval = window.setInterval(() => {
+      if (!isGeneratingRef.current && !isLoadingModelRef.current) {
+        refreshStatus();
       }
+    }, 10000);
+    return () => window.clearInterval(interval);
+  }, [refreshStatus]);
+
+  useEffect(() => {
+    const syncGenerationSettings = () => {
+      setMaxNewTokens(readLocalAiMaxNewTokens());
     };
 
-    // 초기 로드
-    loadProviders();
+    window.addEventListener(LOCAL_AI_SETTINGS_CHANGED_EVENT, syncGenerationSettings);
+    window.addEventListener('storage', syncGenerationSettings);
 
-    // 1초마다 provider 목록 갱신 (설정 변경 감지)
-    const interval = setInterval(loadProviders, 1000);
+    return () => {
+      window.removeEventListener(LOCAL_AI_SETTINGS_CHANGED_EVENT, syncGenerationSettings);
+      window.removeEventListener('storage', syncGenerationSettings);
+    };
+  }, []);
 
-    return () => clearInterval(interval);
-  }, [selectedProvider]);
-
-  // 스크롤 자동 이동 (하단으로)
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, isGenerating]);
 
-  const getCurrentProvider = (): LLMProvider | null => {
-    return providers.find(p => p.id === selectedProvider) || null;
+  const loadModel = async () => {
+    if (isLoadingModelRef.current) return;
+    isLoadingModelRef.current = true;
+    setIsLoadingModel(true);
+    try {
+      const nextStatus = await invoke<LocalAiStatus>('local_ai_load');
+      setStatus(nextStatus);
+      setStatusError(nextStatus.lastError || null);
+    } catch (error) {
+      setStatusError(String(error));
+      await refreshStatus();
+    } finally {
+      isLoadingModelRef.current = false;
+      setIsLoadingModel(false);
+    }
   };
 
-  const sendMessage = async () => {
-    if (!input.trim()) return;
-
-    const provider = getCurrentProvider();
-    if (!provider) {
-      console.error('설정에서 LLM Provider를 먼저 설정해주세요');
+  useEffect(() => {
+    if (didRequestAutoLoadRef.current) return;
+    if (
+      status?.mtpConfigured ||
+      status?.state !== 'not_loaded' ||
+      !status.modelExists ||
+      !status.tokenizerExists
+    ) {
       return;
     }
 
-    // 로컬 LLM (Ollama, LM Studio)은 API 키 불필요
-    const isLocalLLM = provider.type === 'ollama' || provider.type === 'lm-studio';
-    if (!isLocalLLM && !provider.apiKey) {
-      console.error('API 키를 설정해주세요');
-      return;
-    }
+    didRequestAutoLoadRef.current = true;
+    void loadModel();
+  }, [status?.mtpConfigured, status?.modelExists, status?.state, status?.tokenizerExists]);
+
+  const sendMessage = async (
+    rawPrompt = input,
+    options: GenerateOptions = {}
+  ) => {
+    const prompt = rawPrompt.trim();
+    if (!prompt || !isLocalAiReady(status) || isGeneratingRef.current) return;
+    isGeneratingRef.current = true;
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: input.trim(),
+      content: prompt,
       timestamp: new Date()
     };
 
     setMessages(prev => [...prev, userMessage]);
     setInput('');
-    setIsLoading(true);
+    setIsGenerating(true);
+
+    let unlistenStream: (() => void) | null = null;
+    let assistantMessageId: string | null = null;
 
     try {
-      const apiUrl = getProviderApiUrl(provider);
+      const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      assistantMessageId = `${Date.now() + 1}`;
+      let streamedText = '';
 
-      // 모델 선택
-      const modelMap: Record<string, string> = {
-        openai: 'gpt-4o-mini',
-        anthropic: 'claude-3-5-sonnet-20241022',
-        gemini: 'gemini-2.0-flash-exp',
-        ollama: 'llama3.2',
-        'lm-studio': 'local-model'
-      };
+      setMessages(prev => [...prev, {
+        id: assistantMessageId,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date(),
+        replaceTarget: options.replaceTarget
+      }]);
 
-      const model = modelMap[provider.type] || 'gpt-4o-mini';
+      unlistenStream = await listen<LocalAiGenerateStreamChunk>('local-ai-generate-chunk', (event) => {
+        const chunk = event.payload;
+        if (chunk.requestId !== requestId) return;
+        if (chunk.done) return;
 
-      // 메시지 구성
-      const systemMessage = '당신은 메모 작성을 돕는 AI 어시스턴트입니다. 사용자의 메모 작성을 도와주고, 아이디어를 정리하고, 내용을 개선하는 데 도움을 줍니다. 간결하고 명확하게 답변해주세요.';
-      const contextMessage = currentPageContent ? `\n\n현재 페이지 내용:\n${currentPageContent}` : '';
+        streamedText += chunk.tokenText;
+        setMessages(prev => prev.map(message =>
+          message.id === assistantMessageId
+            ? { ...message, content: streamedText }
+            : message
+        ));
+      });
 
-      const allMessages = [
-        {
-          role: 'system',
-          content: systemMessage + contextMessage
-        },
-        ...messages.map(m => ({
-          role: m.role,
-          content: m.content
-        })),
-        {
-          role: 'user',
-          content: userMessage.content
+      const generateCommand = status?.mtpConfigured
+        ? 'local_ai_generate_mtp_stream'
+        : 'local_ai_generate_stream';
+      const pageContext = options.includePageContext
+        ? currentPageContent?.slice(-3000)
+        : undefined;
+
+      const response = await invoke<LocalAiGenerateResponse>(generateCommand, {
+        requestId,
+        request: {
+          prompt,
+          pageContext,
+          maxNewTokens,
+          temperature: 0.4,
+          topP: 0.95,
         }
-      ];
+      });
 
-      // Anthropic은 다른 API 형식 사용
-      if (provider.type === 'anthropic') {
-        console.log('🔵 Anthropic API 요청 시작');
-        console.log('🔵 API URL:', `${apiUrl}/messages`);
-        console.log('🔵 API Key:', provider.apiKey ? `${provider.apiKey.substring(0, 10)}...` : 'NONE');
-
-        try {
-          const requestBody = {
-            model,
-            max_tokens: 4096,
-            messages: allMessages.filter(m => m.role !== 'system').map(m => ({
-              role: m.role === 'user' ? 'user' : 'assistant',
-              content: m.content
-            })),
-            system: systemMessage + contextMessage
-          };
-
-          console.log('🔵 Request Body:', JSON.stringify(requestBody, null, 2));
-
-          const response = await tauriFetch(`${apiUrl}/messages`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': provider.apiKey!,
-              'anthropic-version': '2023-06-01',
-              'anthropic-dangerous-direct-browser-access': 'true'
-            },
-            body: JSON.stringify(requestBody)
-          });
-
-          console.log('🔵 Response Status:', response.status);
-          console.log('🔵 Response OK:', response.ok);
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            console.error('❌ Anthropic API 오류 응답:', errorText);
-
-            let errorMessage = response.statusText;
-            try {
-              const errorData = JSON.parse(errorText);
-              errorMessage = errorData.error?.message || errorData.message || errorText;
-            } catch (e) {
-              errorMessage = errorText;
-            }
-
-            throw new Error(`Anthropic API 요청 실패 (${response.status}): ${errorMessage}`);
-          }
-
-          const data = await response.json();
-          console.log('📥 Anthropic API 응답:', data);
-
-          if (!data.content || !data.content[0] || !data.content[0].text) {
-            console.error('❌ Anthropic API 응답 구조 오류:', data);
-            throw new Error('API 응답에서 텍스트를 찾을 수 없습니다.');
-          }
-
-          const assistantMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: data.content[0].text,
-            timestamp: new Date()
-          };
-
-          setMessages(prev => [...prev, assistantMessage]);
-        } catch (fetchError) {
-          console.error('❌ Anthropic Fetch 오류:', fetchError);
-          throw fetchError;
-        }
-      }
-      // Gemini는 다른 API 형식 사용
-      else if (provider.type === 'gemini') {
-        const geminiMessages = allMessages.filter(m => m.role !== 'system').map((m, index) => {
-          if (index === 0 && m.role === 'user') {
-            return {
-              role: 'user',
-              parts: [{ text: systemMessage + contextMessage + '\n\n' + m.content }]
-            };
-          }
-          return {
-            role: m.role === 'user' ? 'user' : 'model',
-            parts: [{ text: m.content }]
-          };
-        });
-
-        const response = await tauriFetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${provider.apiKey}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            contents: geminiMessages,
-            generationConfig: {
-              temperature: 0.7,
-              maxOutputTokens: 8192,
-              topK: 40,
-              topP: 0.95
-            }
-          })
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          const errorMessage = errorData.error?.message || response.statusText;
-          throw new Error(`API 요청 실패: ${errorMessage}`);
-        }
-
-        const data = await response.json();
-        console.log('📥 Gemini API 응답:', data);
-
-        if (!data.candidates || data.candidates.length === 0) {
-          console.error("❌ Gemini API 응답 구조 오류 - candidates 없음:", data);
-          throw new Error("API 응답에 candidates가 없습니다. API 키와 설정을 확인해주세요.");
-        }
-
-        const candidate = data.candidates[0];
-
-        let text = '';
-        if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
-          text = candidate.content.parts[0].text;
-        } else if (candidate.text) {
-          text = candidate.text;
-        } else if (candidate.output) {
-          text = candidate.output;
-        }
-
-        if (!text) {
-          console.error("❌ Gemini API 응답 구조 오류 - 텍스트를 찾을 수 없음:", candidate);
-          throw new Error("API 응답에서 텍스트를 찾을 수 없습니다.");
-        }
-
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: text,
-          timestamp: new Date()
-        };
-
-        setMessages(prev => [...prev, assistantMessage]);
-      }
-      // Ollama는 다른 API 형식 사용
-      else if (provider.type === 'ollama') {
-        const response = await tauriFetch(`${apiUrl}/api/chat`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            model,
-            messages: allMessages.filter(m => m.role !== 'system').map(m => ({
-              role: m.role,
-              content: m.content
-            })),
-            stream: false
-          })
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Ollama API 요청 실패: ${errorText}`);
-        }
-
-        const data = await response.json();
-        console.log('📥 Ollama API 응답:', data);
-
-        if (!data.message || !data.message.content) {
-          console.error("❌ Ollama API 응답 구조 오류:", data);
-          throw new Error("Ollama 응답에서 콘텐츠를 찾을 수 없습니다. Ollama가 실행 중인지 확인해주세요.");
-        }
-
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: data.message.content,
-          timestamp: new Date()
-        };
-
-        setMessages(prev => [...prev, assistantMessage]);
-      }
-      // OpenAI 호환 API (OpenAI, LM Studio)
-      else {
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json'
-        };
-
-        // LM Studio는 API 키 불필요, OpenAI는 필요
-        if (provider.type !== 'lm-studio' && provider.apiKey) {
-          headers['Authorization'] = `Bearer ${provider.apiKey}`;
-        }
-
-        const response = await tauriFetch(`${apiUrl}/chat/completions`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            model,
-            messages: allMessages,
-            temperature: 0.7,
-            max_tokens: 1000
-          })
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(`API 요청 실패: ${errorData.error?.message || response.statusText}`);
-        }
-
-        const data = await response.json();
-        console.log('📥 OpenAI API 응답:', data);
-
-        // 응답 구조 검증
-        if (!data.choices || data.choices.length === 0) {
-          console.error("❌ OpenAI API 응답 구조 오류 - choices 없음:", data);
-          throw new Error("API 응답에 choices가 없습니다. API 키와 설정을 확인해주세요.");
-        }
-
-        const choice = data.choices[0];
-        if (!choice.message || !choice.message.content) {
-          console.error("❌ OpenAI API 응답 구조 오류 - message.content 없음:", data);
-          throw new Error("API 응답에서 콘텐츠를 찾을 수 없습니다.");
-        }
-
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: choice.message.content,
-          timestamp: new Date()
-        };
-
-        setMessages(prev => [...prev, assistantMessage]);
-      }
+      unlistenStream();
+      unlistenStream = null;
+      setMessages(prev => prev.map(message =>
+        message.id === assistantMessageId
+          ? { ...message, content: response.text || streamedText }
+          : message
+      ));
     } catch (error) {
-      console.error('AI 응답 오류:', error);
-      const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
-      console.error(`AI 응답 오류: ${errorMessage}`);
-
-      const errorMsg: Message = {
+      unlistenStream?.();
+      const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: `⚠️ 오류가 발생했습니다: ${errorMessage}\n\n설정에서 API 키와 Provider 설정을 확인해주세요.`,
+        content: `로컬 AI 오류: ${String(error)}\n\n설정에서 모델 파일, 토크나이저, CPU 가속 상태를 확인해주세요.`,
         timestamp: new Date()
       };
-      setMessages(prev => [...prev, errorMsg]);
+      setMessages(prev => {
+        if (!assistantMessageId) return [...prev, errorMessage];
+        return prev.map(message =>
+          message.id === assistantMessageId ? errorMessage : message
+        );
+      });
+      await refreshStatus();
     } finally {
-      setIsLoading(false);
+      isGeneratingRef.current = false;
+      setIsGenerating(false);
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    if (isComposingRef.current || e.nativeEvent.isComposing) return;
+    e.preventDefault();
+    sendMessage(e.currentTarget.value);
+  };
+
+  const handleKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && !isComposingRef.current && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      sendMessage();
+      sendMessage(e.currentTarget.value);
     }
   };
 
   const clearChat = () => {
     setMessages([]);
-    console.log('대화 내역이 삭제되었습니다');
   };
 
   const insertToEditor = (text: string) => {
-    if (onInsertText) {
-      onInsertText(text);
-      console.log('에디터에 삽입되었습니다');
+    onInsertText?.(text);
+  };
+
+  const insertAsMarkdownBlock = (text: string) => {
+    const block = [
+      '> [!note] Local AI',
+      ...text.split('\n').map((line) => (line.trim() ? `> ${line}` : '>'))
+    ].join('\n');
+    onInsertText?.(block);
+  };
+
+  const replaceSelectionTarget = (targetText: string | undefined, replacementText: string) => {
+    if (!targetText || !onReplaceText) return;
+    const didReplace = onReplaceText(targetText, replacementText);
+    if (!didReplace) {
+      setStatusError('선택한 원문을 현재 문서에서 찾지 못했습니다. 원문 모드에서 같은 범위를 선택한 뒤 다시 시도해주세요.');
     }
   };
 
-  const enabledProviders = providers.filter(p => {
-    const isLocalLLM = p.type === 'ollama' || p.type === 'lm-studio';
-    return p.enabled && (isLocalLLM || p.apiKey);
-  });
+  const selectedText = () => window.getSelection()?.toString().trim() || '';
 
-  if (enabledProviders.length === 0) {
-    return (
-      <div className="flex flex-col h-full p-4 gap-2 items-center justify-center">
-        <p className="text-[9px] text-muted-foreground text-center">
-          설정에서 LLM Provider를 먼저 설정해주세요
-        </p>
-      </div>
+  const summarizeCurrentDocument = () => {
+    if (!currentPageContent?.trim()) return;
+    sendMessage(
+      '현재 문서를 짧게 압축해줘. 핵심 요약, 결정 사항, 다음 액션만 한국어 Markdown으로 출력해줘.',
+      { includePageContext: true }
     );
-  }
+  };
+
+  const organizeCurrentDocument = () => {
+    if (!currentPageContent?.trim()) return;
+    sendMessage(
+      '현재 문서를 읽기 좋은 Markdown 노트로 재구성해줘. 제목, 섹션, 요점, 세부 내용, 체크리스트가 있으면 task list로 정리해줘.',
+      { includePageContext: true }
+    );
+  };
+
+  const rewriteSelectedText = () => {
+    const targetText = selectedText();
+    if (!targetText) {
+      setStatusError('편집기에서 바꿀 문장을 드래그로 선택한 뒤 선택 정리를 눌러주세요.');
+      return;
+    }
+
+    sendMessage(
+      `아래 선택 영역만 더 명확한 한국어 Markdown 문장으로 다듬어줘. 설명 없이 치환할 본문만 출력해줘.\n\n${targetText}`,
+      { replaceTarget: targetText }
+    );
+  };
+
+  const canGenerate = isLocalAiReady(status) && !isGenerating;
+  const showLoadButton = !status?.mtpConfigured && (
+    status?.state === 'not_loaded' ||
+    status?.state === 'error' ||
+    status?.state === 'unsupported'
+  );
+  const helperText = statusError || localAiStateHelp(status);
+  const showStatusCard = !isLocalAiReady(status) || Boolean(statusError) || isLoadingModel;
 
   return (
-    <div className="flex flex-col h-full">
-      {/* 입력 영역 - 최상단 고정 */}
+    <div className="flex flex-col h-full text-[11px]" style={{ fontSize: '11px' }}>
       <div className="p-2 border-b border-sidebar-border flex-shrink-0">
         <div className="flex items-center justify-between gap-2 mb-2">
-          <div className="flex items-center gap-1.5">
-            <span role="img" aria-label="sparkles">✨</span>
-            <h3 className="text-xs font-semibold">AI 도우미</h3>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span style={{ fontSize: '10px' }} aria-hidden="true">AI</span>
+            <h3 className="text-xs font-semibold truncate">{localAiModelLabel(status)}</h3>
           </div>
 
           <div className="flex items-center gap-1.5">
-            {/* 대화 지우기 버튼 */}
             {messages.length > 0 && (
               <button
                 onClick={clearChat}
-                className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-5 w-5 p-0 text-[8px]"
+                className="inline-flex items-center justify-center rounded-md text-[9px] font-medium transition-colors hover:bg-accent hover:text-accent-foreground h-5 w-5 p-0"
                 title="대화 지우기"
               >
-                🗑️
+                X
               </button>
             )}
-
-            {/* Provider 선택 */}
-            <select
-              value={selectedProvider}
-              onChange={(e) => setSelectedProvider(e.target.value)}
-              className="h-6 text-[10px] w-[100px] rounded-md border border-input bg-background px-2 py-1 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <option value="" disabled>Provider</option>
-              {enabledProviders.map((provider) => (
-                <option key={provider.id} value={provider.id} className="text-[10px]">
-                  {provider.name}
-                </option>
-              ))}
-            </select>
+            {showLoadButton && (
+              <button
+                onClick={loadModel}
+                disabled={isLoadingModel || status?.state === 'missing_model' || status?.state === 'missing_tokenizer'}
+                className="h-6 px-2 rounded-md border border-input bg-background text-[10px] disabled:opacity-50"
+              >
+                {isLoadingModel ? '로드 중' : '로드'}
+              </button>
+            )}
           </div>
+        </div>
+
+        {showStatusCard && (
+          <div className="mb-2 rounded-md border border-sidebar-border bg-muted/50 px-2 py-1.5">
+            <span className="font-medium" style={{ fontSize: '10px' }}>{localAiStateLabel(status?.state)}</span>
+            <p className="mt-1 text-[9px] leading-snug text-muted-foreground break-words">
+              {helperText}
+            </p>
+          </div>
+        )}
+
+        <div className="memoji-ai-quick-actions">
+          <button
+            type="button"
+            onClick={summarizeCurrentDocument}
+            disabled={!canGenerate || !currentPageContent?.trim()}
+            className="memoji-ai-quick-button"
+            title="문서를 짧게 압축"
+          >
+            요약
+          </button>
+          <button
+            type="button"
+            onClick={organizeCurrentDocument}
+            disabled={!canGenerate || !currentPageContent?.trim()}
+            className="memoji-ai-quick-button"
+            title="문서를 구조화해 재구성"
+          >
+            정리
+          </button>
+          <button
+            type="button"
+            onClick={rewriteSelectedText}
+            disabled={!canGenerate || !onReplaceText}
+            className="memoji-ai-quick-button"
+            title="선택 영역 정리 후 치환"
+          >
+            선택
+          </button>
         </div>
 
         <div className="flex gap-1.5 items-end">
           <textarea
-            ref={inputRef as any}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="메시지를 입력하세요..."
-            className="text-[9px] placeholder:text-[8px] flex-1 px-2 rounded-md border border-input bg-background resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            style={{ height: '48px', lineHeight: '1.4', fontSize: '9px', paddingTop: '6px', paddingBottom: '4px' }}
+            onKeyDown={handleKeyDown}
+            onKeyUp={handleKeyUp}
+            onCompositionStart={() => {
+              isComposingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              isComposingRef.current = false;
+            }}
+            placeholder={canGenerate ? '메시지 입력' : '모델 로드 필요'}
+            className="placeholder:text-[9px] flex-1 px-2 rounded-md border border-input bg-background resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            style={{ height: '48px', lineHeight: '1.4', fontSize: '10px', paddingTop: '6px', paddingBottom: '4px' }}
             rows={3}
-            disabled={isLoading}
+            disabled={!canGenerate}
           />
           <button
-            onClick={sendMessage}
-            disabled={isLoading || !input.trim()}
-            className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-8 w-8 p-0 flex-shrink-0"
+            onClick={() => sendMessage()}
+            disabled={!canGenerate || !input.trim()}
+            className="inline-flex items-center justify-center rounded-md font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 p-0 flex-shrink-0"
+            style={{ width: '28px', height: '28px' }}
+            title="전송"
+            aria-label="전송"
           >
-            <span role="img" aria-label="send">➤</span>
+            <SendHorizontal aria-hidden="true" style={{ width: '14px', height: '14px', strokeWidth: 2.2 }} />
           </button>
         </div>
       </div>
 
-      {/* 메시지 영역 - 최대 60% 높이, 스크롤 가능 */}
       <div className="flex-1 overflow-y-auto p-3" ref={scrollRef} style={{ maxHeight: '60vh' }}>
         {messages.length === 0 ? (
-          <div className="text-center text-muted-foreground text-[10px] px-2 leading-tight py-4">
-            <p className="mb-0.5 text-[10px]">AI에게 메모 작성 도움을 요청하세요</p>
-            <p className="text-[10px]">예: "이 내용을 요약해줘"</p>
+          <div className="text-center text-muted-foreground px-2 leading-tight py-4" style={{ fontSize: '10px' }}>
+            <p className="mb-0.5">로컬 Gemma 모델로 메모 작성을 도울 수 있습니다</p>
+            <p>예: "이 내용을 요약해줘"</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -536,25 +420,39 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
                 >
                   <p className="whitespace-pre-wrap break-words">{message.content}</p>
                   {message.role === 'assistant' && (
-                    <button
-                      onClick={() => insertToEditor(message.content)}
-                      className="absolute bottom-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center justify-center rounded text-[8px] hover:bg-accent/50 w-4 h-4 p-0"
-                      title="에디터에 저장"
-                    >
-                      💾
-                    </button>
+                    <div className="absolute bottom-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+                      {message.replaceTarget && (
+                        <button
+                          onClick={() => replaceSelectionTarget(message.replaceTarget, message.content)}
+                          className="inline-flex items-center justify-center rounded text-[8px] hover:bg-accent/50 min-w-5 h-4 px-1"
+                          title="선택 영역 치환"
+                        >
+                          치환
+                        </button>
+                      )}
+                      <button
+                        onClick={() => insertAsMarkdownBlock(message.content)}
+                        className="inline-flex items-center justify-center rounded text-[8px] hover:bg-accent/50 min-w-5 h-4 px-1"
+                        title="Markdown block으로 삽입"
+                      >
+                        블록
+                      </button>
+                      <button
+                        onClick={() => insertToEditor(message.content)}
+                        className="inline-flex items-center justify-center rounded text-[8px] hover:bg-accent/50 min-w-5 h-4 px-1"
+                        title="에디터에 삽입"
+                      >
+                        삽입
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
             ))}
-            {isLoading && (
+            {isGenerating && (
               <div className="flex items-start gap-1 mt-4">
                 <div className="bg-muted rounded-lg px-2 py-1.5 text-[10px]">
-                  <div className="flex gap-1">
-                    <span className="animate-bounce">●</span>
-                    <span className="animate-bounce delay-100">●</span>
-                    <span className="animate-bounce delay-200">●</span>
-                  </div>
+                  생성 중...
                 </div>
               </div>
             )}
@@ -566,4 +464,3 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
 };
 
 export default AIChatAssistant;
-

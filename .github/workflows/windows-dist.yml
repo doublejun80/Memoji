@@ -1,0 +1,71 @@
+name: Windows Dist
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  windows-x64:
+    name: Build Windows x64
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Windows bundle
+        run: npm run tauri:build -- --target x86_64-pc-windows-msvc
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path "release/windows-x64" | Out-Null
+
+          $appCandidates = @(
+            "src-tauri/target/x86_64-pc-windows-msvc/release/Memoji.exe",
+            "src-tauri/target/x86_64-pc-windows-msvc/release/app.exe",
+            "src-tauri/target/release/Memoji.exe",
+            "src-tauri/target/release/app.exe"
+          )
+          $setupCandidates = @(
+            "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/Memoji_2.0.0_x64-setup.exe",
+            "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/Memoji_2.0.0-setup.exe",
+            "src-tauri/target/release/bundle/nsis/Memoji_2.0.0_x64-setup.exe",
+            "src-tauri/target/release/bundle/nsis/Memoji_2.0.0-setup.exe"
+          )
+
+          $appPath = $appCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          $setupPath = $setupCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+          if (-not $appPath) {
+            throw "Windows executable was not found after tauri build."
+          }
+
+          Copy-Item $appPath "release/windows-x64/Memoji_2.0.0_x64.exe" -Force
+          if ($setupPath) {
+            Copy-Item $setupPath "release/windows-x64/Memoji_2.0.0_x64-setup.exe" -Force
+          }
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Memoji-2.0.0-windows-x64
+          path: release/windows-x64/*

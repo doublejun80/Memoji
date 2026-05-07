@@ -11,8 +11,31 @@ import { FocusModeProvider, useFocusMode } from './contexts/FocusModeContext';
 import { Page } from './types';
 import { tauriStorage } from './utils/tauriStorage';
 import { logEnvironmentInfo } from './utils/environment';
-import { formatDateKey, toLocalISOString, parseLocalISOString } from './utils/dateUtils';
+import { formatDateKey, parseDateKey, toLocalISOString } from './utils/dateUtils';
+import { pageWithMarkdownMetadata } from './utils/markdownMetadata';
+import { getPageDateKey, getPagesForDate, getProjectParentId, normalizePage } from './utils/pageModel';
 import { Toaster } from './components/ui/sonner';
+
+interface CreatePageOptions {
+  title: string;
+  type?: 'page' | 'folder';
+  dateKey?: string | null;
+  projectParentId?: string | null;
+  switchToNew?: boolean;
+}
+
+const readKeyboardShortcuts = (): any[] => {
+  const savedShortcuts = localStorage.getItem('keyboardShortcuts');
+  if (!savedShortcuts) return [];
+
+  try {
+    const shortcuts = JSON.parse(savedShortcuts);
+    return Array.isArray(shortcuts) ? shortcuts : [];
+  } catch (error) {
+    console.error('Failed to parse keyboard shortcuts:', error);
+    return [];
+  }
+};
 
 // 내부 App 컴포넌트 (FocusMode 컨텍스트 사용)
 function AppContent() {
@@ -28,22 +51,27 @@ function AppContent() {
   const [saveTriggered, setSaveTriggered] = useState(0); // 저장 트리거 카운터
   const { isFocusMode } = useFocusMode();
 
-  // 단축키 설정 마이그레이션 (Ctrl+P → Ctrl+E)
+  // 단축키 설정 마이그레이션 (이전 원문 전환 단축키 id 유지)
   useEffect(() => {
-    const savedShortcuts = localStorage.getItem('keyboardShortcuts');
-    if (savedShortcuts) {
-      const shortcuts = JSON.parse(savedShortcuts);
-      const previewShortcut = shortcuts.find((s: any) => s.id === 'preview');
+    const shortcuts = readKeyboardShortcuts();
+    if (shortcuts.length > 0) {
+      const legacySourceModeShortcutId = ['pre', 'view'].join('');
+      const hasLegacySourceModeShortcut = shortcuts.some((s: any) => s.id === legacySourceModeShortcutId);
 
-      // Ctrl+P를 사용하고 있다면 Ctrl+E로 업데이트
-      if (previewShortcut && previewShortcut.currentKey === 'Ctrl+P') {
-        const updatedShortcuts = shortcuts.map((s: any) =>
-          s.id === 'preview'
-            ? { ...s, defaultKey: 'Ctrl+E', currentKey: 'Ctrl+E' }
+      if (hasLegacySourceModeShortcut) {
+        const updatedShortcuts = shortcuts.map((s: any) => (
+          s.id === legacySourceModeShortcutId
+            ? {
+              ...s,
+              id: 'sourceMode',
+              name: '원문 모드',
+              description: '즉시 편집/Markdown 원문 전환',
+              defaultKey: 'Ctrl+E',
+              currentKey: s.currentKey === 'Ctrl+P' ? 'Ctrl+E' : (s.currentKey || 'Ctrl+E')
+            }
             : s
-        );
+        ));
         localStorage.setItem('keyboardShortcuts', JSON.stringify(updatedShortcuts));
-        console.log('✅ 단축키 마이그레이션 완료: Ctrl+P → Ctrl+E');
       }
     }
   }, []);
@@ -52,13 +80,8 @@ function AppContent() {
   useEffect(() => {
     // localStorage에서 단축키 설정 불러오기
     const getShortcutKey = (id: string, defaultKey: string): string => {
-      const savedShortcuts = localStorage.getItem('keyboardShortcuts');
-      if (savedShortcuts) {
-        const shortcuts = JSON.parse(savedShortcuts);
-        const shortcut = shortcuts.find((s: any) => s.id === id);
-        return shortcut?.currentKey || defaultKey;
-      }
-      return defaultKey;
+      const shortcut = readKeyboardShortcuts().find((s: any) => s.id === id);
+      return shortcut?.currentKey || defaultKey;
     };
 
     // 단축키 문자열을 파싱하는 함수
@@ -94,14 +117,6 @@ function AppContent() {
         return;
       }
 
-      // 새 페이지 단축키
-      const newPageKey = getShortcutKey('newPage', 'Ctrl+N');
-      if (matchesShortcut(e, newPageKey)) {
-        e.preventDefault();
-        handlePageCreate('새 페이지');
-        return;
-      }
-
       // 단축키 설정 열기 (고정)
       if (e.ctrlKey && e.shiftKey && e.key === 'K') {
         e.preventDefault();
@@ -114,51 +129,11 @@ function AppContent() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Helper function to get date in YYYY-MM-DD format (이미 import되어 있으므로 제거)
-  // const formatDateKey = (date: Date) => {
-  //   return date.toISOString().split('T')[0];
-  // };
+  const selectedDateKey = formatDateKey(selectedDate);
 
-  // Get pages for selected date with hierarchical sorting
-  const getFilteredPages = () => {
-    const dateKey = formatDateKey(selectedDate);
-    const filteredPages = pages.filter(page => {
-      const pageDate = parseLocalISOString(page.createdAt);
-      return formatDateKey(pageDate) === dateKey;
-    });
-
-    return sortPagesHierarchically(filteredPages);
-  };
-
-  const sortPagesHierarchically = (pages: Page[]): Page[] => {
-    // 부모 ID별로 그룹화
-    const pagesByParent = pages.reduce((acc, page) => {
-      const parentId = page.parentId || 'root';
-      if (!acc[parentId]) acc[parentId] = [];
-      acc[parentId].push(page);
-      return acc;
-    }, {} as Record<string, Page[]>);
-
-    // 각 그룹 내에서 order로 정렬
-    Object.keys(pagesByParent).forEach(parentId => {
-      pagesByParent[parentId].sort((a, b) => a.order - b.order);
-    });
-
-    // 계층적으로 정렬된 배열 생성
-    const sortedPages: Page[] = [];
-
-    const addPagesRecursively = (parentId: string | null) => {
-      const key = parentId || 'root';
-      const children = pagesByParent[key] || [];
-
-      children.forEach(page => {
-        sortedPages.push(page);
-        addPagesRecursively(page.id);
-      });
-    };
-
-    addPagesRecursively(null);
-    return sortedPages;
+  // Get pages for selected date
+  const getDailyPages = () => {
+    return getPagesForDate(pages, selectedDateKey);
   };
 
   // Check if page has content (markdown text)
@@ -172,8 +147,10 @@ function AppContent() {
     const datesSet = new Set<string>();
     pages.forEach(page => {
       if (pageHasContent(page.id)) {
-        const pageDate = parseLocalISOString(page.createdAt);
-        datesSet.add(formatDateKey(pageDate));
+        const dateKey = getPageDateKey(page);
+        if (dateKey) {
+          datesSet.add(dateKey);
+        }
       }
     });
     return Array.from(datesSet);
@@ -215,13 +192,26 @@ function AppContent() {
 
   const handleInsertText = (text: string) => {
     if (currentPage) {
-      const updatedPage = {
-        ...currentPage,
-        content: currentPage.content + '\n\n' + text,
-        updatedAt: new Date().toISOString()
-      };
+      const nextContent = `${currentPage.content}${currentPage.content.trim() ? '\n\n' : ''}${text}`;
+      const updatedPage = pageWithMarkdownMetadata(currentPage, nextContent);
       handlePageUpdate(updatedPage);
     }
+  };
+
+  const handleReplaceText = (targetText: string, replacementText: string): boolean => {
+    if (!currentPage || !targetText.trim()) return false;
+
+    const index = currentPage.content.indexOf(targetText);
+    if (index === -1) return false;
+
+    const nextContent = [
+      currentPage.content.slice(0, index),
+      replacementText,
+      currentPage.content.slice(index + targetText.length)
+    ].join('');
+    const updatedPage = pageWithMarkdownMetadata(currentPage, nextContent);
+    handlePageUpdate(updatedPage);
+    return true;
   };
 
 
@@ -235,20 +225,7 @@ function AppContent() {
       tauriStorage.cleanupBlockData();
 
       try {
-        // Load pages from storage
-        console.log('📚 App - 페이지 로드 시작');
         const savedPages = await tauriStorage.getPages();
-        console.log('📚 App - 로드된 페이지 수:', savedPages.length);
-
-        // 각 페이지의 태그 정보 출력
-        savedPages.forEach(page => {
-          console.log(`  - "${page.title}":`, {
-            id: page.id,
-            tags: page.tags,
-            tagsType: typeof page.tags,
-            tagsLength: page.tags?.length
-          });
-        });
 
         setPages(savedPages);
 
@@ -261,10 +238,7 @@ function AppContent() {
         // Check if there are pages for today
         const today = new Date();
         const todayKey = formatDateKey(today);
-        const todayPages = savedPages.filter(page => {
-          const pageDate = parseLocalISOString(page.createdAt);
-          return formatDateKey(pageDate) === todayKey;
-        });
+        const todayPages = getPagesForDate(savedPages, todayKey);
 
         if (todayPages.length > 0 && !currentPage) {
           setCurrentPage(todayPages[0]);
@@ -281,70 +255,69 @@ function AppContent() {
 
   // Update current page when date changes
   useEffect(() => {
-    const filteredPages = getFilteredPages();
-    if (filteredPages.length > 0 && (!currentPage || !filteredPages.find(p => p.id === currentPage.id))) {
-      setCurrentPage(filteredPages[0]);
-    } else if (filteredPages.length === 0) {
-      setCurrentPage(null);
+    const currentPageStillExists = currentPage
+      ? pages.some(page => page.id === currentPage.id)
+      : false;
+
+    if (currentPage && currentPageStillExists) {
+      return;
     }
-  }, [selectedDate, pages]);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      // Ctrl+N: Create new memo
-      if (event.ctrlKey && event.key === 'n') {
-        event.preventDefault();
-        const today = new Date();
-        const title = `메모 ${today.getHours()}:${today.getMinutes().toString().padStart(2, '0')}`;
-        handlePageCreate(title);
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, []);
+    const dailyPages = getDailyPages();
+    setCurrentPage(dailyPages[0] || null);
+  }, [selectedDate, pages, currentPage]);
 
 
 
   const handlePageSelect = (page: Page) => {
     setCurrentPage(page);
 
-    // 페이지 선택 시 해당 페이지의 생성 날짜로 달력 이동
-    const pageDate = parseLocalISOString(page.createdAt);
-    const currentSelectedDate = formatDateKey(selectedDate);
-    const pageSelectedDate = formatDateKey(pageDate);
+    // 날짜 소속이 있는 페이지를 선택하면 달력도 해당 날짜로 이동한다.
+    const pageDateKey = getPageDateKey(page);
+    if (!pageDateKey) return;
 
     // 현재 선택된 날짜와 페이지의 날짜가 다르면 날짜 변경
-    if (currentSelectedDate !== pageSelectedDate) {
-      setSelectedDate(pageDate);
+    if (selectedDateKey !== pageDateKey) {
+      setSelectedDate(parseDateKey(pageDateKey));
     }
   };
 
-  const handlePageCreate = async (title: string, parentId?: string, type: 'page' | 'folder' = 'page', switchToNew: boolean = true) => {
+  const createPage = async ({
+    title,
+    type = 'page',
+    dateKey = selectedDateKey,
+    projectParentId = null,
+    switchToNew = true
+  }: CreatePageOptions) => {
     // 현재 페이지가 있으면 먼저 저장 (페이지 전환 시 자동 저장)
     if (currentPage) {
       await handleSave();
     }
 
-    // Create page with selected date
-    const pageDate = new Date(selectedDate);
-    const maxOrder = Math.max(...pages.filter(p => p.parentId === (parentId || null)).map(p => p.order), -1);
+    const normalizedProjectParentId = projectParentId || null;
+    const pageDate = dateKey ? parseDateKey(dateKey) : new Date();
+    const maxOrder = Math.max(
+      ...pages
+        .filter(p => getProjectParentId(p) === normalizedProjectParentId)
+        .map(p => p.order),
+      -1
+    );
 
-    const newPage: Page = {
+    const newPage: Page = normalizePage({
       id: tauriStorage.generateId(),
       title,
       icon: type === 'folder' ? '📁' : '📄',
-      parentId: parentId || null,
+      parentId: normalizedProjectParentId,
+      projectParentId: normalizedProjectParentId,
+      projectIndex: dateKey === null || normalizedProjectParentId !== null,
+      dateKey,
       content: type === 'folder' ? '' : '', // 폴더는 빈 콘텐츠
       createdAt: toLocalISOString(pageDate),
-      updatedAt: toLocalISOString(pageDate),
+      updatedAt: toLocalISOString(new Date()),
       type,
       tags: [],
       order: maxOrder + 1
-    };
+    });
 
     await tauriStorage.savePage(newPage);
 
@@ -357,27 +330,65 @@ function AppContent() {
     }
   };
 
-  const handleFolderCreate = async (title: string, parentId?: string) => {
-    await handlePageCreate(title, parentId, 'folder');
+  const handlePageCreate = async (title: string) => {
+    await createPage({
+      title,
+      type: 'page',
+      dateKey: selectedDateKey,
+      projectParentId: null
+    });
+  };
+
+  const handleDailyPageCreate = async (title: string) => {
+    await handlePageCreate(title);
+  };
+
+  // 새 페이지 단축키는 현재 선택 날짜를 따라 데일리 페이지를 만든다.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        handlePageCreate('새 페이지');
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [handlePageCreate]);
+
+  const handleProjectPageCreate = async (title: string, parentId?: string) => {
+    await createPage({
+      title,
+      type: 'page',
+      dateKey: null,
+      projectParentId: parentId || null
+    });
+  };
+
+  const handleProjectFolderCreate = async (title: string, parentId?: string) => {
+    await createPage({
+      title,
+      type: 'folder',
+      dateKey: null,
+      projectParentId: parentId || null,
+      switchToNew: false
+    });
   };
 
   const handlePageUpdate = async (updatedPage: Page) => {
-    console.log('📝 App.handlePageUpdate 호출:', updatedPage.title);
-    console.log('  - content 길이:', updatedPage.content?.length || 0);
-    console.log('  - tags:', updatedPage.tags);
-    console.log('  - 전체 페이지 객체:', updatedPage);
+    const normalizedPage = normalizePage(updatedPage);
+    await tauriStorage.savePage(normalizedPage);
 
-    await tauriStorage.savePage(updatedPage);
-
-    setPages(pages.map(page =>
-      page.id === updatedPage.id ? updatedPage : page
+    setPages(prevPages => prevPages.map(page =>
+      page.id === normalizedPage.id ? normalizedPage : page
     ));
 
-    if (currentPage?.id === updatedPage.id) {
-      setCurrentPage(updatedPage);
+    if (currentPage?.id === normalizedPage.id) {
+      setCurrentPage(normalizedPage);
     }
 
-    console.log('✅ App.handlePageUpdate 완료');
   };
 
   const handlePageDelete = async (pageId: string) => {
@@ -390,11 +401,7 @@ function AppContent() {
 
     // If current page was deleted, select another page from filtered pages
     if (currentPage && pagesToDelete.includes(currentPage.id)) {
-      const filteredPages = updatedPages.filter(page => {
-        const pageDate = parseLocalISOString(page.createdAt);
-        return formatDateKey(pageDate) === formatDateKey(selectedDate);
-      });
-      setCurrentPage(filteredPages[0] || null);
+      setCurrentPage(getPagesForDate(updatedPages, selectedDateKey)[0] || null);
     }
   };
 
@@ -404,7 +411,8 @@ function AppContent() {
     if (!pageToMove) return;
 
     // Get siblings (pages with the same parent)
-    const siblings = pages.filter(p => p.parentId === pageToMove.parentId);
+    const parentId = getProjectParentId(pageToMove);
+    const siblings = pages.filter(p => getProjectParentId(p) === parentId);
 
     // Sort siblings by order
     siblings.sort((a, b) => a.order - b.order);
@@ -431,6 +439,8 @@ function AppContent() {
     // Update order field for all reordered siblings
     const updatedSiblings = reorderedSiblings.map((page, index) => ({
       ...page,
+      parentId,
+      projectParentId: parentId,
       order: index,
       updatedAt: toLocalISOString(new Date())
     }));
@@ -449,7 +459,7 @@ function AppContent() {
 
   const getAllChildPages = (pageId: string, allPages: Page[]): string[] => {
     const result = [pageId];
-    const children = allPages.filter(page => page.parentId === pageId);
+    const children = allPages.filter(page => getProjectParentId(page) === pageId);
     
     children.forEach(child => {
       result.push(...getAllChildPages(child.id, allPages));
@@ -459,29 +469,7 @@ function AppContent() {
   };
 
   const handleSave = async () => {
-    // MarkdownEditor에 저장 트리거
     setSaveTriggered(prev => prev + 1);
-
-    // Clean up truly empty pages when saving (no content at all)
-    // ❌ 폴더는 삭제하지 않음 (폴더는 항상 빈 콘텐츠를 가짐)
-    const pagesToDelete: string[] = [];
-
-    pages.forEach(page => {
-      // 폴더가 아니고, 내용이 비어있는 페이지만 삭제
-      if (page.type !== 'folder' && (!page.content || page.content.trim().length === 0)) {
-        pagesToDelete.push(page.id);
-      }
-    });
-
-    if (pagesToDelete.length > 0) {
-      await Promise.all(pagesToDelete.map(pageId => tauriStorage.deletePage(pageId)));
-      const updatedPages = pages.filter(page => !pagesToDelete.includes(page.id));
-      setPages(updatedPages);
-
-      if (currentPage && pagesToDelete.includes(currentPage.id)) {
-        setCurrentPage(null);
-      }
-    }
   };
 
   const handleExport = async () => {
@@ -520,7 +508,6 @@ function AppContent() {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
-      console.log(`✅ 내보내기 완료: ${fileName}`);
     } catch (error) {
       console.error('내보내기 실패:', error);
       alert('내보내기 중 오류가 발생했습니다.');
@@ -547,13 +534,18 @@ function AppContent() {
       <div className="flex flex-1 overflow-hidden min-h-0">
         {/* Sidebar - 집중 모드에서 숨김 */}
         {!isFocusMode && isLeftPanelOpen && (
-          <div className="flex-shrink-0 w-52 min-w-52 max-w-52">
+          <div
+            className="flex-shrink-0"
+            style={{ width: '16rem', minWidth: '16rem', maxWidth: '16rem' }}
+          >
             <Sidebar
-              pages={getFilteredPages()}
+              pages={pages}
+              dailyPages={getDailyPages()}
               currentPage={currentPage}
               onPageSelect={handlePageSelect}
-              onPageCreate={handlePageCreate}
-              onFolderCreate={handleFolderCreate}
+              onDailyPageCreate={handleDailyPageCreate}
+              onProjectPageCreate={handleProjectPageCreate}
+              onProjectFolderCreate={handleProjectFolderCreate}
               onPageUpdate={handlePageUpdate}
               onPageDelete={handlePageDelete}
               onPageMove={handlePageMove}
@@ -590,6 +582,7 @@ function AppContent() {
             datesWithPages={getDatesWithPages()}
             currentPage={currentPage}
             onInsertText={handleInsertText}
+            onReplaceText={handleReplaceText}
           />
         )}
       </div>

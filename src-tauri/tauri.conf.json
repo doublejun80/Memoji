@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2.0.0",
   "productName": "Memoji",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "identifier": "com.memoji.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Memoji - 마크다운 메모 앱",
+        "title": "Memoji 2.0 - 로컬 AI 마크다운 노트",
         "width": 1200,
         "height": 800,
         "minWidth": 800,
@@ -28,7 +28,8 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'",
+      "devCsp": "default-src 'self' http://localhost:1420 ws://localhost:1420; connect-src 'self' ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-src 'none'"
     }
   },
   "bundle": {
@@ -42,8 +43,11 @@
       "icons/icon.ico"
     ],
     "category": "Productivity",
-    "shortDescription": "마크다운 기반 메모 앱",
-    "longDescription": "Memoji는 마크다운 기반의 메모 앱입니다. 페이지와 폴더를 자유롭게 구성하고, 날짜별로 메모를 관리할 수 있습니다. 모든 데이터는 로컬 SQLite에 안전하게 저장됩니다."
+    "shortDescription": "로컬 AI Markdown 노트 앱",
+    "longDescription": "Memoji 2.0은 Milkdown 즉시 렌더링 Markdown 편집, 로컬 SQLite 저장, Candle 기반 Gemma GGUF 로컬 AI를 제공하는 오프라인 우선 노트 앱입니다.",
+    "resources": [
+      "resources/models/*"
+    ]
   },
   "plugins": {
     "fs": {
@@ -54,9 +58,6 @@
     "dialog": {
       "open": true,
       "save": true
-    },
-    "shell": {
-      "open": true
     }
   }
 }

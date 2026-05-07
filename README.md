@@ -1,21 +1,23 @@
-# 📝 Memoji - 마크다운 기반 메모 앱
+# 📝 Memoji 2.0 - 로컬 AI Markdown 노트 앱
 
-**VDI 환경에서도 안전한 오프라인 우선 메모 애플리케이션**
+**Typora식 즉시 렌더링 Markdown + Obsidian식 링크/태그 구조 + Windows VDI 우선 로컬 AI 노트앱**
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/yourusername/memoji)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/yourusername/memoji)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-orange.svg)](https://tauri.app/)
 
 ## ✨ 주요 기능
 
-- 📝 **마크다운 기반 메모**: 풍부한 마크다운 문법 지원
+- 📝 **Milkdown 즉시 편집**: Typora처럼 Markdown을 쓰는 즉시 서식으로 렌더링
+- 📊 **GFM 표 지원**: Markdown table 저장/복원과 Milkdown table 편집 UI
 - 📁 **계층적 구조**: 페이지와 폴더로 체계적인 메모 관리
+- 🏷️ **태그/위키링크**: `#tag`, `[[page]]` 기반 지식 구조
 - 🗓️ **날짜별 관리**: 달력으로 날짜별 메모 확인
-- 🔍 **전체 검색**: 초고속 검색 (< 100ms)
+- 🔍 **전체 검색**: 제목/본문/태그 인덱싱 기반 검색
 - ⌨️ **키보드 단축키**: 커스터마이징 가능한 단축키
 - 🎨 **테마**: 다크/라이트 모드 지원
 - 💾 **로컬 저장**: SQLite로 안전한 데이터 저장
-- 🤖 **AI 어시스턴트**: 8개 LLM Provider 지원 (OpenAI, Gemini, Claude 등)
+- 🤖 **로컬 AI 어시스턴트**: Rust Candle 기반 Gemma 4 E2B GGUF 로컬 추론과 토큰 스트리밍
 - 🔒 **Portable 모드**: VDI 환경에서도 데이터 손실 없음
 
 ## 🖥️ VDI 환경 지원
@@ -67,7 +69,7 @@ npm run tauri:dev
 npm run tauri build
 
 # 결과물
-src-tauri/target/release/bundle/msi/Memoji_1.0.0_x64_en-US.msi
+src-tauri/target/release/bundle/msi/Memoji_2.0.0_x64_en-US.msi
 ```
 
 📖 **자세한 빌드 가이드**: [BUILD_GUIDE.md](BUILD_GUIDE.md)
@@ -76,7 +78,7 @@ src-tauri/target/release/bundle/msi/Memoji_1.0.0_x64_en-US.msi
 
 - **OS**: Windows 10/11 (64-bit)
 - **메모리**: 최소 4GB RAM
-- **디스크**: 100MB 여유 공간
+- **디스크**: 앱 100MB 이상, 로컬 GGUF 모델 사용 시 4GB 이상 추가 권장
 - **네트워크**: 불필요 (완전 오프라인 작동)
 
 ## 🎯 주요 단축키
@@ -86,30 +88,24 @@ src-tauri/target/release/bundle/msi/Memoji_1.0.0_x64_en-US.msi
 | `Ctrl+N` | 새 페이지 생성 |
 | `Ctrl+K` | 전체 검색 |
 | `Ctrl+S` | 저장 |
-| `Ctrl+E` | 편집/미리보기 전환 |
+| `Ctrl+E` | 즉시 편집/Markdown 원문 전환 |
 | `Ctrl+B` | 굵게 |
 | `Ctrl+I` | 기울임 |
 | `F11` | 집중 모드 |
 | `Ctrl+Shift+K` | 단축키 설정 |
 
-## 🤖 AI 기능
+## 🤖 로컬 AI 기능
 
-Memoji는 8개의 LLM Provider를 지원합니다:
+Memoji의 AI 도우미는 외부 추론 서비스 없이 로컬 리소스의 Gemma 4 E2B GGUF 모델만 사용하도록 설계되었습니다.
 
-- **OpenAI** (GPT-4, GPT-3.5)
-- **Anthropic** (Claude)
-- **Google** (Gemini)
-- **DeepSeek**
-- **Perplexity**
-- **Groq**
-- **Ollama** (로컬 LLM)
-- **LM Studio** (로컬 LLM)
+### 모델 준비
 
-### 사용 방법
+1. GGUF 모델 파일과 `tokenizer.json`을 `src-tauri/resources/models/`에 둡니다.
+2. 기본 모델 파일명은 `gemma-4-e2b-it-q4.gguf`입니다.
+3. 다른 위치를 쓰려면 `MEMOJI_GEMMA_GGUF`, `MEMOJI_GEMMA_TOKENIZER` 환경 변수를 설정합니다.
+4. 설정 → 로컬 Gemma AI에서 모델 상태와 CPU 가속 상태를 확인합니다.
 
-1. 설정 → AI 도우미 설정
-2. API 키 입력
-3. 우측 패널에서 AI 채팅 시작
+대형 `.gguf` 파일은 git에 커밋하지 않습니다. 체크섬과 후보 모델 정보는 `src-tauri/resources/models/`의 manifest를 참고하세요.
 
 ## 📁 프로젝트 구조
 
@@ -131,8 +127,10 @@ Memoji/
 ## 🔧 기술 스택
 
 - **Frontend**: React 18 + TypeScript + Tailwind CSS v4
+- **Editor**: Milkdown Crepe + ProseMirror/Remark + GFM tables
 - **Desktop**: Tauri v2 (Rust)
 - **Database**: SQLite
+- **Local AI**: Hugging Face Candle + GGUF resources
 - **UI Library**: shadcn/ui + Radix UI
 - **Build Tool**: Vite
 

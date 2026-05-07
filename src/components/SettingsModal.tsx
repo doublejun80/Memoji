@@ -1,12 +1,35 @@
-import React, { useState, useEffect } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import React, { useCallback, useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { ChevronDown, Cpu, Database, FolderOpen, Loader2, Settings } from 'lucide-react';
+import { toast } from 'sonner';
+import {
+  BuiltInPluginState,
+  getBuiltInPlugins,
+  setBuiltInPluginEnabled,
+} from '../editor/plugins/registry';
+import {
+  LOCAL_AI_MAX_NEW_TOKENS_DEFAULT,
+  LOCAL_AI_MAX_NEW_TOKENS_MAX,
+  LOCAL_AI_MAX_NEW_TOKENS_MIN,
+  LOCAL_AI_MAX_NEW_TOKENS_STEP,
+  LocalAiStatus,
+  localAiModelLabel,
+  localAiStateHelp,
+  localAiStateLabel,
+  readLocalAiMaxNewTokens,
+  writeLocalAiMaxNewTokens,
+} from '../types/localAi';
+import {
+  EDITOR_FONT_FAMILY_LABELS,
+  EditorFontFamily,
+  readEditorPreferences,
+  writeEditorPreferences,
+} from '../utils/editorPreferences';
 import { Button } from './ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Separator } from './ui/separator';
-import { toast } from 'sonner';
-import { Settings, X } from 'lucide-react';
-import { LLMProvider, DEFAULT_PROVIDERS } from '../types/llm';
+import { Switch } from './ui/switch';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -19,381 +42,275 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
   appTitle,
-  onAppTitleChange
+  onAppTitleChange,
 }) => {
   const [title, setTitle] = useState(appTitle);
-  const [providers, setProviders] = useState<LLMProvider[]>([]);
-  const [editingProvider, setEditingProvider] = useState<string | null>(null);
-  const [editApiKey, setEditApiKey] = useState('');
-  const [editBaseUrl, setEditBaseUrl] = useState('');
-  const [dataPath, setDataPath] = useState<string>('');
+  const [dataPath, setDataPath] = useState('');
+  const [aiStatus, setAiStatus] = useState<LocalAiStatus | null>(null);
+  const [isLoadingModel, setIsLoadingModel] = useState(false);
+  const [maxNewTokens, setMaxNewTokens] = useState(readLocalAiMaxNewTokens);
+  const [editorPreferences, setEditorPreferences] = useState(readEditorPreferences);
+  const [builtInPlugins, setBuiltInPlugins] = useState<BuiltInPluginState[]>([]);
+  const [builtInPluginsOpen, setBuiltInPluginsOpen] = useState(false);
 
   useEffect(() => {
     setTitle(appTitle);
   }, [appTitle]);
 
-  useEffect(() => {
-    // Load providers from localStorage and sync with DEFAULT_PROVIDERS
-    const savedProviders = localStorage.getItem('llm-providers');
-
-    if (savedProviders) {
-      try {
-        const parsed: LLMProvider[] = JSON.parse(savedProviders);
-
-        // DEFAULT_PROVIDERS에 있는 Provider만 유지하고, 저장된 설정(API 키 등)을 병합
-        const syncedProviders = DEFAULT_PROVIDERS.map(defaultProvider => {
-          const savedProvider = parsed.find(p => p.id === defaultProvider.id);
-          if (savedProvider) {
-            // 저장된 Provider가 있으면 API 키와 enabled 상태를 유지
-            return {
-              ...defaultProvider,
-              apiKey: savedProvider.apiKey,
-              baseUrl: savedProvider.baseUrl || defaultProvider.baseUrl,
-              enabled: savedProvider.enabled
-            };
-          }
-          // 저장된 Provider가 없으면 기본값 사용
-          return defaultProvider;
-        });
-
-        setProviders(syncedProviders);
-        // 동기화된 목록을 다시 저장 (제거된 Provider 정리)
-        localStorage.setItem('llm-providers', JSON.stringify(syncedProviders));
-      } catch (e) {
-        console.error('Failed to parse saved providers:', e);
-        setProviders(DEFAULT_PROVIDERS);
-      }
-    } else {
-      setProviders(DEFAULT_PROVIDERS);
-    }
-
-    // Load data path
-    loadDataPath();
-  }, [isOpen]);
-
-  const loadDataPath = async () => {
+  const loadDataPath = useCallback(async () => {
     try {
-      // @ts-ignore - Tauri API
-      const { invoke } = await import('@tauri-apps/api/core');
-      const path = await invoke<string>('get_data_path');
-      setDataPath(path);
+      setDataPath(await invoke<string>('get_data_path'));
+    } catch {
+      setDataPath('브라우저 모드');
+    }
+  }, []);
+
+  const loadAiStatus = useCallback(async () => {
+    try {
+      setAiStatus(await invoke<LocalAiStatus>('local_ai_status'));
     } catch (error) {
-      console.error('Failed to get data path:', error);
-      setDataPath('브라우저 모드 (localStorage)');
+      toast.error('AI 상태 확인 실패: ' + String(error));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setMaxNewTokens(readLocalAiMaxNewTokens());
+    setEditorPreferences(readEditorPreferences());
+    setBuiltInPlugins(getBuiltInPlugins());
+    setBuiltInPluginsOpen(false);
+    loadDataPath();
+    loadAiStatus();
+  }, [isOpen, loadAiStatus, loadDataPath]);
+
+  const saveTitle = () => {
+    const nextTitle = title.trim();
+    if (!nextTitle) {
+      toast.error('앱 제목을 입력하세요.');
+      return;
+    }
+    onAppTitleChange(nextTitle);
+    toast.success('설정 저장됨');
+    onClose();
+  };
+
+  const loadLocalAi = async () => {
+    setIsLoadingModel(true);
+    try {
+      const status = await invoke<LocalAiStatus>('local_ai_load');
+      setAiStatus(status);
+      toast[status.state === 'loaded' ? 'success' : 'info'](localAiStateLabel(status.state));
+    } catch (error) {
+      toast.error('모델 로드 실패: ' + String(error));
+      await loadAiStatus();
+    } finally {
+      setIsLoadingModel(false);
     }
   };
 
-  const handleOpenDataFolder = async () => {
-    try {
-      // @ts-ignore - Tauri API
-      const { invoke } = await import('@tauri-apps/api/core');
+  const changeMaxNewTokens = (value: number) => {
+    setMaxNewTokens(writeLocalAiMaxNewTokens(value));
+  };
 
-      // 커스텀 명령어로 폴더 열기
+  const changeFontFamily = (fontFamily: EditorFontFamily) => {
+    setEditorPreferences(writeEditorPreferences({ fontFamily }));
+  };
+
+  const togglePlugin = (pluginId: BuiltInPluginState['id'], enabled: boolean) => {
+    setBuiltInPlugins(setBuiltInPluginEnabled(pluginId, enabled));
+  };
+
+  const openDataFolder = async () => {
+    try {
       await invoke('open_data_folder');
     } catch (error) {
-      toast.error('폴더 열기 실패: ' + error);
+      toast.error('폴더 열기 실패: ' + String(error));
     }
   };
 
-  const handleSave = () => {
-    if (title.trim()) {
-      onAppTitleChange(title.trim());
-      toast.success('설정이 저장되었습니다!');
-      onClose();
-    } else {
-      toast.error('제목을 입력해주세요.');
-    }
-  };
-
-  const saveProviders = (updatedProviders: LLMProvider[]) => {
-    setProviders(updatedProviders);
-    localStorage.setItem('llm-providers', JSON.stringify(updatedProviders));
-  };
-
-  const handleEditProvider = (providerId: string) => {
-    const provider = providers.find(p => p.id === providerId);
-    if (provider) {
-      setEditingProvider(providerId);
-      setEditApiKey(provider.apiKey || '');
-      setEditBaseUrl(provider.baseUrl || '');
-    }
-  };
-
-  const handleSaveProvider = () => {
-    if (!editingProvider) return;
-
-    const updatedProviders = providers.map(p => {
-      if (p.id === editingProvider) {
-        return {
-          ...p,
-          apiKey: editApiKey.trim() || undefined,
-          baseUrl: editBaseUrl.trim() || p.baseUrl,
-          enabled: !!editApiKey.trim()
-        };
-      }
-      return p;
-    });
-
-    saveProviders(updatedProviders);
-    setEditingProvider(null);
-    setEditApiKey('');
-    setEditBaseUrl('');
-    toast.success('API 키가 저장되었습니다');
-  };
-
-  const handleCancelEdit = () => {
-    setEditingProvider(null);
-    setEditApiKey('');
-    setEditBaseUrl('');
-  };
+  const cpuFeature = (name: string) => aiStatus?.cpuFeatures?.[name] ? '감지됨' : '없음';
+  const buildFeature = (name: string) => aiStatus?.compiledFeatures?.[name] ? '활성' : '비활성';
+  const canLoadModel = !aiStatus?.mtpConfigured && !!aiStatus?.modelExists && !!aiStatus?.tokenizerExists && !isLoadingModel;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      <DialogContent
+        className="custom-scrollbar max-w-3xl max-h-[80vh] overflow-y-auto text-sm"
+        aria-describedby={undefined}
+      >
         <DialogHeader>
-          <DialogTitle>설정</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <Settings className="h-5 w-5" />
+            설정
+          </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-6 py-4">
-          {/* 앱 정보 섹션 */}
-          <div className="space-y-3">
-            <h3 className="text-lg font-semibold">앱 정보</h3>
-            <div className="bg-muted p-4 rounded-lg space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-2xl">📝</span>
-                <div>
-                  <p className="font-medium">Memoji - 스마트 메모 앱</p>
-                  <p className="text-sm text-muted-foreground">버전 1.0.0</p>
-                </div>
-              </div>
-              <Separator className="my-3" />
-              <div className="space-y-2 text-sm">
-                <p className="text-muted-foreground">
-                  <strong>Memoji</strong>는 날짜별 메모와 프로젝트 관리를 한 곳에서 할 수 있는 
-                  스마트 메모 애플리케이션입니다.
-                </p>
-                <ul className="list-disc list-inside space-y-1 text-muted-foreground ml-2">
-                  <li>📅 날짜별 메모 자동 정리</li>
-                  <li>📁 프로젝트 단위 메모 관리</li>
-                  <li>🏷️ 태그 기반 검색 및 분류</li>
-                  <li>🎨 마크다운 지원 및 실시간 미리보기</li>
-                  <li>🌓 다크모드 지원</li>
-                  <li>⚡ 빠른 검색 및 단축키</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* 데이터 저장 위치 섹션 */}
-          <div className="space-y-3">
-            <h3 className="text-lg font-semibold flex items-center gap-2">
-              💾 데이터 저장 위치
-            </h3>
-            <div className="bg-muted p-4 rounded-lg space-y-3">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">현재 데이터베이스 경로</Label>
-                <div className="flex gap-2">
-                  <Input
-                    value={dataPath}
-                    readOnly
-                    className="font-mono text-xs"
-                  />
-                  <Button
-                    onClick={handleOpenDataFolder}
-                    variant="outline"
-                    size="sm"
-                  >
-                    📁 폴더 열기
-                  </Button>
-                </div>
-              </div>
-
-              <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
-                <div className="flex items-start gap-2">
-                  <span className="text-lg">✅</span>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-blue-700 dark:text-blue-400">
-                      VDI 환경 지원
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      데이터가 실행 파일과 같은 폴더의 'data' 디렉토리에 저장됩니다.
-                      VDI 환경에서도 안전하게 사용할 수 있습니다.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* AI 도우미 설정 섹션 */}
-          <div className="space-y-3">
-            <h3 className="text-lg font-semibold flex items-center gap-2">
-              <Settings className="w-5 h-5" />
-              AI 도우미 설정
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              사용할 LLM Provider의 API 키를 입력하세요
-            </p>
-
-            {/* Provider 목록 */}
-            <div className="border rounded-lg overflow-hidden">
-              {/* 헤더 */}
-              <div className="flex items-center gap-2 bg-muted px-2 py-1.5 text-[10px] font-medium border-b">
-                <div className="w-[70px] flex-shrink-0">ID</div>
-                <div className="w-[80px] flex-shrink-0">Type</div>
-                <div className="flex-1 min-w-0">API Key</div>
-                <div className="w-[50px] flex-shrink-0 text-center">설정</div>
-              </div>
-
-              {/* Provider 행들 */}
-              <div className="divide-y">
-                {providers.map((provider) => (
-                  <div key={provider.id} className="flex items-center gap-2 px-2 py-1.5 hover:bg-muted/50 text-[10px]">
-                    <div className="w-[70px] flex-shrink-0 truncate">{provider.id}</div>
-                    <div className="w-[80px] flex-shrink-0 text-muted-foreground truncate">{provider.name}</div>
-                    <div className="flex-1 min-w-0 truncate">
-                      {provider.apiKey ? (
-                        <span className="text-muted-foreground">••••••••</span>
-                      ) : (
-                        <span className="text-muted-foreground text-[9px]">Set API key</span>
-                      )}
-                    </div>
-                    <div className="w-[50px] flex-shrink-0 flex justify-center">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleEditProvider(provider.id)}
-                        className="h-6 w-6 p-0"
-                      >
-                        <Settings className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* 앱 제목 변경 섹션 */}
-          <div className="space-y-3">
-            <h3 className="text-lg font-semibold">앱 제목 설정</h3>
-            <div className="space-y-2">
-              <Label htmlFor="app-title">앱 제목</Label>
-              <Input
-                id="app-title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="앱 제목을 입력하세요"
-                className="max-w-md"
-              />
-              <p className="text-xs text-muted-foreground">
-                상단 바에 표시될 앱 제목을 변경할 수 있습니다.
+        <div className="memoji-settings-content">
+          <section className="memoji-settings-section">
+            <div className="memoji-settings-section-header">
+              <h3 className="text-base font-semibold">일반</h3>
+              <p className="text-xs leading-5 text-muted-foreground">
+                로컬 저장, 즉시 렌더링 편집, 로컬 Gemma AI를 사용하는 오프라인 노트 앱입니다.
               </p>
             </div>
-          </div>
+            <div className="memoji-settings-field max-w-xl">
+              <Label htmlFor="app-title">앱 제목</Label>
+              <Input id="app-title" value={title} onChange={(event) => setTitle(event.target.value)} />
+            </div>
+          </section>
 
-          <Separator />
-
-          {/* 사용 팁 섹션 */}
-          <div className="space-y-3">
-            <h3 className="text-lg font-semibold">사용 팁</h3>
-            <div className="bg-muted p-4 rounded-lg space-y-2 text-sm">
-              <div className="space-y-2">
-                <p className="font-medium">💡 효율적인 사용법</p>
-                <ul className="list-disc list-inside space-y-1 text-muted-foreground ml-2">
-                  <li><kbd className="px-1.5 py-0.5 bg-background rounded text-xs">Ctrl + N</kbd> - 새 메모 빠르게 생성</li>
-                  <li><kbd className="px-1.5 py-0.5 bg-background rounded text-xs">Ctrl + F</kbd> - 검색창 포커스</li>
-                  <li><kbd className="px-1.5 py-0.5 bg-background rounded text-xs">F11</kbd> - 집중 모드 토글</li>
-                  <li>태그는 <code className="px-1 py-0.5 bg-background rounded">#태그명</code> 형식으로 자동 인식됩니다</li>
-                  <li>날짜별 메모는 자동으로 해당 날짜에 저장됩니다</li>
-                  <li>프로젝트 메모는 장기 프로젝트 관리에 활용하세요</li>
-                </ul>
+          <section className="memoji-settings-section">
+            <h3 className="text-base font-semibold">편집기</h3>
+            <div className="max-w-xl">
+              <div className="memoji-settings-field">
+                <Label htmlFor="editor-font-family">글자체</Label>
+                <select
+                  id="editor-font-family"
+                  value={editorPreferences.fontFamily}
+                  onChange={(event) => changeFontFamily(event.target.value as EditorFontFamily)}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3"
+                >
+                  {Object.entries(EDITOR_FONT_FAMILY_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
               </div>
             </div>
-          </div>
 
-          <Separator />
-
-          {/* 개발 정보 */}
-          <div className="space-y-2">
-            <h3 className="text-lg font-semibold">개발 정보</h3>
-            <div className="text-sm text-muted-foreground space-y-1">
-              <p>Built with React + TypeScript + Tauri</p>
-              <p>© 2025 Memoji. All rights reserved.</p>
+            <div className="memoji-settings-collapsible">
+              <button
+                type="button"
+                className="memoji-settings-collapsible-trigger"
+                onClick={() => setBuiltInPluginsOpen((open) => !open)}
+                aria-expanded={builtInPluginsOpen}
+              >
+                <span>내장 기능</span>
+                <ChevronDown className="h-4 w-4" aria-hidden="true" />
+              </button>
+              {builtInPluginsOpen && (
+                <div className="memoji-settings-plugin-list">
+                  {builtInPlugins.map((plugin) => (
+                    <div key={plugin.id} className="memoji-settings-plugin-card">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-medium">{plugin.name}</p>
+                          <p className="text-xs leading-5 text-muted-foreground">{plugin.description}</p>
+                        </div>
+                        <Switch
+                          checked={plugin.enabled}
+                          onCheckedChange={(checked) => togglePlugin(plugin.id, checked)}
+                          aria-label={`${plugin.name} 켜기/끄기`}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
+          </section>
+
+          <section className="memoji-settings-section">
+            <div className="memoji-settings-card">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-base font-semibold">로컬 AI</h3>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{localAiStateHelp(aiStatus)}</p>
+                </div>
+                {!aiStatus?.mtpConfigured && (
+                  <Button onClick={loadLocalAi} disabled={!canLoadModel} size="sm" className="min-w-24">
+                    {isLoadingModel ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+                    모델 로드
+                  </Button>
+                )}
+              </div>
+              <div className="mt-4 grid gap-3 text-xs sm:grid-cols-3">
+                <div className="rounded-md bg-muted/50 p-3">
+                  <p className="font-medium">상태</p>
+                  <p className="mt-1 text-muted-foreground">{localAiStateLabel(aiStatus?.state)}</p>
+                </div>
+                <div className="rounded-md bg-muted/50 p-3">
+                  <p className="font-medium">모델</p>
+                  <p className="mt-1 break-words text-muted-foreground">{localAiModelLabel(aiStatus)}</p>
+                </div>
+                <div className="rounded-md bg-muted/50 p-3">
+                  <p className="font-medium">Context</p>
+                  <p className="mt-1 text-muted-foreground">{aiStatus?.contextSize ?? 2048}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="memoji-settings-card">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-semibold">답변 토큰</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">낮으면 빠르고, 높으면 길게 답합니다.</p>
+                </div>
+                <strong>{maxNewTokens}</strong>
+              </div>
+              <input
+                type="range"
+                min={LOCAL_AI_MAX_NEW_TOKENS_MIN}
+                max={LOCAL_AI_MAX_NEW_TOKENS_MAX}
+                step={LOCAL_AI_MAX_NEW_TOKENS_STEP}
+                value={maxNewTokens}
+                onChange={(event) => changeMaxNewTokens(Number(event.target.value))}
+                className="mt-4 w-full accent-primary"
+              />
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <span className="text-xs text-muted-foreground">{LOCAL_AI_MAX_NEW_TOKENS_MIN}</span>
+                <Input
+                  type="number"
+                  min={LOCAL_AI_MAX_NEW_TOKENS_MIN}
+                  max={LOCAL_AI_MAX_NEW_TOKENS_MAX}
+                  step={LOCAL_AI_MAX_NEW_TOKENS_STEP}
+                  value={maxNewTokens}
+                  onChange={(event) => changeMaxNewTokens(Number(event.target.value))}
+                  className="h-9 w-28"
+                />
+                <span className="text-xs text-muted-foreground">{LOCAL_AI_MAX_NEW_TOKENS_MAX}</span>
+                <Button variant="outline" size="sm" onClick={() => changeMaxNewTokens(LOCAL_AI_MAX_NEW_TOKENS_DEFAULT)}>
+                  기본값
+                </Button>
+              </div>
+            </div>
+
+            <div className="memoji-settings-card">
+              <h3 className="flex items-center gap-2 text-base font-semibold">
+                <Cpu className="h-4 w-4" />
+                CPU / AVX-512
+              </h3>
+              <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                <span>Runtime AVX-512F: {cpuFeature('avx512f')}</span>
+                <span>Build AVX-512F: {buildFeature('avx512f')}</span>
+                <span>Runtime AVX-512BW: {cpuFeature('avx512bw')}</span>
+                <span>Build AVX-512BW: {buildFeature('avx512bw')}</span>
+                <span>Runtime AVX-512VL: {cpuFeature('avx512vl')}</span>
+                <span>Build AVX-512VL: {buildFeature('avx512vl')}</span>
+              </div>
+            </div>
+          </section>
+
+          <section className="memoji-settings-section max-w-2xl">
+            <h3 className="flex items-center gap-2 text-base font-semibold">
+              <Database className="h-4 w-4" />
+              데이터 저장 위치
+            </h3>
+            <div className="flex gap-2">
+              <Input value={dataPath} readOnly className="font-mono text-xs" />
+              <Button variant="outline" size="sm" onClick={openDataFolder}>
+                <FolderOpen className="mr-1 h-4 w-4" />
+                열기
+              </Button>
+            </div>
+          </section>
+
         </div>
 
-        {/* 하단 버튼 */}
-        <div className="flex justify-end gap-2 pt-4 border-t">
-          <Button variant="outline" onClick={onClose}>
-            취소
-          </Button>
-          <Button onClick={handleSave}>
-            저장
-          </Button>
+        <div className="flex justify-end gap-2 border-t pt-4">
+          <Button variant="outline" onClick={onClose}>취소</Button>
+          <Button onClick={saveTitle}>저장</Button>
         </div>
       </DialogContent>
-
-      {/* Provider 편집 다이얼로그 */}
-      {editingProvider && (
-        <Dialog open={!!editingProvider} onOpenChange={() => handleCancelEdit()}>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>
-                Edit Provider: {providers.find(p => p.id === editingProvider)?.name}
-              </DialogTitle>
-            </DialogHeader>
-
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="api-key">
-                  API Key <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="api-key"
-                  type="password"
-                  value={editApiKey}
-                  onChange={(e) => setEditApiKey(e.target.value)}
-                  placeholder="Enter API key"
-                />
-                <p className="text-xs text-muted-foreground">
-                  (leave blank if not required)
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="base-url">Base URL</Label>
-                <Input
-                  id="base-url"
-                  value={editBaseUrl}
-                  onChange={(e) => setEditBaseUrl(e.target.value)}
-                  placeholder="Enter base URL"
-                />
-                <p className="text-xs text-muted-foreground">
-                  (leave blank if using default)
-                </p>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={handleCancelEdit}>
-                Cancel
-              </Button>
-              <Button onClick={handleSaveProvider}>
-                Save
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
     </Dialog>
   );
 };
-

@@ -132,6 +132,8 @@ export const PageItem: React.FC<PageItemProps> = ({
               e.stopPropagation();
               onSetOpenMenu(openMenu === page.id ? null : page.id);
             }}
+            title="페이지 메뉴"
+            aria-label="페이지 메뉴"
           >
             <MoreHorizontal className="h-3 w-3" />
           </Button>

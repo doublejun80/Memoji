@@ -5,19 +5,18 @@ import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { Search, FileText, Calendar, Tag } from 'lucide-react';
 import { TagRenderer } from './TagRenderer';
+import {
+  SearchFilter,
+  SearchResult,
+  searchPages,
+  splitHighlightedText,
+} from '../utils/searchIndex';
 
 interface SearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   pages: Page[];
   onPageSelect: (page: Page) => void;
-}
-
-interface SearchResult {
-  page: Page;
-  relevance: number;
-  matchedContent: string;
-  matchType: 'title' | 'content' | 'tag';
 }
 
 export const SearchModal: React.FC<SearchModalProps> = ({
@@ -29,90 +28,12 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [searchFilter, setSearchFilter] = useState<'all' | 'title' | 'content' | 'tags'>('all');
+  const [searchFilter, setSearchFilter] = useState<SearchFilter>('all');
   const inputRef = useRef<HTMLInputElement>(null);
 
   // 검색 실행
-  const performSearch = (query: string, filter: string) => {
-    if (!query.trim()) {
-      setSearchResults([]);
-      return;
-    }
-
-    const searchTerms = query.toLowerCase().split(' ').filter(term => term.length > 0);
-    const results: SearchResult[] = [];
-
-    pages.forEach(page => {
-      let relevance = 0;
-      let matchedContent = '';
-      let matchType: 'title' | 'content' | 'tag' = 'content';
-
-      // 제목 검색
-      if (filter === 'all' || filter === 'title') {
-        const titleLower = page.title.toLowerCase();
-        const titleMatches = searchTerms.filter(term => titleLower.includes(term)).length;
-        if (titleMatches > 0) {
-          relevance += titleMatches * 3; // 제목 매치는 높은 점수
-          matchedContent = page.title;
-          matchType = 'title';
-        }
-      }
-
-      // 내용 검색
-      if (filter === 'all' || filter === 'content') {
-        // 콘텐츠에서 #태그 패턴 제거 후 검색
-        const contentWithoutTags = page.content.replace(/#[\w가-힣\u4e00-\u9fff]+/g, '');
-        const contentLower = contentWithoutTags.toLowerCase();
-
-        const contentMatches = searchTerms.filter(term => contentLower.includes(term)).length;
-        if (contentMatches > 0) {
-          relevance += contentMatches;
-          if (!matchedContent) {
-            // 검색어 주변 컨텍스트 추출
-            const firstMatch = searchTerms.find(term => contentLower.includes(term));
-            if (firstMatch) {
-              const index = contentLower.indexOf(firstMatch);
-              const start = Math.max(0, index - 50);
-              const end = Math.min(contentWithoutTags.length, index + 100);
-              matchedContent = '...' + contentWithoutTags.slice(start, end) + '...';
-              matchType = 'content';
-            }
-          }
-        }
-      }
-
-      // 태그 검색 (# 기호 무시)
-      if (filter === 'all' || filter === 'tags') {
-        const tagMatches = page.tags.filter(tag =>
-          searchTerms.some(term => {
-            // # 기호를 제거하고 비교
-            const cleanTag = tag.replace(/^#/, '').toLowerCase();
-            const cleanTerm = term.replace(/^#/, '').toLowerCase();
-            return cleanTag.includes(cleanTerm);
-          })
-        ).length;
-        if (tagMatches > 0) {
-          relevance += tagMatches * 2; // 태그 매치는 중간 점수
-          if (!matchedContent) {
-            matchedContent = page.tags.map(t => t.startsWith('#') ? t : '#' + t).join(', ');
-            matchType = 'tag';
-          }
-        }
-      }
-
-      if (relevance > 0) {
-        results.push({
-          page,
-          relevance,
-          matchedContent: matchedContent || page.content.slice(0, 100) + '...',
-          matchType
-        });
-      }
-    });
-
-    // 관련도 순으로 정렬
-    results.sort((a, b) => b.relevance - a.relevance);
-    setSearchResults(results.slice(0, 10)); // 상위 10개만 표시
+  const performSearch = (query: string, filter: SearchFilter) => {
+    setSearchResults(searchPages(pages, query, filter, 10));
     setSelectedIndex(0);
   };
 
@@ -156,20 +77,16 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     setSearchQuery('');
   };
 
-  // 검색어 하이라이트
-  const highlightText = (text: string, query: string) => {
-    if (!query.trim()) return text;
-    
-    const searchTerms = query.toLowerCase().split(' ').filter(term => term.length > 0);
-    let highlightedText = text;
-    
-    searchTerms.forEach(term => {
-      const regex = new RegExp(`(${term})`, 'gi');
-      highlightedText = highlightedText.replace(regex, '<mark class="bg-yellow-200 dark:bg-yellow-800">$1</mark>');
-    });
-    
-    return highlightedText;
-  };
+  const renderHighlightedText = (text: string) =>
+    splitHighlightedText(text, searchQuery).map((part, index) =>
+      part.match ? (
+        <mark key={index} className="bg-yellow-200 dark:bg-yellow-800">
+          {part.text}
+        </mark>
+      ) : (
+        <React.Fragment key={index}>{part.text}</React.Fragment>
+      )
+    );
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -207,7 +124,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                 key={key}
                 variant={searchFilter === key ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => setSearchFilter(key as any)}
+                onClick={() => setSearchFilter(key as SearchFilter)}
                 className="flex items-center gap-1 text-xs"
               >
                 <Icon className="w-3 h-3" />
@@ -240,24 +157,18 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <h3 
-                        className="font-medium truncate"
-                        dangerouslySetInnerHTML={{
-                          __html: highlightText(result.page.title, searchQuery)
-                        }}
-                      />
+                      <h3 className="font-medium truncate">
+                        {renderHighlightedText(result.page.title)}
+                      </h3>
                       <span className="text-xs text-muted-foreground">
                         {result.matchType === 'title' && '제목'}
                         {result.matchType === 'content' && '내용'}
                         {result.matchType === 'tag' && '태그'}
                       </span>
                     </div>
-                    <p 
-                      className="text-sm text-muted-foreground line-clamp-2"
-                      dangerouslySetInnerHTML={{
-                        __html: highlightText(result.matchedContent, searchQuery)
-                      }}
-                    />
+                    <p className="text-sm text-muted-foreground line-clamp-2">
+                      {renderHighlightedText(result.matchedContent)}
+                    </p>
                     {result.page.tags.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         {result.page.tags.map((tag, tagIndex) => (

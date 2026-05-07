@@ -39,13 +39,27 @@ npm install
 npm run tauri build
 ```
 
+### 2-1. 일반 x64 / AVX-512 빌드 분리
+
+일반 PC용 빌드:
+```powershell
+.\scripts\build-windows-x64.ps1
+```
+
+VDI Intel Xeon Gold 6248R 전용 AVX-512 빌드:
+```powershell
+.\scripts\build-windows-avx512.ps1
+```
+
+AVX-512 빌드는 `RUSTFLAGS="-C target-cpu=cascadelake"`를 사용합니다. 일반 x64 산출물과 AVX-512 산출물은 각각 `release/windows-x64`, `release/windows-avx512` 아래에 구분해서 복사됩니다.
+
 ### 3. 빌드 결과 확인
 빌드가 완료되면 다음 위치에 파일이 생성됩니다:
 
 **Windows:**
-- **설치 파일 (MSI)**: `src-tauri\target\release\bundle\msi\Memoji_1.0.0_x64_en-US.msi`
+- **설치 파일 (MSI)**: `src-tauri\target\release\bundle\msi\Memoji_2.0.0_x64_en-US.msi`
 - **실행 파일 (EXE)**: `src-tauri\target\release\Memoji.exe`
-- **NSIS 설치 파일**: `src-tauri\target\release\bundle\nsis\Memoji_1.0.0_x64-setup.exe`
+- **NSIS 설치 파일**: `src-tauri\target\release\bundle\nsis\Memoji_2.0.0_x64-setup.exe`
 
 ---
 
@@ -54,12 +68,12 @@ npm run tauri build
 ### 권장 배포 방법
 
 **Option 1: MSI 설치 파일 (권장)**
-- 파일: `Memoji_1.0.0_x64_en-US.msi`
+- 파일: `Memoji_2.0.0_x64_en-US.msi`
 - 장점: Windows 표준 설치 프로그램
 - 설치 위치: `C:\Program Files\Memoji`
 
 **Option 2: NSIS 설치 파일**
-- 파일: `Memoji_1.0.0_x64-setup.exe`
+- 파일: `Memoji_2.0.0_x64-setup.exe`
 - 장점: 더 작은 파일 크기
 - 설치 위치: 사용자 선택 가능
 
@@ -73,8 +87,8 @@ npm run tauri build
 ## 🔍 빌드 확인 사항
 
 ### 1. 버전 정보
-- `package.json`: `"version": "1.0.0"`
-- `src-tauri/tauri.conf.json`: `"version": "1.0.0"`
+- `package.json`: `"version": "2.0.0"`
+- `src-tauri/tauri.conf.json`: `"version": "2.0.0"`
 
 ### 2. 앱 정보
 - 제품명: Memoji
@@ -102,9 +116,11 @@ npm run tauri build
 ### 2. 기능 테스트
 - [ ] 앱 실행
 - [ ] 새 페이지 생성
-- [ ] 마크다운 작성
+- [ ] Milkdown 즉시 편집에서 heading/list/task/code/table 작성
 - [ ] 페이지 저장
+- [ ] Markdown 원문 모드 전환 후 내용 손실 없음
 - [ ] 검색 기능
+- [ ] 로컬 AI 상태 조회와 모델 누락 상태 표시
 - [ ] 다크/라이트 모드 전환
 - [ ] 단축키 작동
 - [ ] 앱 재시작 후 데이터 유지
@@ -116,16 +132,16 @@ npm run tauri build
 
 ## ⚠️ 주의사항
 
-### 1. API 키 제거 확인
-배포 전에 다음 항목에 API 키가 없는지 확인:
-- localStorage (브라우저)
-- 소스 코드 내 하드코딩된 키
-- 환경 변수 파일 (.env)
+### 1. 로컬 AI 리소스 확인
+배포 전에 다음 항목을 확인:
+- `src-tauri/resources/models/`에 필요한 manifest와 체크섬 문서가 있는지 확인
+- 실제 `.gguf` 파일은 git에 커밋하지 않음
+- 배포 패키지에 포함할 모델 파일은 체크섬 검증 후 별도 준비
 
 ### 2. 개발 데이터 제거
 - 테스트용 페이지
 - 개발 중 작성한 메모
-- API 설정 정보
+- 로컬 모델 테스트 로그
 
 ### 3. 빌드 환경
 - Node.js 18 이상
@@ -163,17 +179,19 @@ npm install -g @tauri-apps/cli
 
 ## 📝 릴리스 노트 작성
 
-### v1.0.0 (2025-01-XX)
+### v2.0.0 (2026-05-06)
 
 **주요 기능:**
-- ✨ 마크다운 기반 메모 작성
+- ✨ Milkdown 기반 Typora식 즉시 렌더링 Markdown 편집
+- 📊 GFM table 편집/저장/복원
+- 🧩 내장 플러그인 레지스트리: tables, wiki links, tags, tasks, local AI, calendar notes, search index
 - 📁 페이지 및 폴더 계층 구조
 - 🗓️ 날짜별 메모 관리
-- 🔍 전체 검색 기능
+- 🔍 제목/본문/태그 검색 인덱싱
 - ⌨️ 커스터마이징 가능한 단축키
 - 🎨 다크/라이트 모드
 - 💾 로컬 SQLite 데이터베이스
-- 🤖 AI 채팅 어시스턴트 (8개 LLM 지원)
+- 🤖 로컬 Gemma AI 어시스턴트 (Candle GGUF 경로, 토큰 스트리밍 UX)
 - 🔒 Portable 모드 (VDI 환경 지원)
 
 **시스템 요구사항:**
@@ -186,4 +204,3 @@ npm install -g @tauri-apps/cli
 ## 📧 지원
 
 문제가 발생하면 GitHub Issues에 보고해주세요.
-

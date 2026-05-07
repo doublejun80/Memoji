@@ -370,8 +370,8 @@ useEffect(() => {
       }
     ],
     "security": {
-      "csp": null,
-      "devCsp": null,
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self' http://localhost:1420 ws://localhost:1420; connect-src 'self' ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420",
       "freezePrototype": false,
       "dangerousDisableAssetCspModification": false
     }
@@ -390,12 +390,6 @@ useEffect(() => {
       "message": true,
       "open": true,
       "save": true
-    },
-    "shell": {
-      "all": false,
-      "execute": false,
-      "sidecar": false,
-      "open": true
     }
   }
 }
@@ -428,7 +422,6 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             get_app_data_dir,
             log_environment_info
@@ -468,7 +461,6 @@ serde = { version = "1.0", features = ["derive"] }
 tauri = { version = "2.0", features = ["macos-private-api"] }
 tauri-plugin-fs = "2.0"
 tauri-plugin-dialog = "2.0"
-tauri-plugin-shell = "2.0"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

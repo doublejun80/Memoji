@@ -33,7 +33,7 @@ export const PageMenu: React.FC<PageMenuProps> = ({
   };
 
   return (
-    <div className="absolute right-0 top-full mt-1 bg-popover border border-border rounded-lg shadow-lg p-2 z-50 flex items-center gap-1">
+    <div className="absolute right-0 top-full mt-1 bg-popover border border-border rounded-lg shadow-lg px-2 py-2 z-50 flex items-center gap-1.5">
       {/* 수정 버튼 */}
       <Button
         variant="ghost"
@@ -41,8 +41,9 @@ export const PageMenu: React.FC<PageMenuProps> = ({
         className="h-8 w-8 p-0 hover:bg-accent hover:text-accent-foreground transition-colors"
         onClick={() => handleAction(() => onStartEdit(page))}
         title="수정"
+        aria-label="수정"
       >
-        <Edit2 className="h-4 w-4" />
+        <Edit2 className="h-[15px] w-[15px]" />
       </Button>
 
       {/* 페이지 추가 버튼 */}
@@ -52,8 +53,9 @@ export const PageMenu: React.FC<PageMenuProps> = ({
         className="h-8 w-8 p-0 hover:bg-accent hover:text-accent-foreground transition-colors"
         onClick={() => handleAction(() => onCreateChild('하위 페이지', page.id))}
         title="하위 페이지 추가"
+        aria-label="하위 페이지 추가"
       >
-        <Plus className="h-4 w-4" />
+        <Plus className="h-[15px] w-[15px]" />
       </Button>
 
       {/* 폴더 추가 버튼 */}
@@ -63,8 +65,9 @@ export const PageMenu: React.FC<PageMenuProps> = ({
         className="h-8 w-8 p-0 hover:bg-accent hover:text-accent-foreground transition-colors"
         onClick={() => handleAction(() => onCreateChildFolder('하위 폴더', page.id))}
         title="하위 폴더 추가"
+        aria-label="하위 폴더 추가"
       >
-        <FolderPlus className="h-4 w-4" />
+        <FolderPlus className="h-[15px] w-[15px]" />
       </Button>
 
       {/* 구분선 */}
@@ -82,8 +85,9 @@ export const PageMenu: React.FC<PageMenuProps> = ({
         onClick={() => canMoveUp && handleAction(() => onMove(page.id, 'up'))}
         disabled={!canMoveUp}
         title="위로 이동"
+        aria-label="위로 이동"
       >
-        <ChevronUp className="h-4 w-4" />
+        <ChevronUp className="h-[15px] w-[15px]" />
       </Button>
 
       {/* 아래로 이동 버튼 */}
@@ -98,8 +102,9 @@ export const PageMenu: React.FC<PageMenuProps> = ({
         onClick={() => canMoveDown && handleAction(() => onMove(page.id, 'down'))}
         disabled={!canMoveDown}
         title="아래로 이동"
+        aria-label="아래로 이동"
       >
-        <ChevronDown className="h-4 w-4" />
+        <ChevronDown className="h-[15px] w-[15px]" />
       </Button>
 
       {/* 구분선 */}
@@ -113,8 +118,9 @@ export const PageMenu: React.FC<PageMenuProps> = ({
             size="sm"
             className="h-8 w-8 p-0 hover:bg-destructive/10 hover:text-destructive transition-colors"
             title="삭제"
+            aria-label="삭제"
           >
-            <Trash2 className="h-4 w-4" />
+            <Trash2 className="h-[15px] w-[15px]" />
           </Button>
         </AlertDialogTrigger>
         <AlertDialogContent>

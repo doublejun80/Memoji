@@ -3,6 +3,9 @@ export interface Page {
   title: string;
   icon: string;
   parentId: string | null;
+  projectParentId?: string | null; // 프로젝트/사건 인덱스 트리 소속
+  projectIndex?: boolean; // 프로젝트/사건 인덱스에 표시할지 여부
+  dateKey?: string | null; // 데일리 인덱스 소속 날짜(YYYY-MM-DD), 없으면 프로젝트 전용
   content: string; // 마크다운 텍스트
   createdAt: string;
   updatedAt: string;

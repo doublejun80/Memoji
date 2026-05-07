@@ -68,9 +68,9 @@ const defaultShortcuts: KeyboardShortcut[] = [
     category: '편집'
   },
   {
-    id: 'preview',
-    name: '미리보기',
-    description: '편집/미리보기 모드 전환',
+    id: 'sourceMode',
+    name: '원문 모드',
+    description: '즉시 편집/Markdown 원문 전환',
     defaultKey: 'Ctrl+E',
     currentKey: 'Ctrl+E',
     category: '편집'
@@ -89,7 +89,13 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
   useEffect(() => {
     const savedShortcuts = localStorage.getItem('keyboardShortcuts');
     if (savedShortcuts) {
-      setShortcuts(JSON.parse(savedShortcuts));
+      try {
+        const parsedShortcuts = JSON.parse(savedShortcuts);
+        setShortcuts(Array.isArray(parsedShortcuts) ? parsedShortcuts : defaultShortcuts);
+      } catch (error) {
+        console.error('Failed to parse keyboard shortcuts:', error);
+        setShortcuts(defaultShortcuts);
+      }
     } else {
       setShortcuts(defaultShortcuts);
     }

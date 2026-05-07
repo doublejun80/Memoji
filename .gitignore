@@ -1,0 +1,28 @@
+.DS_Store
+
+# Dependencies
+node_modules/
+src/node_modules/
+
+# Frontend build output
+dist/
+src/dist/
+
+# Rust/Tauri build output
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Local model resources: keep manifests/docs, never commit model blobs.
+src-tauri/resources/models/*.gguf
+src-tauri/resources/models/*.bin
+src-tauri/resources/models/*.safetensors
+src-tauri/resources/models/tokenizer.json
+
+# Local release artifacts
+release/
+
+# Logs and local env
+logs/
+*.log
+.env
+.env.*
