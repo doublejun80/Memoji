@@ -8,7 +8,7 @@ use local_ai::{
 };
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, Window};
 
@@ -115,8 +115,16 @@ fn read_runtime_config_from_db(db: &Database) -> Result<LocalAiRuntimeConfig, St
         return Ok(LocalAiRuntimeConfig::default());
     };
 
-    serde_json::from_str(&raw_config)
-        .map_err(|error| format!("AI runtime config is invalid: {error}"))
+    match serde_json::from_str(&raw_config) {
+        Ok(config) => Ok(config),
+        Err(error) => {
+            log::warn!(
+                "AI runtime config is invalid; falling back to defaults: {}",
+                error
+            );
+            Ok(LocalAiRuntimeConfig::default())
+        }
+    }
 }
 
 fn save_runtime_config_to_db(db: &Database, config: &LocalAiRuntimeConfig) -> Result<(), String> {
@@ -137,8 +145,8 @@ fn resolve_mtp_config(state: &State<AppState>) -> Result<Option<MtpConfig>, Stri
 }
 
 /// 데이터 저장 디렉토리 결정
-/// 기본값: 실행 파일과 같은 폴더의 data 디렉토리 (Portable 모드)
-/// VDI 환경에서도 안전하게 작동
+/// MEMOJI_DATA_PATH가 있으면 최우선으로 사용한다.
+/// 기본은 실행 파일 옆 data 폴더이지만, 설치 위치가 쓰기 불가하면 OS 로컬 데이터 폴더로 안전하게 물러난다.
 fn get_data_directory() -> Result<PathBuf, String> {
     // 1. 환경 변수 확인 (고급 사용자용 - 선택사항)
     if let Ok(custom_path) = std::env::var("MEMOJI_DATA_PATH") {
@@ -148,16 +156,41 @@ fn get_data_directory() -> Result<PathBuf, String> {
     }
 
     // 2. 기본값: 실행 파일과 같은 폴더의 data 디렉토리
-    // VDI 환경에서도 안전하게 작동
     let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
 
     let exe_dir = exe_path.parent().ok_or("Failed to get exe directory")?;
 
-    let data_dir = exe_dir.join("data");
+    let portable_data_dir = exe_dir.join("data");
+    if directory_is_writable(&portable_data_dir) {
+        println!("📁 Using portable data directory: {:?}", portable_data_dir);
+        return Ok(portable_data_dir);
+    }
 
-    println!("📁 Using portable data directory: {:?}", data_dir);
+    if let Some(local_data_dir) = dirs::data_local_dir() {
+        let fallback_data_dir = local_data_dir.join("Memoji").join("data");
+        println!(
+            "📁 Portable data directory is not writable, using local data directory: {:?}",
+            fallback_data_dir
+        );
+        return Ok(fallback_data_dir);
+    }
 
-    Ok(data_dir)
+    Ok(portable_data_dir)
+}
+
+fn directory_is_writable(path: &Path) -> bool {
+    if std::fs::create_dir_all(path).is_err() {
+        return false;
+    }
+
+    let probe_path = path.join(".memoji-write-test");
+    match std::fs::write(&probe_path, b"ok") {
+        Ok(_) => {
+            let _ = std::fs::remove_file(probe_path);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 #[tauri::command]

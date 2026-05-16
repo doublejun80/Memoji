@@ -1,5 +1,5 @@
 use super::{
-    sampler::DEFAULT_MAX_NEW_TOKENS, LocalAiError, LocalAiGenerateRequest, LocalAiGenerateResponse,
+    sampler::SamplingConfig, LocalAiError, LocalAiGenerateRequest, LocalAiGenerateResponse,
     LocalAiGenerateStreamChunk,
 };
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
@@ -128,12 +128,13 @@ where
         .build()
         .map_err(|error| LocalAiError::GenerateFailed(error.to_string()))?;
 
+    let sampling = SamplingConfig::from_request(&request);
     let payload = ChatCompletionRequest {
         model: config.model,
         messages: build_messages(&request),
-        max_tokens: request.max_new_tokens.unwrap_or(DEFAULT_MAX_NEW_TOKENS),
-        temperature: request.temperature.unwrap_or(0.4),
-        top_p: request.top_p.unwrap_or(0.95),
+        max_tokens: sampling.max_new_tokens,
+        temperature: sampling.temperature,
+        top_p: sampling.top_p,
         stream: true,
     };
 
@@ -163,12 +164,17 @@ where
     let mut text = String::new();
     let mut generated_tokens = 0usize;
     let mut finish_reason = "stop".to_string();
+    let mut received_done = false;
 
-    while let Some(bytes) = response
-        .chunk()
-        .await
-        .map_err(|error| LocalAiError::GenerateFailed(error.to_string()))?
-    {
+    while !received_done {
+        let Some(bytes) = response
+            .chunk()
+            .await
+            .map_err(|error| LocalAiError::GenerateFailed(error.to_string()))?
+        else {
+            break;
+        };
+
         pending.push_str(&String::from_utf8_lossy(&bytes));
         while let Some(line_end) = pending.find('\n') {
             let line = pending[..line_end].trim_end_matches('\r').to_string();
@@ -181,6 +187,7 @@ where
                 continue;
             }
             if data == "[DONE]" {
+                received_done = true;
                 break;
             }
 

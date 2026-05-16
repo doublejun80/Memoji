@@ -261,8 +261,8 @@ impl Database {
                     .project_parent_id
                     .clone()
                     .or_else(|| page.parent_id.clone());
-                let mapped_parent_id = original_parent_id
-                    .and_then(|parent_id| id_map.get(&parent_id).cloned().or(Some(parent_id)));
+                let mapped_parent_id =
+                    original_parent_id.and_then(|parent_id| id_map.get(&parent_id).cloned());
                 page.parent_id = mapped_parent_id.clone();
                 page.project_parent_id = mapped_parent_id;
                 self.save_page(page).map_err(|error| {
@@ -285,18 +285,29 @@ impl Database {
     }
 
     pub fn delete_page(&self, page_id: &str) -> Result<()> {
-        // 자식 페이지들도 함께 삭제
-        let mut visited = HashSet::new();
-        visited.insert(page_id.to_string());
-        let child_ids = self.get_child_page_ids(page_id, &mut visited)?;
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
 
-        for child_id in child_ids {
+        let delete_result = (|| -> Result<()> {
+            let mut visited = HashSet::new();
+            visited.insert(page_id.to_string());
+            let child_ids = self.get_child_page_ids(page_id, &mut visited)?;
+
+            for child_id in child_ids {
+                self.conn
+                    .execute("DELETE FROM pages WHERE id = ?1", params![child_id])?;
+            }
+
             self.conn
-                .execute("DELETE FROM pages WHERE id = ?1", params![child_id])?;
+                .execute("DELETE FROM pages WHERE id = ?1", params![page_id])?;
+            Ok(())
+        })();
+
+        if let Err(error) = delete_result {
+            let _ = self.conn.execute_batch("ROLLBACK");
+            return Err(error);
         }
 
-        self.conn
-            .execute("DELETE FROM pages WHERE id = ?1", params![page_id])?;
+        self.conn.execute_batch("COMMIT")?;
         Ok(())
     }
 
@@ -423,10 +434,18 @@ fn read_source_pages(source: &Connection) -> std::result::Result<Vec<Page>, Stri
             let parent_id: Option<String> = normalize_optional_string(row.get(3)?);
             let project_parent_id: Option<String> =
                 normalize_optional_string(row.get(4)?).or_else(|| parent_id.clone());
+            let project_index_raw: Option<i64> = row.get(5)?;
             let date_key = normalize_optional_string(row.get(6)?);
             let created_at: String = row.get(8)?;
-            let normalized_date_key = date_key.or_else(|| date_key_from_created_at(&created_at));
-            let project_index_raw: Option<i64> = row.get(5)?;
+            let has_project_membership = project_parent_id.is_some()
+                || matches!(project_index_raw, Some(value) if value != 0);
+            let normalized_date_key = date_key.or_else(|| {
+                if has_project_membership {
+                    None
+                } else {
+                    date_key_from_created_at(&created_at)
+                }
+            });
             let project_index = project_index_raw
                 .map(|value| value != 0)
                 .unwrap_or_else(|| project_parent_id.is_some() || normalized_date_key.is_none());
@@ -590,6 +609,99 @@ mod tests {
         assert_eq!(pages[0].id, "daily-1");
         assert_eq!(pages[0].date_key.as_deref(), Some("2026-05-01"));
         assert_eq!(pages[0].project_index, Some(false));
+    }
+
+    #[test]
+    fn imports_legacy_parented_pages_as_project_only() {
+        let target = in_memory_database();
+        target.init().unwrap();
+
+        let source = Connection::open_in_memory().unwrap();
+        source
+            .execute_batch(
+                "CREATE TABLE pages (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    icon TEXT NOT NULL,
+                    parent_id TEXT,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    tags TEXT NOT NULL,
+                    page_order INTEGER NOT NULL
+                );
+                INSERT INTO pages
+                    (id, title, icon, parent_id, content, created_at, updated_at, type, tags, page_order)
+                VALUES
+                    ('folder-1', '프로젝트', '📁', NULL, '', '2026-05-01T09:00:00.000', '2026-05-01T09:00:00.000', 'folder', '[]', 0),
+                    ('child-1', '프로젝트 메모', '📄', 'folder-1', '내용', '2026-05-01T10:00:00.000', '2026-05-01T10:00:00.000', 'page', '[]', 1);",
+            )
+            .unwrap();
+
+        let summary = target.import_pages_from_connection(&source).unwrap();
+        let pages = target.get_pages().unwrap();
+        let child = pages.iter().find(|page| page.id == "child-1").unwrap();
+
+        assert_eq!(summary.imported, 2);
+        assert_eq!(child.project_parent_id.as_deref(), Some("folder-1"));
+        assert_eq!(child.date_key, None);
+        assert_eq!(child.project_index, Some(true));
+    }
+
+    #[test]
+    fn import_does_not_attach_dangling_parent_to_target_page() {
+        let target = in_memory_database();
+        target.init().unwrap();
+        target
+            .save_page(&Page {
+                id: "missing-parent".to_string(),
+                title: "기존 프로젝트".to_string(),
+                icon: "📁".to_string(),
+                parent_id: None,
+                project_parent_id: None,
+                project_index: Some(true),
+                date_key: None,
+                content: "".to_string(),
+                created_at: "2026-05-01T09:00:00.000".to_string(),
+                updated_at: "2026-05-01T09:00:00.000".to_string(),
+                page_type: "folder".to_string(),
+                tags: vec![],
+                order: 0,
+            })
+            .unwrap();
+
+        let source = Connection::open_in_memory().unwrap();
+        source
+            .execute_batch(
+                "CREATE TABLE pages (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    icon TEXT NOT NULL,
+                    parent_id TEXT,
+                    project_parent_id TEXT,
+                    project_index INTEGER,
+                    date_key TEXT,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    tags TEXT NOT NULL,
+                    page_order INTEGER NOT NULL
+                );
+                INSERT INTO pages
+                    (id, title, icon, parent_id, project_parent_id, project_index, date_key, content, created_at, updated_at, type, tags, page_order)
+                VALUES
+                    ('orphan-child', '고아 메모', '📄', 'missing-parent', 'missing-parent', 1, NULL, '내용', '2026-05-02T09:00:00.000', '2026-05-02T09:00:00.000', 'page', '[]', 0);",
+            )
+            .unwrap();
+
+        target.import_pages_from_connection(&source).unwrap();
+        let pages = target.get_pages().unwrap();
+        let imported = pages.iter().find(|page| page.id == "orphan-child").unwrap();
+
+        assert_eq!(imported.project_parent_id, None);
+        assert_eq!(imported.parent_id, None);
     }
 
     #[test]

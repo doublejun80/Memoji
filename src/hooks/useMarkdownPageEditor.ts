@@ -94,21 +94,27 @@ export const useMarkdownPageEditor = ({
   const dirtyRef = useRef(false);
   const lastPageIdRef = useRef<string | null>(null);
   const onPageUpdateRef = useRef(onPageUpdate);
+  const saveVersionRef = useRef(0);
+  const latestAppliedSaveVersionRef = useRef(0);
 
   useEffect(() => {
     onPageUpdateRef.current = onPageUpdate;
   }, [onPageUpdate]);
 
   const savePage = useCallback(async (page: Page, markdown: string) => {
+    const saveVersion = ++saveVersionRef.current;
     const nextPage = pageWithMarkdownMetadata(page, markdown);
 
     try {
       await onPageUpdateRef.current(nextPage);
+      if (saveVersion < latestAppliedSaveVersionRef.current) return;
+      latestAppliedSaveVersionRef.current = saveVersion;
+
       if (pageRef.current?.id === nextPage.id) {
         pageRef.current = nextPage;
-        contentRef.current = markdown;
-        dirtyRef.current = false;
-        setHasUnsavedChanges(false);
+        const hasNewerLocalContent = contentRef.current !== markdown;
+        dirtyRef.current = hasNewerLocalContent;
+        setHasUnsavedChanges(hasNewerLocalContent);
       }
     } catch (error) {
       console.error('Failed to save page:', error);

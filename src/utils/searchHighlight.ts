@@ -9,7 +9,7 @@ export const highlightSearchQuery = (text: string, query: string): string => {
   
   if (!cleanQuery) {
     // If only tags, highlight the tags themselves
-    const tags = query.match(/#[\w가-힣\u4e00-\u9fff]+/g) || [];
+    const tags: string[] = query.match(/#[\w가-힣\u4e00-\u9fff]+/g) ?? [];
     let highlightedText = text;
     tags.forEach(tag => {
       const regex = new RegExp(`(${escapeRegExp(tag.slice(1))})`, 'gi');
@@ -19,7 +19,7 @@ export const highlightSearchQuery = (text: string, query: string): string => {
   }
   
   // First highlight any tags in the original query
-  const originalTags = query.match(/#[\w가-힣\u4e00-\u9fff]+/g) || [];
+  const originalTags: string[] = query.match(/#[\w가-힣\u4e00-\u9fff]+/g) ?? [];
   let highlightedText = text;
   
   originalTags.forEach(tag => {

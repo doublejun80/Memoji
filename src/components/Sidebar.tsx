@@ -34,7 +34,7 @@ import {
 } from 'lucide-react';
 import { CalendarWidget } from './CalendarWidget';
 import { toLocalISOString } from '../utils/dateUtils';
-import { getProjectIndexPages, getProjectParentId } from '../utils/pageModel';
+import { getProjectIndexPages, getProjectParentId, isProjectIndexPage } from '../utils/pageModel';
 
 const EMOJI_PALETTE = ['📝', '📄', '📌', '✅', '💡', '📚', '📅', '💼', '🚀', '⭐', '🔥', '🎯', '🔎', '🧠', '🛠️', '📊', '🔐', '🏠', '📁', '🙂'];
 const INDEX_ITEM_ROW_CLASS = 'group flex items-center gap-1 rounded px-1 py-2 hover:bg-accent';
@@ -130,6 +130,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     resizeObserver.observe(sidebarRef.current);
     return () => resizeObserver.disconnect();
   }, []);
+
+  useEffect(() => {
+    if (!currentPage || isWideLayout) return;
+    setActiveIndex(isProjectIndexPage(currentPage) ? 'project' : 'daily');
+  }, [currentPage, isWideLayout]);
 
   const toggleExpanded = (pageId: string) => {
     setExpandedPages(prev => {

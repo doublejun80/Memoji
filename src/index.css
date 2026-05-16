@@ -3050,41 +3050,52 @@ input[type="checkbox"]:checked:after {
   color: var(--foreground);
 }
 
-.dark .memoji-milkdown .milkdown-code-block .list-wrapper {
+.dark .memoji-milkdown .milkdown-code-block .list-wrapper,
+.dark .milkdown-code-block .list-wrapper {
   border: 1px solid var(--border);
   background: var(--popover) !important;
+  color: var(--popover-foreground) !important;
   box-shadow: 0 14px 32px rgb(0 0 0 / 34%);
 }
 
-.dark .memoji-milkdown .milkdown-code-block .language-list-item {
+.dark .memoji-milkdown .milkdown-code-block .language-list-item,
+.dark .milkdown-code-block .language-list-item {
   color: var(--popover-foreground) !important;
 }
 
 .dark .memoji-milkdown .milkdown-code-block .language-list-item:hover,
-.dark .memoji-milkdown .milkdown-code-block .language-list-item:focus-visible {
+.dark .memoji-milkdown .milkdown-code-block .language-list-item:focus-visible,
+.dark .milkdown-code-block .language-list-item:hover,
+.dark .milkdown-code-block .language-list-item:focus-visible {
   background: var(--accent) !important;
   color: var(--accent-foreground) !important;
 }
 
-.dark .memoji-milkdown .milkdown-code-block .language-list-item.no-result {
+.dark .memoji-milkdown .milkdown-code-block .language-list-item.no-result,
+.dark .milkdown-code-block .language-list-item.no-result {
   color: var(--muted-foreground) !important;
 }
 
-.dark .memoji-milkdown .milkdown-code-block .search-box {
+.dark .memoji-milkdown .milkdown-code-block .search-box,
+.dark .milkdown-code-block .search-box {
   background: var(--background) !important;
   outline-color: var(--border) !important;
 }
 
-.dark .memoji-milkdown .milkdown-code-block .search-box:has(input:focus) {
+.dark .memoji-milkdown .milkdown-code-block .search-box:has(input:focus),
+.dark .milkdown-code-block .search-box:has(input:focus) {
   outline-color: var(--ring) !important;
 }
 
 .dark .memoji-milkdown .milkdown-code-block .search-box .search-input,
-.dark .memoji-milkdown .milkdown-code-block .search-box input {
+.dark .memoji-milkdown .milkdown-code-block .search-box input,
+.dark .milkdown-code-block .search-box .search-input,
+.dark .milkdown-code-block .search-box input {
   color: var(--foreground) !important;
 }
 
-.dark .memoji-milkdown .milkdown-code-block .search-box input::placeholder {
+.dark .memoji-milkdown .milkdown-code-block .search-box input::placeholder,
+.dark .milkdown-code-block .search-box input::placeholder {
   color: var(--muted-foreground) !important;
   opacity: 1;
 }

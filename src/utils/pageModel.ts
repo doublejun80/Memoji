@@ -11,8 +11,21 @@ const getFallbackDateKey = (createdAt: string | undefined): string | null => {
   return Number.isNaN(parsedDate.getTime()) ? null : formatDateKey(parsedDate);
 };
 
+const getExplicitDateKey = (page: any): string | null | undefined => {
+  if (page.dateKey !== undefined) return page.dateKey || null;
+  if (page.date_key !== undefined) return page.date_key || null;
+  return undefined;
+};
+
+const getExplicitProjectIndex = (page: any): boolean | undefined => {
+  if (page.projectIndex !== undefined && page.projectIndex !== null) return Boolean(page.projectIndex);
+  if (page.project_index !== undefined && page.project_index !== null) return Boolean(page.project_index);
+  return undefined;
+};
+
 export const getPageDateKey = (page: Page): string | null => {
   if (page.dateKey !== undefined) return page.dateKey;
+  if (page.projectIndex === true || getProjectParentId(page) !== null) return null;
   return getFallbackDateKey(page.createdAt);
 };
 
@@ -31,16 +44,16 @@ export const normalizePage = (page: any, index: number = 0): Page => {
   const projectParentId = normalizeParentId(
     page.projectParentId ?? page.project_parent_id ?? page.parentId ?? page.parent_id
   );
-  const dateKey = page.dateKey !== undefined
-    ? page.dateKey
-    : page.date_key !== undefined
-      ? page.date_key
+  const explicitProjectIndex = getExplicitProjectIndex(page);
+  const explicitDateKey = getExplicitDateKey(page);
+  const dateKey = explicitDateKey !== undefined
+    ? explicitDateKey
+    : explicitProjectIndex === true || projectParentId !== null
+      ? null
       : getFallbackDateKey(createdAt);
-  const projectIndex = page.projectIndex !== undefined && page.projectIndex !== null
-    ? Boolean(page.projectIndex)
-    : page.project_index !== undefined && page.project_index !== null
-      ? Boolean(page.project_index)
-      : projectParentId !== null || dateKey === null;
+  const projectIndex = explicitProjectIndex !== undefined
+    ? explicitProjectIndex
+    : projectParentId !== null || dateKey === null;
 
   return {
     id: page.id,

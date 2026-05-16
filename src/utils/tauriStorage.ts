@@ -29,25 +29,52 @@ const initTauri = async () => {
 class TauriStorage {
   private isInitialized = false;
   private isTauriAvailable = false;
+  private initPromise: Promise<void> | null = null;
+  private tauriInitializationError: unknown = null;
 
   async init() {
     if (this.isInitialized) return;
-    
-    // First check if Tauri is available
+    if (this.initPromise) {
+      await this.initPromise;
+      return;
+    }
+
+    this.initPromise = this.initialize();
+    try {
+      await this.initPromise;
+    } finally {
+      this.initPromise = null;
+    }
+  }
+
+  private async initialize() {
     this.isTauriAvailable = await initTauri();
+    this.tauriInitializationError = null;
     
     if (this.isTauriAvailable && invoke) {
       try {
         await invoke('init_database');
         this.isInitialized = true;
+        await this.migrateLocalStoragePagesToTauri();
       } catch (error) {
-        console.warn('⚠️ Failed to initialize Tauri database, falling back to localStorage:', error);
+        this.tauriInitializationError = error;
         this.isInitialized = false;
-        this.isTauriAvailable = false;
+        throw this.makeDesktopStorageError('데이터베이스 초기화', error);
       }
     } else {
       this.isInitialized = false;
       this.isTauriAvailable = false;
+    }
+  }
+
+  private makeDesktopStorageError(operation: string, error: unknown): Error {
+    const detail = error instanceof Error ? error.message : String(error);
+    return new Error(`${operation}에 실패했습니다. 데스크톱 앱에서는 memoji.db 저장소가 열리지 않으면 localStorage로 대체 저장하지 않습니다. 원인: ${detail}`);
+  }
+
+  private assertDesktopStorageReady(operation: string): void {
+    if (this.isTauriAvailable && (!this.isInitialized || !invoke)) {
+      throw this.makeDesktopStorageError(operation, this.tauriInitializationError ?? 'Tauri 저장소가 준비되지 않았습니다.');
     }
   }
 
@@ -60,7 +87,7 @@ class TauriStorage {
 
     if (this.isInitialized && this.isTauriAvailable && invoke) {
       try {
-        const tauriPages = await invoke<any[]>('get_pages');
+        const tauriPages = await invoke('get_pages') as any[];
 
         // Convert snake_case from Tauri to camelCase
         const pages = tauriPages.map(p => {
@@ -85,25 +112,14 @@ class TauriStorage {
         return migratedPages;
       } catch (error) {
         console.error('❌ Tauri에서 페이지 로드 실패:', error);
+        throw this.makeDesktopStorageError('페이지 로드', error);
       }
     }
+
+    this.assertDesktopStorageReady('페이지 로드');
 
     // Fallback to localStorage
-    const saved = localStorage.getItem('blocknote-pages');
-    let pages: any[] = [];
-
-    if (saved) {
-      try {
-        pages = JSON.parse(saved);
-      } catch (error) {
-        console.error('Failed to parse saved localStorage pages:', error);
-        pages = [];
-      }
-    }
-
-    const migratedPages = this.migratePages(pages);
-
-    return migratedPages;
+    return this.getLocalStoragePages();
   }
 
   // 기존 페이지를 새로운 구조로 마이그레이션
@@ -116,29 +132,15 @@ class TauriStorage {
 
     if (this.isInitialized && this.isTauriAvailable && invoke) {
       try {
-        // Convert camelCase to snake_case for Tauri
-        const normalizedPage = normalizePage(page);
-        const tauriPage = {
-          id: normalizedPage.id,
-          title: normalizedPage.title,
-          icon: normalizedPage.icon,
-          parent_id: normalizedPage.projectParentId,
-          project_parent_id: normalizedPage.projectParentId,
-          project_index: normalizedPage.projectIndex,
-          date_key: normalizedPage.dateKey,
-          content: normalizedPage.content,
-          created_at: normalizedPage.createdAt,
-          updated_at: normalizedPage.updatedAt,
-          type: normalizedPage.type,
-          tags: normalizedPage.tags,
-          order: normalizedPage.order
-        };
-        await invoke('save_page', { page: tauriPage });
+        await invoke('save_page', { page: this.toTauriPage(page) });
         return;
       } catch (error) {
-        console.error('❌ Tauri 저장 실패, localStorage로 fallback:', error);
+        console.error('❌ Tauri 저장 실패:', error);
+        throw this.makeDesktopStorageError('페이지 저장', error);
       }
     }
+
+    this.assertDesktopStorageReady('페이지 저장');
 
     // Fallback to localStorage
     const normalizedPage = normalizePage(page);
@@ -159,11 +161,69 @@ class TauriStorage {
     if (!saved) return [];
 
     try {
-      return JSON.parse(saved);
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? this.migratePages(parsed) : [];
     } catch (error) {
       console.error('Failed to parse saved localStorage pages:', error);
       return [];
     }
+  }
+
+  private toTauriPage(page: Page) {
+    const normalizedPage = normalizePage(page);
+    return {
+      id: normalizedPage.id,
+      title: normalizedPage.title,
+      icon: normalizedPage.icon,
+      parent_id: normalizedPage.projectParentId,
+      project_parent_id: normalizedPage.projectParentId,
+      project_index: normalizedPage.projectIndex,
+      date_key: normalizedPage.dateKey,
+      content: normalizedPage.content,
+      created_at: normalizedPage.createdAt,
+      updated_at: normalizedPage.updatedAt,
+      type: normalizedPage.type,
+      tags: normalizedPage.tags,
+      order: normalizedPage.order
+    };
+  }
+
+  private async migrateLocalStoragePagesToTauri(): Promise<void> {
+    if (!this.isInitialized || !this.isTauriAvailable || !invoke) return;
+
+    const legacyRawPages = localStorage.getItem('blocknote-pages');
+    if (!legacyRawPages) return;
+
+    const migrationMarkerKey = 'memoji-localstorage-pages-migrated-to-sqlite';
+    if (localStorage.getItem(migrationMarkerKey)) return;
+
+    const legacyPages = this.getLocalStoragePages();
+    if (legacyPages.length === 0) {
+      localStorage.setItem(migrationMarkerKey, JSON.stringify({
+        migratedAt: new Date().toISOString(),
+        count: 0,
+      }));
+      return;
+    }
+
+    const existingPages = await invoke('get_pages') as any[];
+    if (Array.isArray(existingPages) && existingPages.length > 0) {
+      return;
+    }
+
+    const backupKey = 'memoji-localstorage-pages-backup-before-sqlite';
+    if (!localStorage.getItem(backupKey)) {
+      localStorage.setItem(backupKey, legacyRawPages);
+    }
+
+    for (const page of legacyPages) {
+      await invoke('save_page', { page: this.toTauriPage(page) });
+    }
+
+    localStorage.setItem(migrationMarkerKey, JSON.stringify({
+      migratedAt: new Date().toISOString(),
+      count: legacyPages.length,
+    }));
   }
 
   async deletePage(pageId: string): Promise<void> {
@@ -175,8 +235,11 @@ class TauriStorage {
         return;
       } catch (error) {
         console.error('Failed to delete page from Tauri:', error);
+        throw this.makeDesktopStorageError('페이지 삭제', error);
       }
     }
+
+    this.assertDesktopStorageReady('페이지 삭제');
 
     // Fallback to localStorage
     const pages = this.getLocalStoragePages();
@@ -223,7 +286,7 @@ class TauriStorage {
   async getAppDataDir(): Promise<string | null> {
     if (this.isInitialized && this.isTauriAvailable && invoke) {
       try {
-        return await invoke<string>('get_app_data_dir');
+        return await invoke('get_app_data_dir') as string;
       } catch (error) {
         console.error('Failed to get app data dir:', error);
       }
@@ -236,11 +299,14 @@ class TauriStorage {
 
     if (this.isInitialized && this.isTauriAvailable && invoke) {
       try {
-        return await invoke<string>('get_app_title');
+        return await invoke('get_app_title') as string;
       } catch (error) {
         console.error('Failed to get app title from Tauri:', error);
+        throw this.makeDesktopStorageError('앱 제목 로드', error);
       }
     }
+
+    this.assertDesktopStorageReady('앱 제목 로드');
 
     // Fallback to localStorage
     return localStorage.getItem('app-title');
@@ -255,8 +321,11 @@ class TauriStorage {
         return;
       } catch (error) {
         console.error('Failed to save app title to Tauri:', error);
+        throw this.makeDesktopStorageError('앱 제목 저장', error);
       }
     }
+
+    this.assertDesktopStorageReady('앱 제목 저장');
 
     // Fallback to localStorage
     localStorage.setItem('app-title', title);
@@ -280,7 +349,7 @@ class TauriStorage {
 
     const buffer = await file.arrayBuffer();
     const bytes = Array.from(new Uint8Array(buffer));
-    return await invoke<DatabaseImportSummary>('import_memoji_database', { dbBytes: bytes });
+    return await invoke('import_memoji_database', { dbBytes: bytes }) as DatabaseImportSummary;
   }
 }
 

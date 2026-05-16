@@ -3,19 +3,18 @@ import { createPortal } from 'react-dom';
 import { Crepe } from '@milkdown/crepe';
 import { commandsCtx, editorViewCtx } from '@milkdown/kit/core';
 import {
-  bulletListSchema,
   emphasisSchema,
   headingSchema,
   inlineCodeSchema,
   liftListItemCommand,
-  orderedListSchema,
   paragraphSchema,
   setBlockTypeCommand,
   sinkListItemCommand,
   strongSchema,
   toggleEmphasisCommand,
   toggleStrongCommand,
-  wrapInBlockTypeCommand,
+  wrapInBulletListCommand,
+  wrapInOrderedListCommand,
 } from '@milkdown/kit/preset/commonmark';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { strikethroughSchema, toggleStrikethroughCommand } from '@milkdown/kit/preset/gfm';
@@ -467,6 +466,7 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [emojiPage, setEmojiPage] = useState(0);
   const [emojiPopoverStyle, setEmojiPopoverStyle] = useState<CSSProperties>({});
+  const [editorError, setEditorError] = useState<string | null>(null);
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -587,23 +587,29 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
     valueRef.current = markdown;
     if (!crepe) return;
 
-    preserveEditorViewport(() => {
-      crepe.editor.action((ctx) => {
-        const view = ctx.get(editorViewCtx);
-        if (!view) return;
-        const previousSelection = view.state.selection;
-        replaceAll(markdown)(ctx);
+    try {
+      preserveEditorViewport(() => {
+        crepe.editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          if (!view) return;
+          const previousSelection = view.state.selection;
+          replaceAll(markdown)(ctx);
 
-        const nextView = ctx.get(editorViewCtx);
-        if (!nextView) return;
-        const maxPosition = nextView.state.doc.content.size;
-        const from = Math.min(Math.max(previousSelection.from, 0), maxPosition);
-        const transaction = nextView.state.tr.setSelection(
-          TextSelection.near(nextView.state.doc.resolve(from), 1)
-        );
-        nextView.dispatch(transaction);
+          const nextView = ctx.get(editorViewCtx);
+          if (!nextView) return;
+          const maxPosition = nextView.state.doc.content.size;
+          const from = Math.min(Math.max(previousSelection.from, 0), maxPosition);
+          const transaction = nextView.state.tr.setSelection(
+            TextSelection.near(nextView.state.doc.resolve(from), 1)
+          );
+          nextView.dispatch(transaction);
+        });
       });
-    });
+      setEditorError(null);
+    } catch (error) {
+      console.error('Milkdown editor failed to sync markdown:', error);
+      setEditorError(error instanceof Error ? error.message : String(error));
+    }
   }, [preserveEditorViewport]);
 
   const commitEditorMarkdown = useCallback((markdown: string) => {
@@ -696,12 +702,11 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
     let didApply = false;
     crepe.editor.action((ctx) => {
       const commands = ctx.get(commandsCtx);
-      const listType = kind === 'bullet'
-        ? bulletListSchema.type(ctx)
-        : orderedListSchema.type(ctx);
 
       commands.call(setBlockTypeCommand.key, { nodeType: paragraphSchema.type(ctx) });
-      didApply = Boolean(commands.call(wrapInBlockTypeCommand.key, { nodeType: listType }));
+      didApply = Boolean(commands.call(
+        kind === 'bullet' ? wrapInBulletListCommand.key : wrapInOrderedListCommand.key
+      ));
       if (didApply) ctx.get(editorViewCtx).focus();
     });
 
@@ -713,6 +718,7 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
     if (!rootRef.current) return;
 
     let cancelled = false;
+    setEditorError(null);
 
     const crepe = new Crepe({
       root: rootRef.current,
@@ -769,6 +775,9 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
       setToolbarTarget(nextToolbarTarget);
     }).catch((error) => {
       console.error('Milkdown editor failed to mount:', error);
+      if (!cancelled) {
+        setEditorError(error instanceof Error ? error.message : String(error));
+      }
     });
 
     return () => {
@@ -1158,6 +1167,22 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
     }
     setIsEmojiPickerOpen((open) => !open);
   };
+
+  if (editorError) {
+    return (
+      <div className="flex h-full min-h-0 flex-col bg-background">
+        <div className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+          편집기를 열지 못해 원문 편집으로 전환했습니다. {editorError}
+        </div>
+        <textarea
+          value={value}
+          onChange={(event) => onChangeRef.current(event.target.value)}
+          className="min-h-0 flex-1 resize-none border-none bg-transparent p-6 font-mono text-sm leading-6 outline-none custom-scrollbar"
+          placeholder={placeholder}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="memoji-milkdown" style={editorStyle}>

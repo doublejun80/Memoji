@@ -49,6 +49,7 @@ function AppContent() {
   const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true); // 좌측 패널 상태
   const [appTitle, setAppTitle] = useState<string>('Memoji');
   const [saveTriggered, setSaveTriggered] = useState(0); // 저장 트리거 카운터
+  const [startupError, setStartupError] = useState<string | null>(null);
   const { isFocusMode } = useFocusMode();
 
   // 단축키 설정 마이그레이션 (이전 원문 전환 단축키 id 유지)
@@ -244,6 +245,7 @@ function AppContent() {
         const loadedPages = await tauriStorage.getPages();
         const savedPages = loadedPages.map(normalizePage);
 
+        setStartupError(null);
         setPages(savedPages);
 
         // Load app title from storage
@@ -262,6 +264,7 @@ function AppContent() {
         }
       } catch (error) {
         console.error('Failed to initialize app:', error);
+        setStartupError(error instanceof Error ? error.message : String(error));
       }
     };
 
@@ -313,10 +316,11 @@ function AppContent() {
 
     const normalizedProjectParentId = projectParentId || null;
     const pageDate = dateKey ? parseDateKey(dateKey) : new Date();
+    const siblingPages = dateKey !== null && normalizedProjectParentId === null
+      ? pages.filter(p => p.type !== 'folder' && getPageDateKey(p) === dateKey)
+      : pages.filter(p => isProjectIndexPage(p) && getProjectParentId(p) === normalizedProjectParentId);
     const maxOrder = Math.max(
-      ...pages
-        .filter(p => getProjectParentId(p) === normalizedProjectParentId)
-        .map(p => p.order),
+      ...siblingPages.map(p => p.order),
       -1
     );
 
@@ -409,9 +413,8 @@ function AppContent() {
   };
 
   const handlePageDelete = async (pageId: string) => {
-    // Delete page and all its children
     const pagesToDelete = getAllChildPages(pageId, pages);
-    await Promise.all(pagesToDelete.map(id => tauriStorage.deletePage(id)));
+    await tauriStorage.deletePage(pageId);
 
     const updatedPages = pages.filter(page => !pagesToDelete.includes(page.id));
     setPages(updatedPages);
@@ -499,6 +502,7 @@ function AppContent() {
       parentId: normalizedNextParentId,
       projectParentId: normalizedNextParentId,
       projectIndex: true,
+      dateKey: null,
       order: maxOrder + 1,
       updatedAt: toLocalISOString(new Date())
     });
@@ -583,6 +587,12 @@ function AppContent() {
           appTitle={appTitle}
           onExport={handleExport}
         />
+      )}
+
+      {startupError && (
+        <div className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+          저장소를 열지 못했습니다. {startupError}
+        </div>
       )}
 
       <div className="flex flex-1 overflow-hidden min-h-0">
