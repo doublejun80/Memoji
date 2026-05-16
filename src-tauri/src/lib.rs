@@ -471,24 +471,25 @@ async fn local_ai_generate_mtp_stream(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default();
+    let builder = tauri::Builder::default();
 
-    // ⭐ Single Instance 플러그인 - 가장 먼저 등록해야 함!
-    // Windows/Linux에서 앱 다중 실행 방지
-    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-    {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            // 이미 실행 중인 인스턴스가 있을 때 실행되는 콜백
-            log::info!("🔔 새 인스턴스 실행 시도 감지 - 기존 창 포커스");
+    // Release builds keep single-instance behavior. In dev, a stale app process can outlive
+    // Vite and leave the WebView on a blank dev URL, so keep debug launches independent.
+    #[cfg(all(
+        not(debug_assertions),
+        any(target_os = "macos", target_os = "windows", target_os = "linux")
+    ))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        // 이미 실행 중인 인스턴스가 있을 때 실행되는 콜백
+        log::info!("🔔 새 인스턴스 실행 시도 감지 - 기존 창 포커스");
 
-            // 기존 창을 포커스
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_focus();
-                let _ = window.unminimize();
-                log::info!("✅ 기존 창 포커스 완료");
-            }
-        }));
-    }
+        // 기존 창을 포커스
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.set_focus();
+            let _ = window.unminimize();
+            log::info!("✅ 기존 창 포커스 완료");
+        }
+    }));
 
     builder
         .setup(|app| {
