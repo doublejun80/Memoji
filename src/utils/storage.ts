@@ -61,9 +61,16 @@ export const storage = {
     localStorage.setItem(PAGES_KEY, JSON.stringify(filteredPages));
   },
 
-  // 기존 블록 데이터 정리 (마이그레이션)
   cleanupBlockData(): void {
-    localStorage.removeItem('blocknote-blocks');
+    const legacyBlocks = localStorage.getItem('blocknote-blocks');
+    if (!legacyBlocks || localStorage.getItem('memoji-legacy-blocknote-blocks-backup')) return;
+
+    localStorage.setItem('memoji-legacy-blocknote-blocks-backup', JSON.stringify({
+      createdAt: new Date().toISOString(),
+      entries: {
+        'blocknote-blocks': legacyBlocks,
+      },
+    }));
   },
 
   // Utility

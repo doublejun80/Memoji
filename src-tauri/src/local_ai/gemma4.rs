@@ -15,6 +15,8 @@ use std::fs::File;
 
 const DEFAULT_ROPE_FREQUENCY: f32 = 1_000_000.;
 const DEFAULT_ROPE_FREQUENCY_SLIDING: f32 = 10_000.;
+const MIN_PROMPT_TOKENS_FOR_GENERATION: usize = 64;
+const PROMPT_RESPONSE_SAFETY_TOKENS: usize = 8;
 
 #[derive(Debug)]
 pub struct Gemma4Runtime {
@@ -112,22 +114,19 @@ impl Gemma4Runtime {
         F: FnMut(String, usize) -> Result<(), LocalAiError>,
     {
         let prompt = build_prompt(&request);
-        let mut prompt_tokens = self.tokenizer.encode(&prompt, false)?;
+        let prompt_tokens = self.tokenizer.encode(&prompt, false)?;
         if prompt_tokens.is_empty() {
             return Err(LocalAiError::GenerateFailed(
                 "prompt did not produce any tokens".to_string(),
             ));
         }
 
-        if prompt_tokens.len() > self.context_size {
-            let start = prompt_tokens.len() - self.context_size;
-            prompt_tokens = prompt_tokens[start..].to_vec();
-        }
-
+        let (prompt_tokens, max_new_tokens) = trim_prompt_tokens_for_generation(
+            prompt_tokens,
+            self.context_size,
+            sampling.max_new_tokens,
+        );
         let prompt_token_count = prompt_tokens.len();
-        let max_new_tokens = sampling
-            .max_new_tokens
-            .min(self.context_size.saturating_sub(prompt_tokens.len()).max(1));
         let mut logits_processor = LogitsProcessor::new(
             42,
             Some(sampling.temperature as f64),
@@ -921,6 +920,34 @@ fn build_prompt(request: &LocalAiGenerateRequest) -> String {
     )
 }
 
+fn trim_prompt_tokens_for_generation(
+    prompt_tokens: Vec<u32>,
+    context_size: usize,
+    requested_max_new_tokens: usize,
+) -> (Vec<u32>, usize) {
+    let context_size = context_size.max(1);
+    let max_response_tokens = requested_max_new_tokens.max(1);
+    let reserved_response_tokens = max_response_tokens.min(
+        context_size
+            .saturating_sub(MIN_PROMPT_TOKENS_FOR_GENERATION)
+            .max(1),
+    );
+    let prompt_budget = context_size
+        .saturating_sub(reserved_response_tokens)
+        .saturating_sub(PROMPT_RESPONSE_SAFETY_TOKENS)
+        .max(1);
+
+    let prompt_tokens = if prompt_tokens.len() > prompt_budget {
+        prompt_tokens[prompt_tokens.len() - prompt_budget..].to_vec()
+    } else {
+        prompt_tokens
+    };
+    let available_response_tokens = context_size.saturating_sub(prompt_tokens.len()).max(1);
+    let max_new_tokens = reserved_response_tokens.min(available_response_tokens);
+
+    (prompt_tokens, max_new_tokens)
+}
+
 fn metadata_string(content: &Content, key: &str) -> Option<String> {
     content
         .metadata
@@ -1119,6 +1146,28 @@ mod tests {
         assert!((values[31] - expected_values[95]).abs() < 1e-4);
         assert!((values[32] - expected_values[0]).abs() < 1e-4);
         assert!((values[63] - expected_values[31]).abs() < 1e-4);
+    }
+
+    #[test]
+    fn trims_long_prompts_while_reserving_response_budget() {
+        let prompt_tokens = (0..3000).collect::<Vec<u32>>();
+        let (trimmed, max_new_tokens) = trim_prompt_tokens_for_generation(prompt_tokens, 2048, 96);
+
+        assert_eq!(trimmed.len(), 2048 - 96 - PROMPT_RESPONSE_SAFETY_TOKENS);
+        assert_eq!(max_new_tokens, 96);
+        assert_eq!(trimmed.first().copied(), Some(1056));
+    }
+
+    #[test]
+    fn keeps_minimum_prompt_room_when_requested_response_is_huge() {
+        let prompt_tokens = (0..3000).collect::<Vec<u32>>();
+        let (trimmed, max_new_tokens) = trim_prompt_tokens_for_generation(prompt_tokens, 512, 2048);
+
+        assert_eq!(
+            trimmed.len(),
+            MIN_PROMPT_TOKENS_FOR_GENERATION - PROMPT_RESPONSE_SAFETY_TOKENS
+        );
+        assert_eq!(max_new_tokens, 448);
     }
 
     #[test]

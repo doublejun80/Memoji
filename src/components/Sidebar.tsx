@@ -19,10 +19,16 @@ import {
   CalendarDays,
   ChevronDown,
   ChevronRight,
-  Edit2,
+  FilePlus2,
+  FileText,
+  FolderClosed,
+  FolderInput,
+  FolderOpen,
+  FolderOutput,
   FolderPlus,
   FolderTree,
   MoreHorizontal,
+  PencilLine,
   Plus,
   Trash2
 } from 'lucide-react';
@@ -33,6 +39,11 @@ import { getProjectIndexPages, getProjectParentId } from '../utils/pageModel';
 const EMOJI_PALETTE = ['📝', '📄', '📌', '✅', '💡', '📚', '📅', '💼', '🚀', '⭐', '🔥', '🎯', '🔎', '🧠', '🛠️', '📊', '🔐', '🏠', '📁', '🙂'];
 const INDEX_ITEM_ROW_CLASS = 'group flex items-center gap-1 rounded px-1 py-2 hover:bg-accent';
 const INDEX_ITEM_BUTTON_CLASS = 'flex min-w-0 flex-1 items-center gap-2 text-left';
+const ACTION_MENU_CLASS = 'absolute right-0 top-7 z-50 flex items-center gap-1 rounded-lg border border-border bg-popover p-1.5 shadow-lg';
+const ACTION_BUTTON_CLASS = 'inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground [&>svg]:block [&>svg]:shrink-0';
+const ACTION_BUTTON_DISABLED_CLASS = 'inline-flex h-7 w-7 flex-shrink-0 cursor-not-allowed items-center justify-center rounded-md p-0 text-muted-foreground opacity-30 [&>svg]:block [&>svg]:shrink-0';
+const ACTION_DIVIDER_CLASS = 'hidden';
+const ACTION_ICON_CLASS = 'size-[15px] stroke-[2.2]';
 const INDEX_LIST_STYLE: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
@@ -40,6 +51,23 @@ const INDEX_LIST_STYLE: React.CSSProperties = {
 };
 const INDEX_ITEM_STYLE: React.CSSProperties = {
   minHeight: '42px'
+};
+
+type ActionGlyphName = 'edit' | 'page-add' | 'folder-add' | 'folder-in' | 'folder-out' | 'up' | 'down' | 'delete';
+
+const ActionGlyph: React.FC<{ name: ActionGlyphName }> = ({ name }) => {
+  const icons = {
+    edit: PencilLine,
+    'page-add': FilePlus2,
+    'folder-add': FolderPlus,
+    'folder-in': FolderInput,
+    'folder-out': FolderOutput,
+    up: ArrowUp,
+    down: ArrowDown,
+    delete: Trash2,
+  };
+  const Icon = icons[name];
+  return <Icon className={ACTION_ICON_CLASS} aria-hidden="true" />;
 };
 
 interface SidebarProps {
@@ -53,6 +81,7 @@ interface SidebarProps {
   onPageUpdate: (page: Page) => void;
   onPageDelete: (pageId: string) => void;
   onPageMove: (pageId: string, direction: 'up' | 'down') => void;
+  onPageParentChange: (pageId: string, parentId: string | null) => void;
   onDateSelect: (date: Date) => void;
   selectedDate: Date;
   datesWithPages: string[];
@@ -73,6 +102,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onPageUpdate,
   onPageDelete,
   onPageMove,
+  onPageParentChange,
   onDateSelect,
   selectedDate,
   datesWithPages
@@ -84,6 +114,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [emojiMenuPage, setEmojiMenuPage] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState<SidebarIndex>('daily');
   const [isWideLayout, setIsWideLayout] = useState(false);
+  const [draggedPageId, setDraggedPageId] = useState<string | null>(null);
+  const [dropTargetPageId, setDropTargetPageId] = useState<string | null>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
 
   const projectPages = useMemo(() => getProjectIndexPages(pages), [pages]);
@@ -146,6 +178,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setEmojiMenuPage(null);
   };
 
+  const closeFloatingControls = (pageId: string) => {
+    setOpenMenu(currentOpenMenu => (
+      currentOpenMenu === pageId ? null : currentOpenMenu
+    ));
+    setEmojiMenuPage(currentEmojiMenuPage => (
+      currentEmojiMenuPage === pageId ? null : currentEmojiMenuPage
+    ));
+  };
+
   const updatePageIcon = (page: Page, icon: string) => {
     onPageUpdate({
       ...page,
@@ -158,6 +199,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const getProjectChildren = (parentId: string | null) => (
     projectPages.filter(page => getProjectParentId(page) === parentId)
   );
+
+  const isDescendantOf = (candidateId: string, ancestorId: string): boolean => {
+    const candidatePage = projectPages.find(page => page.id === candidateId);
+    let cursor = candidatePage ? getProjectParentId(candidatePage) : null;
+    while (cursor) {
+      if (cursor === ancestorId) return true;
+      const parentPage = projectPages.find(page => page.id === cursor);
+      cursor = parentPage ? getProjectParentId(parentPage) : null;
+    }
+    return false;
+  };
+
+  const canDropOnFolder = (targetPage: Page) => {
+    if (!draggedPageId || targetPage.type !== 'folder' || draggedPageId === targetPage.id) return false;
+    return !isDescendantOf(targetPage.id, draggedPageId);
+  };
+
+  const moveIntoFolder = (pageId: string, folderId: string) => {
+    onPageParentChange(pageId, folderId);
+    setExpandedPages(prev => new Set(prev).add(folderId));
+    setOpenMenu(null);
+  };
+
+  const renderIndexIcon = (page: Page, isExpandedFolder = false) => {
+    const hasCustomIcon = !!page.icon && !['📄', '📁'].includes(page.icon);
+    if (hasCustomIcon) {
+      return <span className="text-xs leading-none">{page.icon}</span>;
+    }
+
+    if (page.type === 'folder') {
+      const Icon = isExpandedFolder ? FolderOpen : FolderClosed;
+      return <Icon className="h-3.5 w-3.5 text-muted-foreground" strokeWidth={1.8} />;
+    }
+
+    return <FileText className="h-3.5 w-3.5 text-muted-foreground" strokeWidth={1.8} />;
+  };
 
   const renderEmojiButton = (page: Page) => (
     <span className="relative flex-shrink-0">
@@ -172,7 +249,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           setOpenMenu(null);
         }}
       >
-        {page.icon || '📝'}
+        {renderIndexIcon(page, expandedPages.has(page.id))}
       </button>
       {emojiMenuPage === page.id && (
         <div
@@ -247,13 +324,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   key={page.id}
                   className={`${INDEX_ITEM_ROW_CLASS} ${isSelected ? 'bg-accent' : ''}`}
                   style={INDEX_ITEM_STYLE}
+                  onMouseLeave={() => closeFloatingControls(page.id)}
                 >
                   <div
                     className={`${INDEX_ITEM_BUTTON_CLASS} cursor-pointer`}
                     onClick={() => onPageSelect(page)}
                   >
                     <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center text-xs">
-                      {page.icon || '📄'}
+                      {renderIndexIcon(page)}
                     </span>
                     {isEditing ? (
                       <Input
@@ -283,7 +361,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       variant="ghost"
                       size="sm"
                       className="flex h-6 w-6 items-center justify-center p-1 hover:bg-accent"
-                      onClick={(event) => handleMenuClick(page.id, event)}
+                      onClick={(event: React.MouseEvent) => handleMenuClick(page.id, event)}
                       title="페이지 메뉴"
                       aria-label="페이지 메뉴"
                     >
@@ -292,13 +370,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                     {isMenuOpen && (
                       <div
-                        className="absolute right-0 top-7 z-50 flex items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-2 shadow-lg"
+                        className={ACTION_MENU_CLASS}
                         onMouseDown={(event) => {
                           event.stopPropagation();
                         }}
                       >
                         <button
-                          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-sm p-0 transition-colors hover:bg-accent hover:text-accent-foreground"
+                          className={ACTION_BUTTON_CLASS}
                           onMouseDown={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
@@ -307,20 +385,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           title="수정"
                           aria-label="수정"
                         >
-                          <Edit2 className="h-4 w-4" strokeWidth={1.35} />
+                          <ActionGlyph name="edit" />
                         </button>
 
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
                             <button
-                              className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-sm p-0 transition-colors hover:bg-accent hover:text-destructive"
+                              className={`${ACTION_BUTTON_CLASS} hover:text-destructive`}
                               onMouseDown={(event) => {
                                 event.stopPropagation();
                               }}
                               title="삭제"
                               aria-label="삭제"
                             >
-                              <Trash2 className="h-4 w-4" strokeWidth={1.35} />
+                              <ActionGlyph name="delete" />
                             </button>
                           </AlertDialogTrigger>
                           <AlertDialogContent>
@@ -377,21 +455,58 @@ export const Sidebar: React.FC<SidebarProps> = ({
       const isMenuOpen = openMenu === page.id;
       const canMoveUp = index > 0;
       const canMoveDown = index < children.length - 1;
+      const previousSiblingFolder = [...children]
+        .slice(0, index)
+        .reverse()
+        .find(sibling => sibling.type === 'folder') || null;
+      const parentIdForPage = getProjectParentId(page);
+      const parentPage = parentIdForPage ? pages.find(candidate => candidate.id === parentIdForPage) : null;
+      const canMoveIntoPreviousFolder = !!previousSiblingFolder && previousSiblingFolder.id !== page.id;
+      const canMoveOut = !!parentIdForPage;
 
       return (
         <div key={page.id} className="relative">
           <div
             className={`${INDEX_ITEM_ROW_CLASS} ${
               isSelected ? 'bg-accent' : ''
-            }`}
+            } ${dropTargetPageId === page.id ? 'ring-1 ring-primary/60' : ''}`}
             style={{ ...INDEX_ITEM_STYLE, paddingLeft: `${6 + level * 12}px` }}
+            onMouseLeave={() => closeFloatingControls(page.id)}
+            draggable
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = 'move';
+              event.dataTransfer.setData('text/plain', page.id);
+              setDraggedPageId(page.id);
+              setOpenMenu(null);
+            }}
+            onDragEnd={() => {
+              setDraggedPageId(null);
+              setDropTargetPageId(null);
+            }}
+            onDragOver={(event) => {
+              if (!canDropOnFolder(page)) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'move';
+              setDropTargetPageId(page.id);
+            }}
+            onDragLeave={() => {
+              if (dropTargetPageId === page.id) setDropTargetPageId(null);
+            }}
+            onDrop={(event) => {
+              const droppedPageId = event.dataTransfer.getData('text/plain') || draggedPageId;
+              if (!droppedPageId || !canDropOnFolder(page)) return;
+              event.preventDefault();
+              moveIntoFolder(droppedPageId, page.id);
+              setDraggedPageId(null);
+              setDropTargetPageId(null);
+            }}
           >
             {hasChildren ? (
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-4 w-4 p-0 hover:bg-transparent"
-                onClick={(event) => {
+                onClick={(event: React.MouseEvent) => {
                   event.stopPropagation();
                   toggleExpanded(page.id);
                 }}
@@ -446,7 +561,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 variant="ghost"
                 size="sm"
                 className="flex h-6 w-6 items-center justify-center p-1 hover:bg-accent"
-                onClick={(event) => handleMenuClick(page.id, event)}
+                onClick={(event: React.MouseEvent) => handleMenuClick(page.id, event)}
                 title="페이지 메뉴"
                 aria-label="페이지 메뉴"
               >
@@ -455,13 +570,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               {isMenuOpen && (
                 <div
-                  className="absolute right-0 top-7 z-50 flex items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-2 shadow-lg"
+                  className={ACTION_MENU_CLASS}
                   onMouseDown={(event) => {
                     event.stopPropagation();
                   }}
                 >
                   <button
-                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-sm p-0 transition-colors hover:bg-accent hover:text-accent-foreground"
+                    className={ACTION_BUTTON_CLASS}
                     onMouseDown={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
@@ -470,11 +585,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     title="수정"
                     aria-label="수정"
                   >
-                    <Edit2 className="h-4 w-4" strokeWidth={1.35} />
+                    <ActionGlyph name="edit" />
                   </button>
 
                   <button
-                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-sm p-0 transition-colors hover:bg-accent hover:text-accent-foreground"
+                    className={ACTION_BUTTON_CLASS}
                     onMouseDown={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
@@ -485,11 +600,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     title="하위 페이지 추가"
                     aria-label="하위 페이지 추가"
                   >
-                    <Plus className="h-4 w-4" strokeWidth={1.35} />
+                    <ActionGlyph name="page-add" />
                   </button>
 
                   <button
-                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-sm p-0 transition-colors hover:bg-accent hover:text-accent-foreground"
+                    className={ACTION_BUTTON_CLASS}
                     onMouseDown={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
@@ -500,15 +615,48 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     title="하위 폴더 추가"
                     aria-label="하위 폴더 추가"
                   >
-                    <FolderPlus className="h-4 w-4" strokeWidth={1.35} />
+                    <ActionGlyph name="folder-add" />
                   </button>
 
-                  <div className="mx-0.5 h-5 w-px flex-shrink-0 bg-border" />
+                  <div className={ACTION_DIVIDER_CLASS} />
 
                   <button
-                    className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-sm p-0 transition-colors ${
-                      canMoveUp ? 'hover:bg-accent hover:text-accent-foreground' : 'cursor-not-allowed opacity-30'
-                    }`}
+                    className={canMoveIntoPreviousFolder ? ACTION_BUTTON_CLASS : ACTION_BUTTON_DISABLED_CLASS}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (previousSiblingFolder) {
+                        moveIntoFolder(page.id, previousSiblingFolder.id);
+                      }
+                    }}
+                    disabled={!canMoveIntoPreviousFolder}
+                    title={previousSiblingFolder ? `'${previousSiblingFolder.title}' 안으로 이동` : '앞쪽 폴더 안으로 이동'}
+                    aria-label="앞쪽 폴더 안으로 이동"
+                  >
+                    <ActionGlyph name="folder-in" />
+                  </button>
+
+                  <button
+                    className={canMoveOut ? ACTION_BUTTON_CLASS : ACTION_BUTTON_DISABLED_CLASS}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (canMoveOut) {
+                        onPageParentChange(page.id, parentPage ? getProjectParentId(parentPage) : null);
+                        setOpenMenu(null);
+                      }
+                    }}
+                    disabled={!canMoveOut}
+                    title="상위 폴더로 빼기"
+                    aria-label="상위 폴더로 빼기"
+                  >
+                    <ActionGlyph name="folder-out" />
+                  </button>
+
+                  <div className={ACTION_DIVIDER_CLASS} />
+
+                  <button
+                    className={canMoveUp ? ACTION_BUTTON_CLASS : ACTION_BUTTON_DISABLED_CLASS}
                     onMouseDown={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
@@ -521,13 +669,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     title="위로 이동"
                     aria-label="위로 이동"
                   >
-                    <ArrowUp className="h-4 w-4" strokeWidth={1.55} />
+                    <ActionGlyph name="up" />
                   </button>
 
                   <button
-                    className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-sm p-0 transition-colors ${
-                      canMoveDown ? 'hover:bg-accent hover:text-accent-foreground' : 'cursor-not-allowed opacity-30'
-                    }`}
+                    className={canMoveDown ? ACTION_BUTTON_CLASS : ACTION_BUTTON_DISABLED_CLASS}
                     onMouseDown={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
@@ -540,22 +686,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     title="아래로 이동"
                     aria-label="아래로 이동"
                   >
-                    <ArrowDown className="h-4 w-4" strokeWidth={1.55} />
+                    <ActionGlyph name="down" />
                   </button>
 
-                  <div className="mx-0.5 h-5 w-px flex-shrink-0 bg-border" />
+                  <div className={ACTION_DIVIDER_CLASS} />
 
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
                       <button
-                        className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-sm p-0 transition-colors hover:bg-accent hover:text-destructive"
+                        className={`${ACTION_BUTTON_CLASS} hover:text-destructive`}
                         onMouseDown={(event) => {
                           event.stopPropagation();
                         }}
                         title="삭제"
                         aria-label="삭제"
                       >
-                        <Trash2 className="h-4 w-4" strokeWidth={1.35} />
+                        <ActionGlyph name="delete" />
                       </button>
                     </AlertDialogTrigger>
                     <AlertDialogContent>

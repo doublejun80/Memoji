@@ -1,6 +1,13 @@
 import { Page } from '../types';
 import { normalizePage } from './pageModel';
 
+export interface DatabaseImportSummary {
+  imported: number;
+  duplicated: number;
+  skipped: number;
+  backup_path: string;
+}
+
 // Dynamic import for Tauri API to handle environments where it's not available
 let invoke: any = null;
 
@@ -197,13 +204,20 @@ class TauriStorage {
   }
 
   cleanupBlockData(): void {
-    // 기존 블록 데이터 정리 (마이그레이션용)
-    const keys = Object.keys(localStorage);
-    keys.forEach(key => {
-      if (key.startsWith('blocknote-blocks-') || key === 'blocknote-blocks') {
-        localStorage.removeItem(key);
-      }
-    });
+    const legacyEntries = Object.keys(localStorage)
+      .filter(key => key.startsWith('blocknote-blocks-') || key === 'blocknote-blocks')
+      .map(key => [key, localStorage.getItem(key)] as const)
+      .filter((entry): entry is readonly [string, string] => entry[1] !== null);
+
+    if (legacyEntries.length === 0) return;
+
+    const backupKey = 'memoji-legacy-blocknote-blocks-backup';
+    if (!localStorage.getItem(backupKey)) {
+      localStorage.setItem(backupKey, JSON.stringify({
+        createdAt: new Date().toISOString(),
+        entries: Object.fromEntries(legacyEntries),
+      }));
+    }
   }
 
   async getAppDataDir(): Promise<string | null> {
@@ -246,6 +260,27 @@ class TauriStorage {
 
     // Fallback to localStorage
     localStorage.setItem('app-title', title);
+  }
+
+  async importDatabaseFile(file: File): Promise<DatabaseImportSummary> {
+    await this.init();
+
+    if (!this.isInitialized || !this.isTauriAvailable || !invoke) {
+      throw new Error('DB 가져오기는 데스크톱 앱에서만 사용할 수 있습니다.');
+    }
+
+    if (!file.name.toLowerCase().endsWith('.db')) {
+      throw new Error('memoji.db 파일을 선택해주세요.');
+    }
+
+    const maxImportBytes = 256 * 1024 * 1024;
+    if (file.size > maxImportBytes) {
+      throw new Error('DB 파일이 너무 큽니다. data 폴더에서 직접 백업 후 교체해주세요.');
+    }
+
+    const buffer = await file.arrayBuffer();
+    const bytes = Array.from(new Uint8Array(buffer));
+    return await invoke<DatabaseImportSummary>('import_memoji_database', { dbBytes: bytes });
   }
 }
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { MarkdownEditor } from './components/MarkdownEditor';
 import { TopBar } from './components/TopBar';
@@ -13,7 +13,7 @@ import { tauriStorage } from './utils/tauriStorage';
 import { logEnvironmentInfo } from './utils/environment';
 import { formatDateKey, parseDateKey, toLocalISOString } from './utils/dateUtils';
 import { pageWithMarkdownMetadata } from './utils/markdownMetadata';
-import { getPageDateKey, getPagesForDate, getProjectParentId, normalizePage } from './utils/pageModel';
+import { getPageDateKey, getPagesForDate, getProjectParentId, isProjectIndexPage, normalizePage } from './utils/pageModel';
 import { Toaster } from './components/ui/sonner';
 
 interface CreatePageOptions {
@@ -131,6 +131,22 @@ function AppContent() {
 
   const selectedDateKey = formatDateKey(selectedDate);
 
+  const reloadPagesFromStorage = useCallback(async () => {
+    const loadedPages = await tauriStorage.getPages();
+    const savedPages = loadedPages.map(normalizePage);
+    setPages(savedPages);
+    setCurrentPage(previousPage => {
+      if (previousPage) {
+        const reloadedPage = savedPages.find(page => page.id === previousPage.id);
+        if (reloadedPage) return reloadedPage;
+      }
+
+      return getPagesForDate(savedPages, selectedDateKey)[0]
+        || savedPages.find(page => page.type === 'page')
+        || null;
+    });
+  }, [selectedDateKey]);
+
   // Get pages for selected date
   const getDailyPages = () => {
     return getPagesForDate(pages, selectedDateKey);
@@ -225,7 +241,8 @@ function AppContent() {
       tauriStorage.cleanupBlockData();
 
       try {
-        const savedPages = await tauriStorage.getPages();
+        const loadedPages = await tauriStorage.getPages();
+        const savedPages = loadedPages.map(normalizePage);
 
         setPages(savedPages);
 
@@ -385,9 +402,9 @@ function AppContent() {
       page.id === normalizedPage.id ? normalizedPage : page
     ));
 
-    if (currentPage?.id === normalizedPage.id) {
-      setCurrentPage(normalizedPage);
-    }
+    setCurrentPage(previousPage => (
+      previousPage?.id === normalizedPage.id ? normalizedPage : previousPage
+    ));
 
   };
 
@@ -412,7 +429,7 @@ function AppContent() {
 
     // Get siblings (pages with the same parent)
     const parentId = getProjectParentId(pageToMove);
-    const siblings = pages.filter(p => getProjectParentId(p) === parentId);
+    const siblings = pages.filter(p => isProjectIndexPage(p) && getProjectParentId(p) === parentId);
 
     // Sort siblings by order
     siblings.sort((a, b) => a.order - b.order);
@@ -455,6 +472,43 @@ function AppContent() {
 
     // Save all affected pages
     await Promise.all(updatedSiblings.map(page => tauriStorage.savePage(page)));
+  };
+
+  const handlePageParentChange = async (pageId: string, nextParentId: string | null) => {
+    const pageToMove = pages.find(page => page.id === pageId);
+    if (!pageToMove) return;
+
+    const normalizedNextParentId = nextParentId || null;
+    if (normalizedNextParentId === pageId) return;
+
+    let cursor = normalizedNextParentId;
+    while (cursor) {
+      if (cursor === pageId) return;
+      const parentPage = pages.find(page => page.id === cursor);
+      cursor = parentPage ? getProjectParentId(parentPage) : null;
+    }
+
+    const maxOrder = Math.max(
+      ...pages
+        .filter(page => page.id !== pageId && isProjectIndexPage(page) && getProjectParentId(page) === normalizedNextParentId)
+        .map(page => page.order),
+      -1
+    );
+    const updatedPage = normalizePage({
+      ...pageToMove,
+      parentId: normalizedNextParentId,
+      projectParentId: normalizedNextParentId,
+      projectIndex: true,
+      order: maxOrder + 1,
+      updatedAt: toLocalISOString(new Date())
+    });
+    const updatedPages = pages.map(page => page.id === pageId ? updatedPage : page);
+
+    setPages(updatedPages);
+    if (currentPage?.id === pageId) {
+      setCurrentPage(updatedPage);
+    }
+    await tauriStorage.savePage(updatedPage);
   };
 
   const getAllChildPages = (pageId: string, allPages: Page[]): string[] => {
@@ -549,6 +603,7 @@ function AppContent() {
               onPageUpdate={handlePageUpdate}
               onPageDelete={handlePageDelete}
               onPageMove={handlePageMove}
+              onPageParentChange={handlePageParentChange}
               onDateSelect={handleDateSelect}
               selectedDate={selectedDate}
               datesWithPages={getDatesWithPages()}
@@ -610,6 +665,7 @@ function AppContent() {
         onClose={() => setIsSettingsOpen(false)}
         appTitle={appTitle}
         onAppTitleChange={handleAppTitleChange}
+        onDataImported={reloadPagesFromStorage}
       />
 
       <Toaster />

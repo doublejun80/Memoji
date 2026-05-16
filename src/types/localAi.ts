@@ -18,6 +18,22 @@ export interface LocalAiModelInfo {
   contextSize: number;
 }
 
+export interface LocalAiRuntimeInfo {
+  os: string;
+  arch: string;
+  availableParallelism: number;
+  buildProfile: string;
+}
+
+export interface LocalAiGenerationStats {
+  elapsedMs: number;
+  promptTokens: number;
+  generatedTokens: number;
+  tokensPerSecond: number;
+  maxNewTokens: number;
+  mode: string;
+}
+
 export interface LocalAiStatus {
   state: LocalAiLoadState;
   modelPath: string;
@@ -35,6 +51,11 @@ export interface LocalAiStatus {
   compiledFeatures: Record<string, boolean>;
   avx512RuntimeReady: boolean;
   avx512Build: boolean;
+  runtimeInfo?: LocalAiRuntimeInfo;
+  modelFileSizeBytes?: number | null;
+  tokenizerFileSizeBytes?: number | null;
+  lastLoadMs?: number | null;
+  lastGeneration?: LocalAiGenerationStats | null;
 }
 
 export interface LocalAiGenerateRequest {
@@ -60,9 +81,40 @@ export interface LocalAiGenerateStreamChunk {
   finishReason?: string | null;
 }
 
+export interface LocalAiBenchmarkResult {
+  status: LocalAiStatus;
+  loadMs?: number | null;
+  cachedModel: boolean;
+  generateMs: number;
+  promptTokens: number;
+  generatedTokens: number;
+  tokensPerSecond: number;
+  speedLabel: string;
+  recommendation: string;
+}
+
+export interface LocalAiRuntimeConfig {
+  serverEnabled: boolean;
+  endpoint: string;
+  model: string;
+  draftModel?: string;
+}
+
+export interface LocalAiRuntimeConfigView extends LocalAiRuntimeConfig {
+  envConfigured: boolean;
+  envTakesPrecedence: boolean;
+}
+
+export interface LocalAiRuntimeTestResult {
+  ok: boolean;
+  message: string;
+  generatedTokens: number;
+  tokensPerSecond: number;
+}
+
 export const LOCAL_AI_MAX_NEW_TOKENS_MIN = 32;
-export const LOCAL_AI_MAX_NEW_TOKENS_MAX = 2048;
-export const LOCAL_AI_MAX_NEW_TOKENS_DEFAULT = 192;
+export const LOCAL_AI_MAX_NEW_TOKENS_MAX = 4096;
+export const LOCAL_AI_MAX_NEW_TOKENS_DEFAULT = 512;
 export const LOCAL_AI_MAX_NEW_TOKENS_STEP = 16;
 export const LOCAL_AI_MAX_NEW_TOKENS_STORAGE_KEY = 'memoji.localAi.maxNewTokens';
 export const LOCAL_AI_SETTINGS_CHANGED_EVENT = 'memoji-local-ai-settings-changed';
@@ -96,6 +148,29 @@ export const writeLocalAiMaxNewTokens = (value: number): number => {
   return nextValue;
 };
 
+export const formatLocalAiBytes = (bytes?: number | null): string => {
+  if (!bytes || !Number.isFinite(bytes)) return '-';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+};
+
+export const formatLocalAiSpeed = (tokensPerSecond?: number | null): string => {
+  if (!Number.isFinite(tokensPerSecond ?? NaN)) return '-';
+  return `${tokensPerSecond!.toFixed(2)} tok/s`;
+};
+
+export const localAiRuntimeLabel = (status?: LocalAiStatus | null): string => {
+  if (!status?.runtimeInfo) return '-';
+  const { os, arch, availableParallelism, buildProfile } = status.runtimeInfo;
+  return `${os}/${arch} · ${availableParallelism} threads · ${buildProfile}`;
+};
+
 export const localAiStateLabel = (state?: LocalAiLoadState): string => {
   switch (state) {
     case 'missing_model':
@@ -121,7 +196,7 @@ export const localAiStateHelp = (status?: LocalAiStatus | null): string => {
   if (!status) return '로컬 Gemma 상태를 확인하고 있습니다.';
   if (status.mtpConfigured) {
     return status.mtpDraftModel
-      ? `VDI MTP 서버로 스트리밍합니다. Drafter: ${status.mtpDraftModel}`
+      ? `VDI 내부 로컬 추론 서버로 스트리밍합니다. Draft 설정: ${status.mtpDraftModel}`
       : 'VDI 내부 로컬 추론 서버로 스트리밍합니다. Drafter는 서버 실행 옵션에서 설정됩니다.';
   }
 

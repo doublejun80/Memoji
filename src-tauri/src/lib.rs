@@ -1,11 +1,13 @@
 mod database;
 mod local_ai;
 
-use database::{Database, Page};
+use database::{Database, ImportDatabaseSummary, Page};
 use local_ai::{
-    LocalAiConfig, LocalAiGenerateRequest, LocalAiGenerateResponse, LocalAiGenerateStreamChunk,
-    LocalAiState, LocalAiStatus, MtpConfig,
+    LocalAiBenchmarkResult, LocalAiConfig, LocalAiGenerateRequest, LocalAiGenerateResponse,
+    LocalAiGenerateStreamChunk, LocalAiState, LocalAiStatus, MtpConfig, DEFAULT_MTP_MODEL,
 };
+use rusqlite::{Connection, OpenFlags};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, Window};
@@ -13,6 +15,125 @@ use tauri::{Emitter, Manager, State, Window};
 struct AppState {
     db: Mutex<Database>,
     local_ai: LocalAiState,
+}
+
+const LOCAL_AI_RUNTIME_CONFIG_KEY: &str = "local_ai_runtime_config";
+const DEFAULT_MTP_ENDPOINT: &str = "http://127.0.0.1:8080/v1/chat/completions";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalAiRuntimeConfig {
+    server_enabled: bool,
+    endpoint: String,
+    model: String,
+    draft_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalAiRuntimeConfigView {
+    server_enabled: bool,
+    endpoint: String,
+    model: String,
+    draft_model: Option<String>,
+    env_configured: bool,
+    env_takes_precedence: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalAiRuntimeTestResult {
+    ok: bool,
+    message: String,
+    generated_tokens: usize,
+    tokens_per_second: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct ImportDatabaseResult {
+    imported: usize,
+    duplicated: usize,
+    skipped: usize,
+    backup_path: String,
+}
+
+impl ImportDatabaseResult {
+    fn from_summary(summary: ImportDatabaseSummary, backup_path: PathBuf) -> Self {
+        Self {
+            imported: summary.imported,
+            duplicated: summary.duplicated,
+            skipped: summary.skipped,
+            backup_path: backup_path.to_string_lossy().to_string(),
+        }
+    }
+}
+
+impl Default for LocalAiRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            server_enabled: false,
+            endpoint: DEFAULT_MTP_ENDPOINT.to_string(),
+            model: DEFAULT_MTP_MODEL.to_string(),
+            draft_model: None,
+        }
+    }
+}
+
+impl LocalAiRuntimeConfig {
+    fn to_mtp_config(&self) -> Result<Option<MtpConfig>, String> {
+        if !self.server_enabled {
+            return Ok(None);
+        }
+
+        MtpConfig::from_values(
+            self.endpoint.clone(),
+            Some(self.model.clone()),
+            self.draft_model.clone(),
+            None,
+        )
+        .map(Some)
+    }
+
+    fn into_view(self) -> LocalAiRuntimeConfigView {
+        let env_configured = MtpConfig::from_env().is_some();
+        LocalAiRuntimeConfigView {
+            server_enabled: self.server_enabled,
+            endpoint: self.endpoint,
+            model: self.model,
+            draft_model: self.draft_model,
+            env_configured,
+            env_takes_precedence: env_configured,
+        }
+    }
+}
+
+fn read_runtime_config_from_db(db: &Database) -> Result<LocalAiRuntimeConfig, String> {
+    let Some(raw_config) = db
+        .get_setting(LOCAL_AI_RUNTIME_CONFIG_KEY)
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(LocalAiRuntimeConfig::default());
+    };
+
+    serde_json::from_str(&raw_config)
+        .map_err(|error| format!("AI runtime config is invalid: {error}"))
+}
+
+fn save_runtime_config_to_db(db: &Database, config: &LocalAiRuntimeConfig) -> Result<(), String> {
+    let raw_config = serde_json::to_string(config)
+        .map_err(|error| format!("Failed to serialize AI runtime config: {error}"))?;
+    db.save_setting(LOCAL_AI_RUNTIME_CONFIG_KEY, &raw_config)
+        .map_err(|error| error.to_string())
+}
+
+fn resolve_mtp_config(state: &State<AppState>) -> Result<Option<MtpConfig>, String> {
+    if let Some(config) = MtpConfig::from_env() {
+        return Ok(Some(config));
+    }
+
+    let db = state.db.lock().map_err(|error| error.to_string())?;
+    let config = read_runtime_config_from_db(&db)?;
+    config.to_mtp_config()
 }
 
 /// 데이터 저장 디렉토리 결정
@@ -128,13 +249,133 @@ fn open_data_folder() -> Result<(), String> {
 }
 
 #[tauri::command]
+fn import_memoji_database(
+    db_bytes: Vec<u8>,
+    state: State<AppState>,
+) -> Result<ImportDatabaseResult, String> {
+    const SQLITE_HEADER: &[u8] = b"SQLite format 3\0";
+    const MAX_IMPORT_BYTES: usize = 256 * 1024 * 1024;
+
+    if db_bytes.len() < SQLITE_HEADER.len() || !db_bytes.starts_with(SQLITE_HEADER) {
+        return Err("SQLite memoji.db 파일이 아닙니다.".to_string());
+    }
+
+    if db_bytes.len() > MAX_IMPORT_BYTES {
+        return Err("DB 파일이 너무 큽니다. data 폴더에서 직접 백업 후 교체해주세요.".to_string());
+    }
+
+    let data_dir = get_data_directory()?;
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|error| format!("Failed to create data directory: {}", error))?;
+
+    let now = chrono::Local::now();
+    let import_stamp = format!(
+        "{}-{:03}",
+        now.format("%Y%m%d-%H%M%S"),
+        now.timestamp_subsec_millis()
+    );
+    let import_dir = data_dir.join("imports");
+    std::fs::create_dir_all(&import_dir)
+        .map_err(|error| format!("Failed to create import directory: {}", error))?;
+    let import_path = import_dir.join(format!("memoji-import-{}.db", import_stamp));
+    std::fs::write(&import_path, db_bytes)
+        .map_err(|error| format!("Failed to stage imported database: {}", error))?;
+
+    let source = Connection::open_with_flags(&import_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|error| format!("Failed to open imported database: {}", error))?;
+
+    let backup_dir = data_dir.join("backups");
+    std::fs::create_dir_all(&backup_dir)
+        .map_err(|error| format!("Failed to create backup directory: {}", error))?;
+    let backup_path = backup_dir.join(format!("memoji-before-import-{}.db", import_stamp));
+
+    let import_summary_result: Result<ImportDatabaseSummary, String> = match state.db.lock() {
+        Ok(db) => db
+            .backup_to(&backup_path)
+            .and_then(|_| db.import_pages_from_connection(&source)),
+        Err(error) => Err(error.to_string()),
+    };
+
+    drop(source);
+    let _ = std::fs::remove_file(&import_path);
+    let import_summary = import_summary_result?;
+
+    Ok(ImportDatabaseResult::from_summary(
+        import_summary,
+        backup_path,
+    ))
+}
+
+#[tauri::command]
 fn local_ai_status(state: State<AppState>) -> Result<LocalAiStatus, String> {
-    Ok(state.local_ai.status())
+    let mtp_config = resolve_mtp_config(&state)?;
+    Ok(state.local_ai.status_with_mtp_config(mtp_config))
 }
 
 #[tauri::command]
 fn local_ai_load(state: State<AppState>) -> Result<LocalAiStatus, String> {
     state.local_ai.load().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn local_ai_get_runtime_config(state: State<AppState>) -> Result<LocalAiRuntimeConfigView, String> {
+    let db = state.db.lock().map_err(|error| error.to_string())?;
+    Ok(read_runtime_config_from_db(&db)?.into_view())
+}
+
+#[tauri::command]
+fn local_ai_save_runtime_config(
+    config: LocalAiRuntimeConfig,
+    state: State<AppState>,
+) -> Result<LocalAiRuntimeConfigView, String> {
+    config.to_mtp_config()?;
+    let db = state.db.lock().map_err(|error| error.to_string())?;
+    save_runtime_config_to_db(&db, &config)?;
+    Ok(config.into_view())
+}
+
+#[tauri::command]
+fn local_ai_benchmark(state: State<AppState>) -> Result<LocalAiBenchmarkResult, String> {
+    state
+        .local_ai
+        .benchmark()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn local_ai_test_runtime_config(
+    config: LocalAiRuntimeConfig,
+) -> Result<LocalAiRuntimeTestResult, String> {
+    let mtp_config = config
+        .to_mtp_config()?
+        .ok_or_else(|| "고속 로컬 서버를 먼저 켜세요.".to_string())?;
+    let started = std::time::Instant::now();
+    let response = local_ai::generate_mtp_stream(
+        mtp_config,
+        "runtime-config-test".to_string(),
+        LocalAiGenerateRequest {
+            prompt: "한국어로 한 문장만 짧게 인사해줘.".to_string(),
+            page_context: None,
+            max_new_tokens: Some(8),
+            temperature: Some(0.0),
+            top_p: Some(1.0),
+        },
+        |_chunk| Ok(()),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let elapsed_ms = started.elapsed().as_millis().max(1);
+    let tokens_per_second = response.generated_tokens as f64 / (elapsed_ms as f64 / 1000.0);
+
+    Ok(LocalAiRuntimeTestResult {
+        ok: true,
+        message: format!(
+            "연결 성공: {} chunks, {:.2} tok/s",
+            response.generated_tokens, tokens_per_second
+        ),
+        generated_tokens: response.generated_tokens,
+        tokens_per_second,
+    })
 }
 
 #[tauri::command]
@@ -196,9 +437,10 @@ async fn local_ai_generate_mtp_stream(
     request_id: String,
     request: LocalAiGenerateRequest,
     window: Window,
+    state: State<'_, AppState>,
 ) -> Result<LocalAiGenerateResponse, String> {
-    let config = MtpConfig::from_env()
-        .ok_or_else(|| "MTP endpoint is not configured. Set MEMOJI_MTP_ENDPOINT.".to_string())?;
+    let config = resolve_mtp_config(&state)?
+        .ok_or_else(|| "고속 로컬 서버가 설정되어 있지 않습니다.".to_string())?;
     let stream_window = window.clone();
     let stream_request_id = request_id.clone();
 
@@ -333,8 +575,13 @@ pub fn run() {
             get_app_data_dir,
             get_data_path,
             open_data_folder,
+            import_memoji_database,
             local_ai_status,
             local_ai_load,
+            local_ai_get_runtime_config,
+            local_ai_save_runtime_config,
+            local_ai_test_runtime_config,
+            local_ai_benchmark,
             local_ai_generate,
             local_ai_generate_stream,
             local_ai_generate_mtp_stream,

@@ -1,5 +1,7 @@
 use super::LocalAiGenerateRequest;
 
+pub const DEFAULT_MAX_NEW_TOKENS: usize = 512;
+
 #[derive(Debug, Clone, Copy)]
 pub struct SamplingConfig {
     pub max_new_tokens: usize,
@@ -10,7 +12,10 @@ pub struct SamplingConfig {
 impl SamplingConfig {
     pub fn from_request(request: &LocalAiGenerateRequest) -> Self {
         Self {
-            max_new_tokens: request.max_new_tokens.unwrap_or(192).clamp(1, 2048),
+            max_new_tokens: request
+                .max_new_tokens
+                .unwrap_or(DEFAULT_MAX_NEW_TOKENS)
+                .clamp(1, 2048),
             temperature: request.temperature.unwrap_or(0.9).clamp(0.0, 2.0),
             top_p: request.top_p.unwrap_or(0.95).clamp(0.05, 1.0),
         }

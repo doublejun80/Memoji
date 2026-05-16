@@ -7,7 +7,7 @@ import { useMarkdownPageEditor } from '../hooks/useMarkdownPageEditor';
 
 interface MarkdownEditorProps {
   currentPage: Page | null;
-  onPageUpdate: (page: Page) => void;
+  onPageUpdate: (page: Page) => void | Promise<void>;
   pages?: Page[];
   onPageSelect?: (page: Page) => void;
   onPageCreate?: (title: string) => void;

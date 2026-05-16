@@ -2612,6 +2612,65 @@ input[type="checkbox"]:checked:after {
   margin-bottom: 8px;
 }
 
+.memoji-ai-runtime-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 9px;
+  color: var(--muted-foreground);
+}
+
+.memoji-ai-runtime-badge {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted), transparent 30%);
+  padding: 2px 6px;
+  color: var(--foreground);
+  line-height: 1;
+}
+
+.memoji-ai-runtime-detail {
+  white-space: nowrap;
+}
+
+.memoji-ai-token-presets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.memoji-ai-token-preset {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--input);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--muted-foreground);
+  font-size: 9px;
+  line-height: 1;
+}
+
+.memoji-ai-token-preset[data-active="true"] {
+  border-color: var(--foreground);
+  background: var(--foreground);
+  color: var(--background);
+}
+
+.memoji-ai-token-preset:not([data-active="true"]):hover,
+.memoji-ai-token-preset:not([data-active="true"]):focus-visible {
+  background: var(--accent);
+  color: var(--accent-foreground);
+  outline: none;
+}
+
 .memoji-ai-quick-button {
   display: inline-flex;
   height: 28px;
@@ -2650,7 +2709,8 @@ input[type="checkbox"]:checked:after {
 }
 
 .memoji-editor-color-menu,
-.memoji-editor-emoji-menu {
+.memoji-editor-emoji-menu,
+.memoji-editor-indent-controls {
   position: relative;
   display: inline-flex;
   flex: 0 0 auto;
@@ -2658,7 +2718,8 @@ input[type="checkbox"]:checked:after {
 }
 
 .memoji-editor-color-button,
-.memoji-editor-emoji-button {
+.memoji-editor-emoji-button,
+.memoji-editor-indent-button {
   display: inline-flex;
   width: 30px;
   height: 26px;
@@ -2671,6 +2732,10 @@ input[type="checkbox"]:checked:after {
   font-size: 15px;
   line-height: 1;
   transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+}
+
+.memoji-editor-indent-controls {
+  gap: 4px;
 }
 
 .memoji-editor-color-button {
@@ -2693,14 +2758,17 @@ input[type="checkbox"]:checked:after {
 .memoji-editor-color-button:hover,
 .memoji-editor-color-button:focus-visible,
 .memoji-editor-emoji-button:hover,
-.memoji-editor-emoji-button:focus-visible {
+.memoji-editor-emoji-button:focus-visible,
+.memoji-editor-indent-button:hover,
+.memoji-editor-indent-button:focus-visible {
   border-color: var(--border);
   background: var(--accent);
   color: var(--accent-foreground);
 }
 
 .memoji-editor-color-button:focus-visible,
-.memoji-editor-emoji-button:focus-visible {
+.memoji-editor-emoji-button:focus-visible,
+.memoji-editor-indent-button:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--muted-foreground), transparent 65%);
   outline-offset: 2px;
 }
@@ -2839,10 +2907,6 @@ input[type="checkbox"]:checked:after {
   scrollbar-color: transparent transparent;
 }
 
-.memoji-milkdown .ProseMirror * {
-  caret-color: inherit;
-}
-
 .memoji-milkdown .ProseMirror::-webkit-scrollbar {
   width: 0;
   height: 0;
@@ -2856,7 +2920,10 @@ input[type="checkbox"]:checked:after {
 
 .memoji-milkdown .ProseMirror h1,
 .memoji-milkdown .ProseMirror h2,
-.memoji-milkdown .ProseMirror h3 {
+.memoji-milkdown .ProseMirror h3,
+.memoji-milkdown .ProseMirror h4,
+.memoji-milkdown .ProseMirror h5,
+.memoji-milkdown .ProseMirror h6 {
   font-family: var(--memoji-editor-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif) !important;
   font-weight: 650;
   letter-spacing: 0;
@@ -2878,6 +2945,24 @@ input[type="checkbox"]:checked:after {
   margin: 1em 0 .45em;
   font-size: 1.18em;
   line-height: 1.35;
+}
+
+.memoji-milkdown .ProseMirror h4 {
+  margin: .9em 0 .4em;
+  font-size: 1.08em;
+  line-height: 1.4;
+}
+
+.memoji-milkdown .ProseMirror h5 {
+  margin: .8em 0 .35em;
+  font-size: 1em;
+  line-height: 1.45;
+}
+
+.memoji-milkdown .ProseMirror h6 {
+  margin: .75em 0 .3em;
+  font-size: .94em;
+  line-height: 1.5;
 }
 
 .memoji-milkdown .ProseMirror p {
@@ -2963,6 +3048,45 @@ input[type="checkbox"]:checked:after {
 .dark .memoji-milkdown .ProseMirror {
   background: var(--background);
   color: var(--foreground);
+}
+
+.dark .memoji-milkdown .milkdown-code-block .list-wrapper {
+  border: 1px solid var(--border);
+  background: var(--popover) !important;
+  box-shadow: 0 14px 32px rgb(0 0 0 / 34%);
+}
+
+.dark .memoji-milkdown .milkdown-code-block .language-list-item {
+  color: var(--popover-foreground) !important;
+}
+
+.dark .memoji-milkdown .milkdown-code-block .language-list-item:hover,
+.dark .memoji-milkdown .milkdown-code-block .language-list-item:focus-visible {
+  background: var(--accent) !important;
+  color: var(--accent-foreground) !important;
+}
+
+.dark .memoji-milkdown .milkdown-code-block .language-list-item.no-result {
+  color: var(--muted-foreground) !important;
+}
+
+.dark .memoji-milkdown .milkdown-code-block .search-box {
+  background: var(--background) !important;
+  outline-color: var(--border) !important;
+}
+
+.dark .memoji-milkdown .milkdown-code-block .search-box:has(input:focus) {
+  outline-color: var(--ring) !important;
+}
+
+.dark .memoji-milkdown .milkdown-code-block .search-box .search-input,
+.dark .memoji-milkdown .milkdown-code-block .search-box input {
+  color: var(--foreground) !important;
+}
+
+.dark .memoji-milkdown .milkdown-code-block .search-box input::placeholder {
+  color: var(--muted-foreground) !important;
+  opacity: 1;
 }
 
 @property --tw-translate-x {

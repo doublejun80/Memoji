@@ -2,9 +2,25 @@ import React, { CSSProperties, useCallback, useEffect, useRef, useState } from '
 import { createPortal } from 'react-dom';
 import { Crepe } from '@milkdown/crepe';
 import { commandsCtx, editorViewCtx } from '@milkdown/kit/core';
-import { headingSchema, paragraphSchema, setBlockTypeCommand } from '@milkdown/kit/preset/commonmark';
+import {
+  bulletListSchema,
+  emphasisSchema,
+  headingSchema,
+  inlineCodeSchema,
+  liftListItemCommand,
+  orderedListSchema,
+  paragraphSchema,
+  setBlockTypeCommand,
+  sinkListItemCommand,
+  strongSchema,
+  toggleEmphasisCommand,
+  toggleStrongCommand,
+  wrapInBlockTypeCommand,
+} from '@milkdown/kit/preset/commonmark';
 import { TextSelection } from '@milkdown/kit/prose/state';
+import { strikethroughSchema, toggleStrikethroughCommand } from '@milkdown/kit/preset/gfm';
 import { $markSchema, $remark, insert as insertMarkdown, replaceAll } from '@milkdown/kit/utils';
+import { IndentDecrease, IndentIncrease } from 'lucide-react';
 import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame.css';
 import '@milkdown/prose/tables/style/tables.css';
@@ -37,13 +53,13 @@ const TEXT_COLOR_OPTIONS = [
 ];
 
 const FORMAT_OPTIONS = [
-  { label: 'Paragraph', level: null },
-  { label: 'Heading 1', level: 1 },
-  { label: 'Heading 2', level: 2 },
-  { label: 'Heading 3', level: 3 },
-  { label: 'Heading 4', level: 4 },
-  { label: 'Heading 5', level: 5 },
-  { label: 'Heading 6', level: 6 },
+  { label: '본문', level: null },
+  { label: '제목 1', level: 1 },
+  { label: '제목 2', level: 2 },
+  { label: '제목 3', level: 3 },
+  { label: '제목 4', level: 4 },
+  { label: '제목 5', level: 5 },
+  { label: '제목 6', level: 6 },
 ] as const;
 
 const TOOLBAR_BUTTON_LABELS = [
@@ -63,6 +79,60 @@ const TOOLBAR_BUTTON_LABELS = [
   '구분선',
 ];
 
+const BULLET_LIST_TOOLBAR_INDEX = 4;
+const ORDERED_LIST_TOOLBAR_INDEX = 5;
+const INLINE_FORMAT_TOOLBAR_INDEXES = [
+  'strong',
+  'emphasis',
+  'strikethrough',
+  'inline-code',
+] as const;
+
+type InlineFormat = typeof INLINE_FORMAT_TOOLBAR_INDEXES[number];
+
+const shouldHandleToolbarEvent = (event: Event) => (
+  !(event instanceof KeyboardEvent) || event.key === 'Enter' || event.key === ' '
+);
+
+const consumeToolbarEvent = (event: Event) => {
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  event.stopPropagation();
+};
+
+const IMAGE_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+const SAFE_IMAGE_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/bmp',
+]);
+
+const imageFileToDataUrl = (file: File): Promise<string> => {
+  const isImage = SAFE_IMAGE_MIME_TYPES.has(file.type) || /\.(png|jpe?g|gif|webp|bmp)$/i.test(file.name);
+  if (!isImage) {
+    return Promise.reject(new Error('PNG, JPG, GIF, WEBP, BMP 이미지만 삽입할 수 있습니다.'));
+  }
+
+  if (file.size > IMAGE_UPLOAD_MAX_BYTES) {
+    return Promise.reject(new Error('이미지 파일은 20MB 이하만 삽입할 수 있습니다.'));
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+      } else {
+        reject(new Error('이미지를 읽지 못했습니다.'));
+      }
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('이미지를 읽지 못했습니다.'));
+    reader.readAsDataURL(file);
+  });
+};
+
 const normalizeTextColor = (color: unknown): string | null => {
   if (typeof color !== 'string') return null;
   const trimmed = color.trim();
@@ -76,21 +146,29 @@ const getColorFromHtml = (value: unknown): string | null => {
   return normalizeTextColor(match?.[2]);
 };
 
-const isClosingColorSpan = (value: unknown): boolean => (
+const getHeadingStyleLevelFromHtml = (value: unknown): number | null => {
+  if (typeof value !== 'string') return null;
+  const match = value.match(/<span\b[^>]*data-memoji-heading-level=(["'])([1-6])\1[^>]*>/i);
+  const numericLevel = Number(match?.[2]);
+  return Number.isInteger(numericLevel) && numericLevel >= 1 && numericLevel <= 6 ? numericLevel : null;
+};
+
+const isClosingSpan = (value: unknown): boolean => (
   typeof value === 'string' && /^<\/span\s*>$/i.test(value.trim())
 );
 
-const transformColorSpanNodes = (nodes: any[]): any[] => {
+const transformMemojiSpanNodes = (nodes: any[]): any[] => {
   const nextNodes: any[] = [];
 
   for (let index = 0; index < nodes.length; index += 1) {
     const node = nodes[index];
     const color = node?.type === 'html' ? getColorFromHtml(node.value) : null;
+    const headingLevel = node?.type === 'html' ? getHeadingStyleLevelFromHtml(node.value) : null;
 
     if (color) {
       const children: any[] = [];
       let cursor = index + 1;
-      while (cursor < nodes.length && !isClosingColorSpan(nodes[cursor]?.value)) {
+      while (cursor < nodes.length && !isClosingSpan(nodes[cursor]?.value)) {
         children.push(nodes[cursor]);
         cursor += 1;
       }
@@ -99,8 +177,23 @@ const transformColorSpanNodes = (nodes: any[]): any[] => {
         nextNodes.push({
           type: 'memojiTextColor',
           color,
-          children: transformColorSpanNodes(children),
+          children: transformMemojiSpanNodes(children),
         });
+        index = cursor;
+        continue;
+      }
+    }
+
+    if (headingLevel) {
+      const children: any[] = [];
+      let cursor = index + 1;
+      while (cursor < nodes.length && !isClosingSpan(nodes[cursor]?.value)) {
+        children.push(nodes[cursor]);
+        cursor += 1;
+      }
+
+      if (cursor < nodes.length && children.length > 0) {
+        nextNodes.push(...transformMemojiSpanNodes(children));
         index = cursor;
         continue;
       }
@@ -109,7 +202,7 @@ const transformColorSpanNodes = (nodes: any[]): any[] => {
     if (Array.isArray(node?.children)) {
       nextNodes.push({
         ...node,
-        children: transformColorSpanNodes(node.children),
+        children: transformMemojiSpanNodes(node.children),
       });
     } else {
       nextNodes.push(node);
@@ -119,9 +212,31 @@ const transformColorSpanNodes = (nodes: any[]): any[] => {
   return nextNodes;
 };
 
-const remarkTextColor = $remark('memojiTextColor', () => () => (tree: any) => {
+const transformListHeadingNodes = (node: any): any => {
+  if (!node || !Array.isArray(node.children)) return node;
+
+  const children = node.children.map((child: any) => {
+    const transformedChild = transformListHeadingNodes(child);
+
+    if (node.type === 'listItem' && transformedChild?.type === 'heading') {
+      return {
+        type: 'paragraph',
+        children: transformMemojiSpanNodes(transformedChild.children ?? []),
+      };
+    }
+
+    return transformedChild;
+  });
+
+  return {
+    ...node,
+    children: transformMemojiSpanNodes(children),
+  };
+};
+
+const remarkMemojiInlineStyles = $remark('memojiInlineStyles', () => () => (tree: any) => {
   if (Array.isArray(tree?.children)) {
-    tree.children = transformColorSpanNodes(tree.children);
+    tree.children = transformListHeadingNodes({ ...tree }).children;
   }
 });
 
@@ -491,9 +606,108 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
     });
   }, [preserveEditorViewport]);
 
+  const commitEditorMarkdown = useCallback((markdown: string) => {
+    if (markdown !== valueRef.current) {
+      valueRef.current = markdown;
+      onChangeRef.current(markdown);
+    }
+    return markdown;
+  }, []);
+
   useEffect(() => {
     syncMarkdownToEditor(value);
   }, [syncMarkdownToEditor, value]);
+
+  const applyInlineFormat = useCallback((format: InlineFormat) => {
+    const crepe = crepeRef.current;
+    if (!crepe) return false;
+
+    let didApply = false;
+
+    crepe.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      if (!view) return;
+
+      const { state } = view;
+      const { from, to, empty } = state.selection;
+
+      if (empty) {
+        if (format === 'inline-code') {
+          const markType = inlineCodeSchema.type(ctx);
+          const activeMarks = state.storedMarks ?? state.selection.$from.marks();
+          const hasMark = activeMarks.some((mark) => mark.type === markType);
+          const transaction = hasMark
+            ? state.tr.removeStoredMark(markType)
+            : state.tr.addStoredMark(markType.create());
+          view.dispatch(transaction);
+          didApply = true;
+        } else {
+          const commands = ctx.get(commandsCtx);
+          if (format === 'strong') {
+            didApply = Boolean(commands.call(toggleStrongCommand.key));
+          } else if (format === 'emphasis') {
+            didApply = Boolean(commands.call(toggleEmphasisCommand.key));
+          } else if (format === 'strikethrough') {
+            didApply = Boolean(commands.call(toggleStrikethroughCommand.key));
+          }
+        }
+
+        if (didApply) view.focus();
+        return;
+      }
+
+      const markType = (() => {
+        if (format === 'strong') return strongSchema.type(ctx);
+        if (format === 'emphasis') return emphasisSchema.type(ctx);
+        if (format === 'strikethrough') return strikethroughSchema.type(ctx);
+        return inlineCodeSchema.type(ctx);
+      })();
+
+      const hasMark = state.doc.rangeHasMark(from, to, markType);
+      let transaction = state.tr.removeMark(from, to, markType);
+
+      if (!hasMark) {
+        if (format === 'inline-code') {
+          Object.values(state.schema.marks).forEach((schemaMarkType) => {
+            if (schemaMarkType !== markType) {
+              transaction = transaction.removeMark(from, to, schemaMarkType);
+            }
+          });
+        }
+
+        transaction = transaction.addMark(from, to, markType.create());
+      }
+
+      if (!transaction.docChanged) return;
+
+      view.dispatch(transaction.scrollIntoView());
+      view.focus();
+      didApply = true;
+    });
+
+    if (didApply) commitEditorMarkdown(crepe.getMarkdown());
+    return didApply;
+  }, [commitEditorMarkdown]);
+
+  const applyListFormat = useCallback((kind: 'bullet' | 'ordered') => {
+    const crepe = crepeRef.current;
+    if (!crepe) return false;
+
+    let didApply = false;
+    crepe.editor.action((ctx) => {
+      const commands = ctx.get(commandsCtx);
+      const listType = kind === 'bullet'
+        ? bulletListSchema.type(ctx)
+        : orderedListSchema.type(ctx);
+
+      commands.call(setBlockTypeCommand.key, { nodeType: paragraphSchema.type(ctx) });
+      didApply = Boolean(commands.call(wrapInBlockTypeCommand.key, { nodeType: listType }));
+      if (didApply) ctx.get(editorViewCtx).focus();
+    });
+
+    if (didApply) commitEditorMarkdown(crepe.getMarkdown());
+    return didApply;
+  }, [commitEditorMarkdown]);
 
   useEffect(() => {
     if (!rootRef.current) return;
@@ -513,15 +727,32 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
           text: placeholder,
           mode: 'doc',
         },
+        [Crepe.Feature.Cursor]: {
+          virtual: false,
+        },
+        [Crepe.Feature.ImageBlock]: {
+          onUpload: imageFileToDataUrl,
+          inlineUploadButton: '파일 선택',
+          inlineUploadPlaceholderText: '또는 이미지 링크',
+          blockUploadButton: '파일 선택',
+          blockUploadPlaceholderText: '또는 이미지 링크',
+          blockCaptionPlaceholderText: '이미지 설명',
+          onImageLoadError: (event: Event) => {
+            console.warn('Memoji image failed to load:', event);
+          },
+        },
       },
     });
-    crepe.editor.use([remarkTextColor, textColorSchema].flat());
+    crepe.editor.use([remarkMemojiInlineStyles, textColorSchema].flat());
 
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, markdown, prevMarkdown) => {
-        if (cancelled || markdown === prevMarkdown || markdown === valueRef.current) return;
-        valueRef.current = markdown;
-        onChangeRef.current(markdown);
+        if (
+          cancelled ||
+          markdown === prevMarkdown ||
+          markdown === valueRef.current
+        ) return;
+        commitEditorMarkdown(markdown);
       });
     });
 
@@ -534,7 +765,7 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
         if (crepe.getMarkdown() === valueRef.current) return;
         replaceAll(valueRef.current)(ctx);
       });
-      const nextToolbarTarget = rootRef.current?.querySelector('.top-bar-inner') ?? null;
+      const nextToolbarTarget = rootRef.current?.querySelector('.top-bar-inner') as HTMLElement | null;
       setToolbarTarget(nextToolbarTarget);
     }).catch((error) => {
       console.error('Milkdown editor failed to mount:', error);
@@ -551,7 +782,7 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
         console.error('Milkdown editor failed to destroy:', error);
       });
     };
-  }, [placeholder]);
+  }, [commitEditorMarkdown, placeholder]);
 
   useEffect(() => {
     if (!isEmojiPickerOpen) return;
@@ -577,30 +808,67 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
     if (!toolbarTarget) return;
 
     let headingButton: HTMLElement | null = null;
+    let bulletListButton: HTMLElement | null = null;
+    let orderedListButton: HTMLElement | null = null;
+    let inlineFormatButtonCleanups: Array<() => void> = [];
 
     const openFormatMenu = (event: PointerEvent) => {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      event.stopPropagation();
+      consumeToolbarEvent(event);
       formatButtonRef.current = event.currentTarget as HTMLElement;
       updateFormatMenuPosition();
       setIsFormatMenuOpen((open) => !open);
     };
 
     const blockNativeFormatMenu = (event: Event) => {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      event.stopPropagation();
+      consumeToolbarEvent(event);
     };
 
     const openFormatMenuFromKeyboard = (event: KeyboardEvent) => {
-      if (event.key !== 'Enter' && event.key !== ' ') return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      event.stopPropagation();
+      if (!shouldHandleToolbarEvent(event)) return;
+      consumeToolbarEvent(event);
       formatButtonRef.current = event.currentTarget as HTMLElement;
       updateFormatMenuPosition();
       setIsFormatMenuOpen((open) => !open);
+    };
+
+    const runBulletList = (event: Event) => {
+      if (!shouldHandleToolbarEvent(event)) return;
+      consumeToolbarEvent(event);
+      applyListFormat('bullet');
+    };
+
+    const runOrderedList = (event: Event) => {
+      if (!shouldHandleToolbarEvent(event)) return;
+      consumeToolbarEvent(event);
+      applyListFormat('ordered');
+    };
+
+    const detachInlineFormatButtons = () => {
+      inlineFormatButtonCleanups.forEach((cleanup) => cleanup());
+      inlineFormatButtonCleanups = [];
+    };
+
+    const attachInlineFormatButtons = () => {
+      detachInlineFormatButtons();
+      const buttons = Array.from(toolbarTarget.querySelectorAll('.top-bar-item')) as HTMLElement[];
+
+      INLINE_FORMAT_TOOLBAR_INDEXES.forEach((format, index) => {
+        const button = buttons[index];
+        if (!button) return;
+
+        const runInlineFormat = (event: Event) => {
+          if (!shouldHandleToolbarEvent(event)) return;
+          consumeToolbarEvent(event);
+          applyInlineFormat(format);
+        };
+
+        button.addEventListener('pointerdown', runInlineFormat, true);
+        button.addEventListener('keydown', runInlineFormat, true);
+        inlineFormatButtonCleanups.push(() => {
+          button.removeEventListener('pointerdown', runInlineFormat, true);
+          button.removeEventListener('keydown', runInlineFormat, true);
+        });
+      });
     };
 
     const attachHeadingButton = () => {
@@ -618,8 +886,32 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
       headingButton.addEventListener('keydown', openFormatMenuFromKeyboard, true);
     };
 
+    const attachListButtons = () => {
+      const buttons = Array.from(toolbarTarget.querySelectorAll('.top-bar-item')) as HTMLElement[];
+      const nextBulletListButton = buttons[BULLET_LIST_TOOLBAR_INDEX] ?? null;
+      const nextOrderedListButton = buttons[ORDERED_LIST_TOOLBAR_INDEX] ?? null;
+
+      if (nextBulletListButton !== bulletListButton) {
+        bulletListButton?.removeEventListener('pointerdown', runBulletList, true);
+        bulletListButton?.removeEventListener('keydown', runBulletList, true);
+        bulletListButton = nextBulletListButton;
+        bulletListButton?.addEventListener('pointerdown', runBulletList, true);
+        bulletListButton?.addEventListener('keydown', runBulletList, true);
+      }
+
+      if (nextOrderedListButton !== orderedListButton) {
+        orderedListButton?.removeEventListener('pointerdown', runOrderedList, true);
+        orderedListButton?.removeEventListener('keydown', runOrderedList, true);
+        orderedListButton = nextOrderedListButton;
+        orderedListButton?.addEventListener('pointerdown', runOrderedList, true);
+        orderedListButton?.addEventListener('keydown', runOrderedList, true);
+      }
+    };
+
     const syncToolbarControls = () => {
       attachHeadingButton();
+      attachInlineFormatButtons();
+      attachListButtons();
       labelToolbarButtons();
     };
 
@@ -635,9 +927,61 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
       headingButton?.removeEventListener('mousedown', blockNativeFormatMenu, true);
       headingButton?.removeEventListener('click', blockNativeFormatMenu, true);
       headingButton?.removeEventListener('keydown', openFormatMenuFromKeyboard, true);
+      bulletListButton?.removeEventListener('pointerdown', runBulletList, true);
+      bulletListButton?.removeEventListener('keydown', runBulletList, true);
+      orderedListButton?.removeEventListener('pointerdown', runOrderedList, true);
+      orderedListButton?.removeEventListener('keydown', runOrderedList, true);
+      detachInlineFormatButtons();
       observer.disconnect();
     };
-  }, [labelToolbarButtons, toolbarTarget, updateFormatMenuPosition]);
+  }, [applyInlineFormat, applyListFormat, labelToolbarButtons, toolbarTarget, updateFormatMenuPosition]);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+
+    let inlineFormatButtonCleanups: Array<() => void> = [];
+
+    const detachInlineFormatButtons = () => {
+      inlineFormatButtonCleanups.forEach((cleanup) => cleanup());
+      inlineFormatButtonCleanups = [];
+    };
+
+    const attachInlineFormatButtons = () => {
+      detachInlineFormatButtons();
+      const buttons = Array.from(root.querySelectorAll('.milkdown-toolbar .toolbar-item')) as HTMLElement[];
+
+      INLINE_FORMAT_TOOLBAR_INDEXES.forEach((format, index) => {
+        const button = buttons[index];
+        if (!button) return;
+
+        const runInlineFormat = (event: Event) => {
+          if (!shouldHandleToolbarEvent(event)) return;
+          consumeToolbarEvent(event);
+          applyInlineFormat(format);
+        };
+
+        button.addEventListener('pointerdown', runInlineFormat, true);
+        button.addEventListener('keydown', runInlineFormat, true);
+        inlineFormatButtonCleanups.push(() => {
+          button.removeEventListener('pointerdown', runInlineFormat, true);
+          button.removeEventListener('keydown', runInlineFormat, true);
+        });
+      });
+    };
+
+    const observer = new MutationObserver(attachInlineFormatButtons);
+    observer.observe(root, {
+      childList: true,
+      subtree: true,
+    });
+    attachInlineFormatButtons();
+
+    return () => {
+      observer.disconnect();
+      detachInlineFormatButtons();
+    };
+  }, [applyInlineFormat]);
 
   useEffect(() => {
     if (!isFormatMenuOpen) return;
@@ -695,11 +1039,7 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
       crepe.editor.action(insertMarkdown(emoji, true));
     });
 
-    const nextValue = crepe.getMarkdown();
-    if (nextValue !== valueRef.current) {
-      valueRef.current = nextValue;
-      onChangeRef.current(nextValue);
-    }
+    commitEditorMarkdown(crepe.getMarkdown());
     setIsEmojiPickerOpen(false);
   };
 
@@ -708,6 +1048,9 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
     if (!crepe) return;
 
     crepe.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      if (!view) return;
+
       const commands = ctx.get(commandsCtx);
       if (level === null) {
         commands.call(setBlockTypeCommand.key, { nodeType: paragraphSchema.type(ctx) });
@@ -717,14 +1060,10 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
           attrs: { level },
         });
       }
-      ctx.get(editorViewCtx).focus();
+      view.focus();
     });
 
-    const nextValue = crepe.getMarkdown();
-    if (nextValue !== valueRef.current) {
-      valueRef.current = nextValue;
-      onChangeRef.current(nextValue);
-    }
+    commitEditorMarkdown(crepe.getMarkdown());
     setIsFormatMenuOpen(false);
   };
 
@@ -752,13 +1091,58 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
       view.focus();
     });
 
-    const nextValue = crepe.getMarkdown();
-    if (nextValue !== valueRef.current) {
-      valueRef.current = nextValue;
-      onChangeRef.current(nextValue);
-    }
+    commitEditorMarkdown(crepe.getMarkdown());
     setIsColorPickerOpen(false);
   };
+
+  const applyListIndent = useCallback((direction: 'increase' | 'decrease') => {
+    const crepe = crepeRef.current;
+    if (!crepe) return false;
+
+    let didRun = false;
+
+    crepe.editor.action((ctx) => {
+      const commands = ctx.get(commandsCtx);
+      didRun = Boolean(commands.call(
+        direction === 'increase'
+          ? sinkListItemCommand.key
+          : liftListItemCommand.key
+      ));
+
+      if (didRun) {
+        ctx.get(editorViewCtx).focus();
+      }
+    });
+
+    if (!didRun) return false;
+
+    commitEditorMarkdown(crepe.getMarkdown());
+    return true;
+  }, [commitEditorMarkdown]);
+
+  useEffect(() => {
+    const editorElement = rootRef.current?.querySelector('.ProseMirror') as HTMLElement | null;
+    if (!editorElement) return;
+
+    const handleTabIndent = (event: KeyboardEvent) => {
+      if (event.isComposing || event.keyCode === 229 || event.altKey || event.ctrlKey || event.metaKey) return;
+      let didHandle = false;
+
+      if (event.key === 'Tab') {
+        didHandle = applyListIndent(event.shiftKey ? 'decrease' : 'increase');
+      }
+
+      if (didHandle) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+
+    editorElement.addEventListener('keydown', handleTabIndent, true);
+    return () => {
+      editorElement.removeEventListener('keydown', handleTabIndent, true);
+    };
+  }, [applyListIndent, toolbarTarget]);
 
   const toggleColorPicker = () => {
     if (!isColorPickerOpen) {
@@ -817,6 +1201,28 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
               aria-expanded={isEmojiPickerOpen}
             >
               😊
+            </button>
+          </div>
+          <div className="memoji-editor-indent-controls">
+            <button
+              type="button"
+              className="memoji-editor-indent-button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => applyListIndent('decrease')}
+              title="내어쓰기"
+              aria-label="내어쓰기"
+            >
+              <IndentDecrease className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className="memoji-editor-indent-button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => applyListIndent('increase')}
+              title="들여쓰기"
+              aria-label="들여쓰기"
+            >
+              <IndentIncrease className="h-4 w-4" />
             </button>
           </div>
         </>,

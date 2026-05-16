@@ -6,7 +6,7 @@ export type EditorMode = 'wysiwyg' | 'source';
 
 interface UseMarkdownPageEditorOptions {
   currentPage: Page | null;
-  onPageUpdate: (page: Page) => void;
+  onPageUpdate: (page: Page) => void | Promise<void>;
   onSaveRequest?: number;
   debounceMs?: number;
 }
@@ -70,9 +70,7 @@ const mergeExternalContent = (baseContent: string, localContent: string, incomin
   }
 
   const removedText = baseContent.slice(start, baseEnd);
-  if (localContent.slice(start, start + removedText.length) !== removedText) {
-    return incomingContent;
-  }
+  if (localContent.slice(start, start + removedText.length) !== removedText) return localContent;
 
   return [
     localContent.slice(0, start),
@@ -101,23 +99,34 @@ export const useMarkdownPageEditor = ({
     onPageUpdateRef.current = onPageUpdate;
   }, [onPageUpdate]);
 
-  const savePage = useCallback((page: Page, markdown: string) => {
+  const savePage = useCallback(async (page: Page, markdown: string) => {
     const nextPage = pageWithMarkdownMetadata(page, markdown);
-    onPageUpdateRef.current(nextPage);
-    pageRef.current = nextPage;
-    contentRef.current = markdown;
-    dirtyRef.current = false;
-    setHasUnsavedChanges(false);
+
+    try {
+      await onPageUpdateRef.current(nextPage);
+      if (pageRef.current?.id === nextPage.id) {
+        pageRef.current = nextPage;
+        contentRef.current = markdown;
+        dirtyRef.current = false;
+        setHasUnsavedChanges(false);
+      }
+    } catch (error) {
+      console.error('Failed to save page:', error);
+      if (pageRef.current?.id === page.id) {
+        dirtyRef.current = true;
+        setHasUnsavedChanges(true);
+      }
+    }
   }, []);
 
   const flushUnsaved = useCallback(() => {
-    if (!pageRef.current || !dirtyRef.current) return;
-    savePage(pageRef.current, contentRef.current);
+    if (!pageRef.current || !dirtyRef.current) return Promise.resolve();
+    return savePage(pageRef.current, contentRef.current);
   }, [savePage]);
 
   useEffect(() => {
     if (!currentPage) {
-      flushUnsaved();
+      void flushUnsaved();
       pageRef.current = null;
       contentRef.current = '';
       lastPageIdRef.current = null;
@@ -128,7 +137,7 @@ export const useMarkdownPageEditor = ({
     }
 
     if (currentPage.id !== lastPageIdRef.current) {
-      flushUnsaved();
+      void flushUnsaved();
       pageRef.current = currentPage;
       contentRef.current = currentPage.content || '';
       lastPageIdRef.current = currentPage.id;
@@ -157,7 +166,7 @@ export const useMarkdownPageEditor = ({
 
   useEffect(() => {
     return () => {
-      flushUnsaved();
+      void flushUnsaved();
     };
   }, [flushUnsaved]);
 
@@ -166,7 +175,7 @@ export const useMarkdownPageEditor = ({
 
     const timer = window.setTimeout(() => {
       if (pageRef.current && dirtyRef.current) {
-        savePage(pageRef.current, contentRef.current);
+        void savePage(pageRef.current, contentRef.current);
       }
     }, debounceMs);
 
@@ -175,7 +184,7 @@ export const useMarkdownPageEditor = ({
 
   useEffect(() => {
     if (!onSaveRequest || onSaveRequest <= 0) return;
-    flushUnsaved();
+    void flushUnsaved();
   }, [onSaveRequest, flushUnsaved]);
 
   useEffect(() => {

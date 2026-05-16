@@ -1,13 +1,16 @@
 use super::{
-    LocalAiError, LocalAiGenerateRequest, LocalAiGenerateResponse, LocalAiGenerateStreamChunk,
+    sampler::DEFAULT_MAX_NEW_TOKENS, LocalAiError, LocalAiGenerateRequest, LocalAiGenerateResponse,
+    LocalAiGenerateStreamChunk,
 };
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
+use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::time::Duration;
 
-const DEFAULT_MTP_MODEL: &str = "google/gemma-4-E2B-it";
+pub const DEFAULT_MTP_MODEL: &str = "google/gemma-4-E2B-it";
 const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 600;
+const MAX_MTP_ERROR_BODY_CHARS: usize = 600;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MtpConfig {
@@ -19,35 +22,45 @@ pub struct MtpConfig {
 
 impl MtpConfig {
     pub fn from_env() -> Option<Self> {
-        let endpoint = std::env::var("MEMOJI_MTP_ENDPOINT")
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| endpoint_is_vdi_local(value))
-            .filter(|value| !value.is_empty())?;
-        let model = std::env::var("MEMOJI_MTP_MODEL")
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| DEFAULT_MTP_MODEL.to_string());
-        let draft_model = std::env::var("MEMOJI_MTP_DRAFT_MODEL")
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
-        let api_key = std::env::var("MEMOJI_MTP_API_KEY")
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
+        let endpoint = std::env::var("MEMOJI_MTP_ENDPOINT").ok()?;
+        let model = std::env::var("MEMOJI_MTP_MODEL").ok();
+        let draft_model = std::env::var("MEMOJI_MTP_DRAFT_MODEL").ok();
+        let api_key = std::env::var("MEMOJI_MTP_API_KEY").ok();
 
-        Some(Self {
+        Self::from_values(endpoint, model, draft_model, api_key).ok()
+    }
+
+    pub fn from_values(
+        endpoint: String,
+        model: Option<String>,
+        draft_model: Option<String>,
+        api_key: Option<String>,
+    ) -> Result<Self, String> {
+        let endpoint = endpoint.trim().to_string();
+        if endpoint.is_empty() {
+            return Err("고속 로컬 서버 endpoint를 입력하세요.".to_string());
+        }
+        if !endpoint_is_vdi_local(&endpoint) {
+            return Err("고속 로컬 서버는 localhost, 127.0.0.1, ::1만 허용합니다.".to_string());
+        }
+
+        Ok(Self {
             endpoint,
-            model,
-            draft_model,
-            api_key,
+            model: model
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| DEFAULT_MTP_MODEL.to_string()),
+            draft_model: draft_model
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            api_key: api_key
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
         })
     }
 }
 
-fn endpoint_is_vdi_local(endpoint: &str) -> bool {
+pub fn endpoint_is_vdi_local(endpoint: &str) -> bool {
     let Ok(url) = reqwest::Url::parse(endpoint) else {
         return false;
     };
@@ -58,7 +71,7 @@ fn endpoint_is_vdi_local(endpoint: &str) -> bool {
     let Some(host) = url.host_str().map(|host| host.to_ascii_lowercase()) else {
         return false;
     };
-    if host == "localhost" || host.ends_with(".localhost") {
+    if host == "localhost" {
         return true;
     }
 
@@ -111,13 +124,14 @@ where
 {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS))
+        .redirect(Policy::none())
         .build()
         .map_err(|error| LocalAiError::GenerateFailed(error.to_string()))?;
 
     let payload = ChatCompletionRequest {
         model: config.model,
         messages: build_messages(&request),
-        max_tokens: request.max_new_tokens.unwrap_or(192),
+        max_tokens: request.max_new_tokens.unwrap_or(DEFAULT_MAX_NEW_TOKENS),
         temperature: request.temperature.unwrap_or(0.4),
         top_p: request.top_p.unwrap_or(0.95),
         stream: true,
@@ -139,7 +153,7 @@ where
 
     if !response.status().is_success() {
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+        let body = sanitize_error_body(&response.text().await.unwrap_or_default());
         return Err(LocalAiError::GenerateFailed(format!(
             "MTP endpoint returned {status}: {body}"
         )));
@@ -217,6 +231,25 @@ fn parse_stream_event(data: &str) -> Result<Vec<StreamEvent>, LocalAiError> {
         .collect())
 }
 
+fn sanitize_error_body(body: &str) -> String {
+    let redacted = body
+        .split_whitespace()
+        .map(|part| {
+            if part.len() > 24
+                && (part.to_ascii_lowercase().contains("bearer")
+                    || part.chars().filter(|ch| *ch == '.').count() >= 2)
+            {
+                "[redacted]"
+            } else {
+                part
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    redacted.chars().take(MAX_MTP_ERROR_BODY_CHARS).collect()
+}
+
 fn build_messages(request: &LocalAiGenerateRequest) -> Vec<ChatMessage> {
     let mut system = String::from(
         "You are Memoji's local note assistant. Answer concisely in Korean unless the user asks otherwise. Do not use tools or hidden reasoning.",
@@ -279,12 +312,38 @@ mod tests {
     }
 
     #[test]
+    fn truncates_mtp_error_body_before_returning_to_ui() {
+        let body = format!("error {}", "x".repeat(1200));
+        let sanitized = sanitize_error_body(&body);
+
+        assert!(sanitized.chars().count() <= MAX_MTP_ERROR_BODY_CHARS);
+    }
+
+    #[test]
+    fn builds_config_from_trimmed_loopback_values() {
+        let config = MtpConfig::from_values(
+            " http://127.0.0.1:8080/v1/chat/completions ".to_string(),
+            Some(" local-gemma ".to_string()),
+            Some(" draft ".to_string()),
+            None,
+        )
+        .expect("loopback config should be accepted");
+
+        assert_eq!(config.endpoint, "http://127.0.0.1:8080/v1/chat/completions");
+        assert_eq!(config.model, "local-gemma");
+        assert_eq!(config.draft_model.as_deref(), Some("draft"));
+    }
+
+    #[test]
     fn allows_only_loopback_mtp_endpoints() {
         assert!(endpoint_is_vdi_local(
             "http://127.0.0.1:8080/v1/chat/completions"
         ));
         assert!(endpoint_is_vdi_local(
             "http://localhost:8080/v1/chat/completions"
+        ));
+        assert!(!endpoint_is_vdi_local(
+            "http://evil.localhost:8080/v1/chat/completions"
         ));
         assert!(!endpoint_is_vdi_local(
             "http://10.20.30.40:8080/v1/chat/completions"

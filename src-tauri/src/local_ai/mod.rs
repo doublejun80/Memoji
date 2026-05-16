@@ -4,10 +4,10 @@ mod sampler;
 mod tokenizer;
 
 use gemma4::Gemma4Runtime;
-pub use mtp_client::{generate_mtp_stream, MtpConfig};
+pub use mtp_client::{generate_mtp_stream, MtpConfig, DEFAULT_MTP_MODEL};
 use sampler::SamplingConfig;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fmt, path::PathBuf, sync::Mutex};
+use std::{collections::BTreeMap, fmt, path::PathBuf, sync::Mutex, thread, time::Instant};
 
 const DEFAULT_CONTEXT_SIZE: usize = 2048;
 const MIN_CONTEXT_SIZE: usize = 512;
@@ -101,6 +101,11 @@ pub struct LocalAiStatus {
     pub compiled_features: BTreeMap<String, bool>,
     pub avx512_runtime_ready: bool,
     pub avx512_build: bool,
+    pub runtime_info: LocalAiRuntimeInfo,
+    pub model_file_size_bytes: Option<u64>,
+    pub tokenizer_file_size_bytes: Option<u64>,
+    pub last_load_ms: Option<u128>,
+    pub last_generation: Option<LocalAiGenerationStats>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -133,6 +138,40 @@ pub struct LocalAiGenerateResponse {
     pub prompt_tokens: usize,
     pub generated_tokens: usize,
     pub finish_reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalAiRuntimeInfo {
+    pub os: String,
+    pub arch: String,
+    pub available_parallelism: usize,
+    pub build_profile: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalAiGenerationStats {
+    pub elapsed_ms: u128,
+    pub prompt_tokens: usize,
+    pub generated_tokens: usize,
+    pub tokens_per_second: f64,
+    pub max_new_tokens: usize,
+    pub mode: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalAiBenchmarkResult {
+    pub status: LocalAiStatus,
+    pub load_ms: Option<u128>,
+    pub cached_model: bool,
+    pub generate_ms: u128,
+    pub prompt_tokens: usize,
+    pub generated_tokens: usize,
+    pub tokens_per_second: f64,
+    pub speed_label: String,
+    pub recommendation: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -203,6 +242,8 @@ struct LocalAiInner {
     load_state: LocalAiLoadState,
     model_info: Option<LocalAiModelInfo>,
     last_error: Option<String>,
+    last_load_ms: Option<u128>,
+    last_generation: Option<LocalAiGenerationStats>,
 }
 
 #[derive(Debug)]
@@ -220,13 +261,20 @@ impl LocalAiState {
                 load_state: LocalAiLoadState::NotLoaded,
                 model_info: None,
                 last_error: None,
+                last_load_ms: None,
+                last_generation: None,
             }),
         }
     }
 
     pub fn status(&self) -> LocalAiStatus {
         let inner = self.inner.lock().expect("local ai state poisoned");
-        self.status_from_inner(&inner)
+        self.status_from_inner(&inner, MtpConfig::from_env())
+    }
+
+    pub fn status_with_mtp_config(&self, mtp_config: Option<MtpConfig>) -> LocalAiStatus {
+        let inner = self.inner.lock().expect("local ai state poisoned");
+        self.status_from_inner(&inner, mtp_config)
     }
 
     pub fn load(&self) -> Result<LocalAiStatus, LocalAiError> {
@@ -234,11 +282,16 @@ impl LocalAiState {
 
         {
             let mut inner = self.inner.lock().expect("local ai state poisoned");
+            if inner.runtime.is_some() && inner.load_state == LocalAiLoadState::Loaded {
+                return Ok(self.status_from_inner(&inner, MtpConfig::from_env()));
+            }
             inner.load_state = LocalAiLoadState::Loading;
             inner.last_error = None;
         }
 
+        let load_started = Instant::now();
         let load_result = Gemma4Runtime::load(&self.config);
+        let load_ms = load_started.elapsed().as_millis();
         let mut inner = self.inner.lock().expect("local ai state poisoned");
 
         match load_result {
@@ -250,7 +303,8 @@ impl LocalAiState {
                     LocalAiLoadState::Unsupported
                 };
                 inner.runtime = Some(runtime);
-                Ok(self.status_from_inner(&inner))
+                inner.last_load_ms = Some(load_ms);
+                Ok(self.status_from_inner(&inner, MtpConfig::from_env()))
             }
             Err(error) => {
                 inner.load_state = match &error {
@@ -259,6 +313,7 @@ impl LocalAiState {
                 };
                 inner.runtime = None;
                 inner.last_error = Some(error.to_string());
+                inner.last_load_ms = Some(load_ms);
                 Err(error)
             }
         }
@@ -276,7 +331,17 @@ impl LocalAiState {
             return Err(runtime.unsupported_error());
         }
 
-        runtime.generate(request, sampling)
+        let max_new_tokens = sampling.max_new_tokens;
+        let started = Instant::now();
+        let response = runtime.generate(request, sampling)?;
+        inner.last_generation = Some(generation_stats(
+            &response,
+            max_new_tokens,
+            started.elapsed().as_millis(),
+            "local",
+        ));
+
+        Ok(response)
     }
 
     pub fn generate_with_callback<F>(
@@ -295,7 +360,62 @@ impl LocalAiState {
             return Err(runtime.unsupported_error());
         }
 
-        runtime.generate_with_callback(request, sampling, on_token)
+        let max_new_tokens = sampling.max_new_tokens;
+        let started = Instant::now();
+        let response = runtime.generate_with_callback(request, sampling, on_token)?;
+        inner.last_generation = Some(generation_stats(
+            &response,
+            max_new_tokens,
+            started.elapsed().as_millis(),
+            "local_stream",
+        ));
+
+        Ok(response)
+    }
+
+    pub fn benchmark(&self) -> Result<LocalAiBenchmarkResult, LocalAiError> {
+        let was_loaded = {
+            let inner = self.inner.lock().expect("local ai state poisoned");
+            inner.runtime.is_some() && inner.load_state == LocalAiLoadState::Loaded
+        };
+
+        let load_started = Instant::now();
+        let status_after_load = self.load()?;
+        let load_ms = if was_loaded {
+            None
+        } else {
+            Some(load_started.elapsed().as_millis())
+        };
+
+        if status_after_load.state != LocalAiLoadState::Loaded {
+            return Err(LocalAiError::GenerateFailed(
+                "Local AI model is not ready for benchmark".to_string(),
+            ));
+        }
+
+        let request = LocalAiGenerateRequest {
+            prompt: "한국어로 아주 짧게 인사하고 오늘 메모를 도와주겠다고 말해줘.".to_string(),
+            page_context: None,
+            max_new_tokens: Some(16),
+            temperature: Some(0.0),
+            top_p: Some(1.0),
+        };
+        let generate_started = Instant::now();
+        let response = self.generate(request)?;
+        let generate_ms = generate_started.elapsed().as_millis();
+        let tokens_per_second = tokens_per_second(response.generated_tokens, generate_ms);
+
+        Ok(LocalAiBenchmarkResult {
+            status: self.status(),
+            load_ms,
+            cached_model: was_loaded,
+            generate_ms,
+            prompt_tokens: response.prompt_tokens,
+            generated_tokens: response.generated_tokens,
+            tokens_per_second,
+            speed_label: speed_label(tokens_per_second).to_string(),
+            recommendation: speed_recommendation(tokens_per_second).to_string(),
+        })
     }
 
     fn validate_resource_paths(&self) -> Result<(), LocalAiError> {
@@ -314,7 +434,11 @@ impl LocalAiState {
         Ok(())
     }
 
-    fn status_from_inner(&self, inner: &LocalAiInner) -> LocalAiStatus {
+    fn status_from_inner(
+        &self,
+        inner: &LocalAiInner,
+        mtp_config: Option<MtpConfig>,
+    ) -> LocalAiStatus {
         let model_exists = self.config.model_path.exists();
         let tokenizer_exists = self.config.tokenizer_path.exists();
         let state = if !model_exists {
@@ -326,8 +450,6 @@ impl LocalAiState {
         };
         let cpu_features = runtime_cpu_features();
         let compiled_features = compiled_cpu_features();
-        let mtp_config = MtpConfig::from_env();
-
         LocalAiStatus {
             state,
             model_path: self.config.model_path.to_string_lossy().into_owned(),
@@ -345,6 +467,11 @@ impl LocalAiState {
             avx512_build: avx512_ready(&compiled_features),
             cpu_features,
             compiled_features,
+            runtime_info: runtime_info(),
+            model_file_size_bytes: file_size(&self.config.model_path),
+            tokenizer_file_size_bytes: file_size(&self.config.tokenizer_path),
+            last_load_ms: inner.last_load_ms,
+            last_generation: inner.last_generation.clone(),
         }
     }
 }
@@ -405,6 +532,69 @@ fn compiled_cpu_features() -> BTreeMap<String, bool> {
     features
 }
 
+fn runtime_info() -> LocalAiRuntimeInfo {
+    LocalAiRuntimeInfo {
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        available_parallelism: thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1),
+        build_profile: if cfg!(debug_assertions) {
+            "debug".to_string()
+        } else {
+            "release".to_string()
+        },
+    }
+}
+
+fn file_size(path: &PathBuf) -> Option<u64> {
+    std::fs::metadata(path).ok().map(|metadata| metadata.len())
+}
+
+fn generation_stats(
+    response: &LocalAiGenerateResponse,
+    max_new_tokens: usize,
+    elapsed_ms: u128,
+    mode: &str,
+) -> LocalAiGenerationStats {
+    LocalAiGenerationStats {
+        elapsed_ms,
+        prompt_tokens: response.prompt_tokens,
+        generated_tokens: response.generated_tokens,
+        tokens_per_second: tokens_per_second(response.generated_tokens, elapsed_ms),
+        max_new_tokens,
+        mode: mode.to_string(),
+    }
+}
+
+fn tokens_per_second(generated_tokens: usize, elapsed_ms: u128) -> f64 {
+    if elapsed_ms == 0 {
+        return generated_tokens as f64;
+    }
+
+    generated_tokens as f64 / (elapsed_ms as f64 / 1000.0)
+}
+
+fn speed_label(tokens_per_second: f64) -> &'static str {
+    if tokens_per_second >= 8.0 {
+        "빠름"
+    } else if tokens_per_second >= 3.0 {
+        "보통"
+    } else if tokens_per_second >= 1.0 {
+        "느림"
+    } else {
+        "매우 느림"
+    }
+}
+
+fn speed_recommendation(tokens_per_second: f64) -> &'static str {
+    if tokens_per_second >= 3.0 {
+        "내장 로컬 모델로 짧은 답변은 사용 가능합니다. 답변 토큰을 64-96으로 유지하세요."
+    } else {
+        "VDI CPU에서 내장 모델이 느립니다. 답변 토큰을 64 이하로 쓰거나, VDI 내부 localhost MTP/추론 서버 구성을 검토하세요."
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -437,6 +627,30 @@ mod tests {
     }
 
     #[test]
+    fn status_reports_runtime_diagnostics_without_model_load() {
+        let state = LocalAiState::new(LocalAiConfig {
+            model_path: PathBuf::from("resources/models/missing.gguf"),
+            tokenizer_path: PathBuf::from("resources/models/missing-tokenizer.json"),
+            context_size: 2048,
+        });
+
+        let status = state.status();
+
+        assert!(!status.runtime_info.os.is_empty());
+        assert!(!status.runtime_info.arch.is_empty());
+        assert!(status.runtime_info.available_parallelism >= 1);
+        assert!(status.cpu_features.contains_key("avx2"));
+        assert!(status.compiled_features.contains_key("avx2"));
+    }
+
+    #[test]
+    fn speed_recommendation_marks_slow_vdi_for_mtp_review() {
+        assert_eq!(speed_label(0.5), "매우 느림");
+        assert!(speed_recommendation(0.5).contains("MTP"));
+        assert_eq!(speed_label(3.0), "보통");
+    }
+
+    #[test]
     fn generate_requires_loaded_model() {
         let state = LocalAiState::new(LocalAiConfig {
             model_path: PathBuf::from("resources/models/missing.gguf"),
@@ -455,5 +669,29 @@ mod tests {
             .expect_err("generation should fail before the model is loaded");
 
         assert!(matches!(error, LocalAiError::ModelNotLoaded));
+    }
+
+    #[test]
+    #[ignore = "requires downloaded Gemma 4 GGUF and tokenizer resources"]
+    fn local_downloaded_gemma4_benchmark_reports_vdi_speed() {
+        let models_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("models");
+        let state = LocalAiState::new(LocalAiConfig {
+            model_path: models_dir.join("gemma-4-e2b-it-q4.gguf"),
+            tokenizer_path: models_dir.join("tokenizer.json"),
+            context_size: 512,
+        });
+
+        let result = state
+            .benchmark()
+            .expect("benchmark should run with downloaded Gemma 4 resources");
+
+        println!(
+            "load={:?}ms generate={}ms speed={:.2} tok/s label={}",
+            result.load_ms, result.generate_ms, result.tokens_per_second, result.speed_label
+        );
+        assert!(result.generated_tokens <= 16);
+        assert!(result.generate_ms > 0);
     }
 }

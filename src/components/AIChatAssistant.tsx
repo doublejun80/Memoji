@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { SendHorizontal } from 'lucide-react';
+import { Loader2, SendHorizontal } from 'lucide-react';
 import {
   isLocalAiReady,
+  LOCAL_AI_MAX_NEW_TOKENS_DEFAULT,
   LOCAL_AI_SETTINGS_CHANGED_EVENT,
   localAiModelLabel,
   localAiStateHelp,
@@ -12,6 +13,7 @@ import {
   LocalAiGenerateStreamChunk,
   LocalAiStatus,
   readLocalAiMaxNewTokens,
+  writeLocalAiMaxNewTokens,
 } from '../types/localAi';
 
 interface Message {
@@ -32,6 +34,13 @@ interface GenerateOptions {
   includePageContext?: boolean;
   replaceTarget?: string;
 }
+
+const PAGE_CONTEXT_CHAR_LIMIT = 2000;
+const TOKEN_PRESETS = [
+  { label: '짧게', value: 256 },
+  { label: '기본', value: LOCAL_AI_MAX_NEW_TOKENS_DEFAULT },
+  { label: '길게', value: 1536 },
+];
 
 const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
   onInsertText,
@@ -175,7 +184,7 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
         ? 'local_ai_generate_mtp_stream'
         : 'local_ai_generate_stream';
       const pageContext = options.includePageContext
-        ? currentPageContent?.slice(-3000)
+        ? currentPageContent?.slice(-PAGE_CONTEXT_CHAR_LIMIT)
         : undefined;
 
       const response = await invoke<LocalAiGenerateResponse>(generateCommand, {
@@ -233,6 +242,10 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
 
   const clearChat = () => {
     setMessages([]);
+  };
+
+  const changeMaxNewTokens = (value: number) => {
+    setMaxNewTokens(writeLocalAiMaxNewTokens(value));
   };
 
   const insertToEditor = (text: string) => {
@@ -318,8 +331,9 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
               <button
                 onClick={loadModel}
                 disabled={isLoadingModel || status?.state === 'missing_model' || status?.state === 'missing_tokenizer'}
-                className="h-6 px-2 rounded-md border border-input bg-background text-[10px] disabled:opacity-50"
+                className="inline-flex h-6 items-center gap-1 rounded-md border border-input bg-background px-2 text-[10px] disabled:opacity-50"
               >
+                {isLoadingModel ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : null}
                 {isLoadingModel ? '로드 중' : '로드'}
               </button>
             )}
@@ -334,6 +348,27 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
             </p>
           </div>
         )}
+
+        <div className="memoji-ai-runtime-row">
+          <span className="memoji-ai-runtime-badge">
+            {status?.mtpConfigured ? 'VDI 스트리밍' : '로컬'}
+          </span>
+          <span className="memoji-ai-runtime-detail">최대 {maxNewTokens}토큰</span>
+        </div>
+
+        <div className="memoji-ai-token-presets" aria-label="답변 길이">
+          {TOKEN_PRESETS.map((preset) => (
+            <button
+              key={preset.value}
+              type="button"
+              onClick={() => changeMaxNewTokens(preset.value)}
+              className="memoji-ai-token-preset"
+              data-active={maxNewTokens === preset.value}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
 
         <div className="memoji-ai-quick-actions">
           <button
