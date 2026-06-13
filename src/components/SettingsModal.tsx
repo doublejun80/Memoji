@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ChevronDown, Cpu, Database, FolderOpen, Gauge, Loader2, Settings, Upload } from 'lucide-react';
+import { ChevronDown, Cpu, Database, Download, FolderOpen, Gauge, Loader2, Settings, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   BuiltInPluginState,
@@ -65,6 +65,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [runtimeTestResult, setRuntimeTestResult] = useState<LocalAiRuntimeTestResult | null>(null);
   const [aiBenchmark, setAiBenchmark] = useState<LocalAiBenchmarkResult | null>(null);
   const [isImportingDatabase, setIsImportingDatabase] = useState(false);
+  const [isExportingPages, setIsExportingPages] = useState(false);
   const [maxNewTokens, setMaxNewTokens] = useState(readLocalAiMaxNewTokens);
   const [editorPreferences, setEditorPreferences] = useState(readEditorPreferences);
   const [builtInPlugins, setBuiltInPlugins] = useState<BuiltInPluginState[]>([]);
@@ -254,6 +255,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       if (databaseInputRef.current) {
         databaseInputRef.current.value = '';
       }
+    }
+  };
+
+  const exportAllPages = async () => {
+    setIsExportingPages(true);
+    try {
+      const summary = await tauriStorage.exportPagesZip();
+      toast.success(`전체 페이지 ZIP 내보내기 완료: ${summary.exported}개 파일`, {
+        description: summary.zip_path,
+      });
+    } catch (error) {
+      toast.error('전체 페이지 ZIP 내보내기 실패: ' + String(error));
+    } finally {
+      setIsExportingPages(false);
     }
   };
 
@@ -599,8 +614,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 )}
                 기존 memoji.db 가져오기
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={exportAllPages}
+                disabled={isExportingPages}
+              >
+                {isExportingPages ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-1 h-4 w-4" />
+                )}
+                전체 페이지 ZIP 내보내기
+              </Button>
               <span className="text-xs text-muted-foreground">
-                현재 DB를 백업한 뒤 페이지를 병합합니다.
+                가져오기는 현재 DB를 백업한 뒤 병합하고, 내보내기는 페이지별 Markdown 파일과 manifest.json을 ZIP으로 저장합니다.
               </span>
             </div>
           </section>

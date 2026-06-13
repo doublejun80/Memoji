@@ -1,16 +1,18 @@
 mod database;
 mod local_ai;
 
-use database::{Database, ImportDatabaseSummary, Page};
+use database::{build_page_export_entries, Database, ImportDatabaseSummary, Page};
 use local_ai::{
     LocalAiBenchmarkResult, LocalAiConfig, LocalAiGenerateRequest, LocalAiGenerateResponse,
     LocalAiGenerateStreamChunk, LocalAiState, LocalAiStatus, MtpConfig, DEFAULT_MTP_MODEL,
 };
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, Window};
+use zip::write::SimpleFileOptions;
 
 struct AppState {
     db: Mutex<Database>,
@@ -55,6 +57,12 @@ struct ImportDatabaseResult {
     duplicated: usize,
     skipped: usize,
     backup_path: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PagesZipExportResult {
+    exported: usize,
+    zip_path: String,
 }
 
 impl ImportDatabaseResult {
@@ -340,6 +348,60 @@ fn import_memoji_database(
 }
 
 #[tauri::command]
+fn export_pages_zip(state: State<AppState>) -> Result<PagesZipExportResult, String> {
+    let pages = {
+        let db = state.db.lock().map_err(|error| error.to_string())?;
+        db.get_pages().map_err(|error| error.to_string())?
+    };
+
+    if pages.is_empty() {
+        return Err("내보낼 페이지가 없습니다.".to_string());
+    }
+
+    let entries = build_page_export_entries(&pages);
+    let data_dir = get_data_directory()?;
+    let export_dir = data_dir.join("exports");
+    std::fs::create_dir_all(&export_dir)
+        .map_err(|error| format!("Failed to create export directory: {}", error))?;
+
+    let now = chrono::Local::now();
+    let export_stamp = format!(
+        "{}-{:03}",
+        now.format("%Y%m%d-%H%M%S"),
+        now.timestamp_subsec_millis()
+    );
+    let zip_path = export_dir.join(format!("memoji-pages-{}.zip", export_stamp));
+    let zip_file = std::fs::File::create(&zip_path)
+        .map_err(|error| format!("Failed to create export zip: {}", error))?;
+    let mut zip = zip::ZipWriter::new(zip_file);
+    let options = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Stored)
+        .unix_permissions(0o644);
+
+    let manifest = serde_json::to_string_pretty(&pages)
+        .map_err(|error| format!("Failed to serialize export manifest: {}", error))?;
+    zip.start_file("manifest.json", options)
+        .map_err(|error| format!("Failed to write manifest: {}", error))?;
+    zip.write_all(manifest.as_bytes())
+        .map_err(|error| format!("Failed to write manifest: {}", error))?;
+
+    for entry in &entries {
+        zip.start_file(&entry.path, options)
+            .map_err(|error| format!("Failed to write '{}': {}", entry.path, error))?;
+        zip.write_all(entry.content.as_bytes())
+            .map_err(|error| format!("Failed to write '{}': {}", entry.path, error))?;
+    }
+
+    zip.finish()
+        .map_err(|error| format!("Failed to finalize export zip: {}", error))?;
+
+    Ok(PagesZipExportResult {
+        exported: entries.len(),
+        zip_path: zip_path.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
 fn local_ai_status(state: State<AppState>) -> Result<LocalAiStatus, String> {
     let mtp_config = resolve_mtp_config(&state)?;
     Ok(state.local_ai.status_with_mtp_config(mtp_config))
@@ -610,6 +672,7 @@ pub fn run() {
             get_data_path,
             open_data_folder,
             import_memoji_database,
+            export_pages_zip,
             local_ai_status,
             local_ai_load,
             local_ai_get_runtime_config,

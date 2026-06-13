@@ -123,6 +123,7 @@ dependencies = [
  "tauri-plugin-log",
  "tauri-plugin-single-instance",
  "tokenizers",
+ "zip",
 ]
 
 [[package]]

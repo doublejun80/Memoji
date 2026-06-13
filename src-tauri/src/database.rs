@@ -360,6 +360,180 @@ impl Database {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageExportEntry {
+    pub path: String,
+    pub content: String,
+}
+
+pub fn build_page_export_entries(pages: &[Page]) -> Vec<PageExportEntry> {
+    let pages_by_id: HashMap<String, &Page> =
+        pages.iter().map(|page| (page.id.clone(), page)).collect();
+
+    let mut entries: Vec<PageExportEntry> = pages
+        .iter()
+        .filter(|page| page.page_type != "folder")
+        .map(|page| PageExportEntry {
+            path: page_export_path(page, &pages_by_id),
+            content: page_export_content(page),
+        })
+        .collect();
+
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    entries
+}
+
+fn page_export_path(page: &Page, pages_by_id: &HashMap<String, &Page>) -> String {
+    let mut segments = Vec::new();
+    let project_parent_id = page_project_parent_id(page);
+    let is_project_page = page.project_index.unwrap_or(false)
+        || project_parent_id.is_some()
+        || page.date_key.is_none();
+
+    if is_project_page {
+        segments.push("projects".to_string());
+        segments.extend(project_parent_segments(page, pages_by_id));
+    } else if let Some(date_key) = page
+        .date_key
+        .as_deref()
+        .filter(|date| !date.trim().is_empty())
+    {
+        segments.push("daily".to_string());
+        segments.push(sanitize_export_segment(date_key));
+    } else {
+        segments.push("pages".to_string());
+    }
+
+    segments.push(format!(
+        "{}__{}.md",
+        sanitize_export_segment(&page.title),
+        sanitize_export_segment(&page.id)
+    ));
+    segments.join("/")
+}
+
+fn project_parent_segments(page: &Page, pages_by_id: &HashMap<String, &Page>) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut visited = HashSet::new();
+    let mut cursor = page_project_parent_id(page).map(str::to_string);
+
+    while let Some(parent_id) = cursor {
+        if !visited.insert(parent_id.clone()) {
+            break;
+        }
+
+        let Some(parent) = pages_by_id.get(&parent_id) else {
+            break;
+        };
+
+        segments.push(sanitize_export_segment(&parent.title));
+        cursor = page_project_parent_id(parent).map(str::to_string);
+    }
+
+    segments.reverse();
+    segments
+}
+
+fn page_project_parent_id(page: &Page) -> Option<&str> {
+    page.project_parent_id
+        .as_deref()
+        .or(page.parent_id.as_deref())
+        .map(str::trim)
+        .filter(|parent_id| !parent_id.is_empty())
+}
+
+fn sanitize_export_segment(raw: &str) -> String {
+    let mut sanitized = raw
+        .trim()
+        .chars()
+        .map(|character| {
+            if character.is_control()
+                || matches!(
+                    character,
+                    '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+                )
+            {
+                '_'
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+
+    while sanitized.ends_with([' ', '.']) {
+        sanitized.pop();
+    }
+
+    if sanitized.is_empty() {
+        sanitized = "Untitled".to_string();
+    }
+
+    let upper = sanitized.to_ascii_uppercase();
+    let is_reserved = matches!(
+        upper.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    );
+
+    if is_reserved {
+        format!("_{sanitized}")
+    } else {
+        sanitized
+    }
+}
+
+fn page_export_content(page: &Page) -> String {
+    let tags_json = serde_json::to_string(&page.tags).unwrap_or_else(|_| "[]".to_string());
+    let mut content = String::new();
+
+    content.push_str("---\n");
+    content.push_str(&format!("id: {}\n", yaml_string(&page.id)));
+    content.push_str(&format!("title: {}\n", yaml_string(&page.title)));
+    content.push_str(&format!("type: {}\n", yaml_string(&page.page_type)));
+    if let Some(date_key) = page.date_key.as_deref() {
+        content.push_str(&format!("date_key: {}\n", yaml_string(date_key)));
+    }
+    if let Some(parent_id) = page_project_parent_id(page) {
+        content.push_str(&format!("project_parent_id: {}\n", yaml_string(parent_id)));
+    }
+    content.push_str(&format!("created_at: {}\n", yaml_string(&page.created_at)));
+    content.push_str(&format!("updated_at: {}\n", yaml_string(&page.updated_at)));
+    content.push_str(&format!("tags: {tags_json}\n"));
+    content.push_str("---\n\n");
+    content.push_str("# ");
+    content.push_str(&page.title);
+    content.push_str("\n\n");
+    content.push_str(&page.content);
+    if !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content
+}
+
+fn yaml_string(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
+}
+
 fn validate_source_database(source: &Connection) -> std::result::Result<(), String> {
     let quick_check: String = source
         .query_row("PRAGMA quick_check", [], |row| row.get(0))
@@ -570,6 +744,116 @@ mod tests {
         Database {
             conn: Connection::open_in_memory().unwrap(),
         }
+    }
+
+    fn export_test_page(
+        id: &str,
+        title: &str,
+        page_type: &str,
+        project_parent_id: Option<&str>,
+        date_key: Option<&str>,
+        order: i32,
+    ) -> Page {
+        Page {
+            id: id.to_string(),
+            title: title.to_string(),
+            icon: if page_type == "folder" {
+                "📁"
+            } else {
+                "📄"
+            }
+            .to_string(),
+            parent_id: project_parent_id.map(str::to_string),
+            project_parent_id: project_parent_id.map(str::to_string),
+            project_index: Some(project_parent_id.is_some() || date_key.is_none()),
+            date_key: date_key.map(str::to_string),
+            content: format!("content for {title}"),
+            created_at: "2026-05-01T09:00:00.000".to_string(),
+            updated_at: "2026-05-01T09:00:00.000".to_string(),
+            page_type: page_type.to_string(),
+            tags: vec![],
+            order,
+        }
+    }
+
+    #[test]
+    fn export_entries_put_repeated_folder_children_under_that_folder() {
+        let pages = vec![
+            export_test_page("folder-1", "저장", "folder", None, None, 0),
+            export_test_page(
+                "child-1",
+                "하위 페이지 1",
+                "page",
+                Some("folder-1"),
+                None,
+                0,
+            ),
+            export_test_page(
+                "child-2",
+                "하위 페이지 2",
+                "page",
+                Some("folder-1"),
+                None,
+                1,
+            ),
+            export_test_page(
+                "child-3",
+                "하위 페이지 3",
+                "page",
+                Some("folder-1"),
+                None,
+                2,
+            ),
+            export_test_page(
+                "child-4",
+                "하위 페이지 4",
+                "page",
+                Some("folder-1"),
+                None,
+                3,
+            ),
+        ];
+
+        let entries = build_page_export_entries(&pages);
+        let paths: Vec<&str> = entries.iter().map(|entry| entry.path.as_str()).collect();
+
+        assert_eq!(paths.len(), 4);
+        assert!(paths.iter().all(|path| path.starts_with("projects/저장/")));
+        assert!(paths
+            .iter()
+            .any(|path| path.contains("하위 페이지 4__child-4.md")));
+    }
+
+    #[test]
+    fn export_entries_keep_daily_and_project_pages_separate_without_duplicates() {
+        let pages = vec![
+            export_test_page("daily-1", "새 페이지", "page", None, Some("2026-05-07"), 0),
+            export_test_page("folder-1", "프로젝트", "folder", None, None, 0),
+            export_test_page("project-1", "새 페이지", "page", Some("folder-1"), None, 0),
+        ];
+
+        let entries = build_page_export_entries(&pages);
+        let paths: Vec<&str> = entries.iter().map(|entry| entry.path.as_str()).collect();
+
+        assert_eq!(paths.len(), 2);
+        assert!(paths.contains(&"daily/2026-05-07/새 페이지__daily-1.md"));
+        assert!(paths.contains(&"projects/프로젝트/새 페이지__project-1.md"));
+    }
+
+    #[test]
+    fn export_entries_sanitize_windows_unsafe_names() {
+        let pages = vec![export_test_page(
+            "daily:1",
+            "A/B: C*?",
+            "page",
+            None,
+            Some("2026-05-07"),
+            0,
+        )];
+
+        let entries = build_page_export_entries(&pages);
+
+        assert_eq!(entries[0].path, "daily/2026-05-07/A_B_ C____daily_1.md");
     }
 
     #[test]

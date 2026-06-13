@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { MarkdownEditor } from './components/MarkdownEditor';
 import { TopBar } from './components/TopBar';
@@ -51,6 +51,11 @@ function AppContent() {
   const [saveTriggered, setSaveTriggered] = useState(0); // 저장 트리거 카운터
   const [startupError, setStartupError] = useState<string | null>(null);
   const { isFocusMode } = useFocusMode();
+  const pagesRef = useRef<Page[]>([]);
+
+  useEffect(() => {
+    pagesRef.current = pages;
+  }, [pages]);
 
   // 단축키 설정 마이그레이션 (이전 원문 전환 단축키 id 유지)
   useEffect(() => {
@@ -135,6 +140,7 @@ function AppContent() {
   const reloadPagesFromStorage = useCallback(async () => {
     const loadedPages = await tauriStorage.getPages();
     const savedPages = loadedPages.map(normalizePage);
+    pagesRef.current = savedPages;
     setPages(savedPages);
     setCurrentPage(previousPage => {
       if (previousPage) {
@@ -188,6 +194,7 @@ function AppContent() {
     if (pagesToDelete.length > 0) {
       await Promise.all(pagesToDelete.map(pageId => tauriStorage.deletePage(pageId)));
       const updatedPages = pages.filter(page => !pagesToDelete.includes(page.id));
+      pagesRef.current = updatedPages;
       setPages(updatedPages);
       
       // If current page was deleted, clear it
@@ -246,6 +253,7 @@ function AppContent() {
         const savedPages = loadedPages.map(normalizePage);
 
         setStartupError(null);
+        pagesRef.current = savedPages;
         setPages(savedPages);
 
         // Load app title from storage
@@ -315,10 +323,19 @@ function AppContent() {
     }
 
     const normalizedProjectParentId = projectParentId || null;
+    const currentPages = pagesRef.current;
+    if (
+      normalizedProjectParentId
+      && !currentPages.some(page => page.id === normalizedProjectParentId)
+    ) {
+      console.warn('Project parent not found; skipped creating orphan project page:', normalizedProjectParentId);
+      return;
+    }
+
     const pageDate = dateKey ? parseDateKey(dateKey) : new Date();
     const siblingPages = dateKey !== null && normalizedProjectParentId === null
-      ? pages.filter(p => p.type !== 'folder' && getPageDateKey(p) === dateKey)
-      : pages.filter(p => isProjectIndexPage(p) && getProjectParentId(p) === normalizedProjectParentId);
+      ? currentPages.filter(p => p.type !== 'folder' && getPageDateKey(p) === dateKey)
+      : currentPages.filter(p => isProjectIndexPage(p) && getProjectParentId(p) === normalizedProjectParentId);
     const maxOrder = Math.max(
       ...siblingPages.map(p => p.order),
       -1
@@ -342,7 +359,8 @@ function AppContent() {
 
     await tauriStorage.savePage(newPage);
 
-    const updatedPages = [...pages, newPage];
+    const updatedPages = [...currentPages, newPage];
+    pagesRef.current = updatedPages;
     setPages(updatedPages);
 
     // 폴더가 아니고 switchToNew가 true인 경우에만 새 페이지로 전환
@@ -402,9 +420,11 @@ function AppContent() {
     const normalizedPage = normalizePage(updatedPage);
     await tauriStorage.savePage(normalizedPage);
 
-    setPages(prevPages => prevPages.map(page =>
+    const updatedPages = pagesRef.current.map(page =>
       page.id === normalizedPage.id ? normalizedPage : page
-    ));
+    );
+    pagesRef.current = updatedPages;
+    setPages(updatedPages);
 
     setCurrentPage(previousPage => (
       previousPage?.id === normalizedPage.id ? normalizedPage : previousPage
@@ -417,6 +437,7 @@ function AppContent() {
     await tauriStorage.deletePage(pageId);
 
     const updatedPages = pages.filter(page => !pagesToDelete.includes(page.id));
+    pagesRef.current = updatedPages;
     setPages(updatedPages);
 
     // If current page was deleted, select another page from filtered pages
@@ -471,6 +492,7 @@ function AppContent() {
       return updatedSibling || page;
     });
 
+    pagesRef.current = updatedPages;
     setPages(updatedPages);
 
     // Save all affected pages
@@ -508,6 +530,7 @@ function AppContent() {
     });
     const updatedPages = pages.map(page => page.id === pageId ? updatedPage : page);
 
+    pagesRef.current = updatedPages;
     setPages(updatedPages);
     if (currentPage?.id === pageId) {
       setCurrentPage(updatedPage);

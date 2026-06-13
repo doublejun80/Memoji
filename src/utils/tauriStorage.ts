@@ -8,6 +8,11 @@ export interface DatabaseImportSummary {
   backup_path: string;
 }
 
+export interface PagesZipExportSummary {
+  exported: number;
+  zip_path: string;
+}
+
 // Dynamic import for Tauri API to handle environments where it's not available
 let invoke: any = null;
 
@@ -350,6 +355,16 @@ class TauriStorage {
     const buffer = await file.arrayBuffer();
     const bytes = Array.from(new Uint8Array(buffer));
     return await invoke('import_memoji_database', { dbBytes: bytes }) as DatabaseImportSummary;
+  }
+
+  async exportPagesZip(): Promise<PagesZipExportSummary> {
+    await this.init();
+
+    if (!this.isInitialized || !this.isTauriAvailable || !invoke) {
+      throw new Error('전체 페이지 ZIP 내보내기는 데스크톱 앱에서만 사용할 수 있습니다.');
+    }
+
+    return await invoke('export_pages_zip') as PagesZipExportSummary;
   }
 }
 
