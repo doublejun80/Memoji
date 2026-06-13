@@ -13,3 +13,7 @@ export interface Page {
   tags: string[]; // 태그 배열 추가
   order: number; // 정렬 순서
 }
+
+export type PageNavigationIndex = 'daily' | 'project';
+
+export type PageSelectionSource = PageNavigationIndex | 'global';

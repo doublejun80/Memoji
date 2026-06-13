@@ -8,12 +8,13 @@ import { SettingsModal } from './components/SettingsModal';
 import { RightPanel } from './components/RightPanel';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { FocusModeProvider, useFocusMode } from './contexts/FocusModeContext';
-import { Page } from './types';
+import { Page, PageNavigationIndex, PageSelectionSource } from './types';
 import { tauriStorage } from './utils/tauriStorage';
 import { logEnvironmentInfo } from './utils/environment';
 import { formatDateKey, parseDateKey, toLocalISOString } from './utils/dateUtils';
 import { pageWithMarkdownMetadata } from './utils/markdownMetadata';
 import { getPageDateKey, getPagesForDate, getProjectParentId, isProjectIndexPage, normalizePage } from './utils/pageModel';
+import { resolvePageSelectionState } from './utils/navigationState';
 import { Toaster } from './components/ui/sonner';
 
 interface CreatePageOptions {
@@ -41,6 +42,7 @@ const readKeyboardShortcuts = (): any[] => {
 function AppContent() {
   const [pages, setPages] = useState<Page[]>([]);
   const [currentPage, setCurrentPage] = useState<Page | null>(null);
+  const [currentPageIndex, setCurrentPageIndex] = useState<PageNavigationIndex>('daily');
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
@@ -206,6 +208,7 @@ function AppContent() {
 
   const handleDateSelect = (date: Date) => {
     setSelectedDate(date);
+    setCurrentPageIndex('daily');
     setCurrentPage(null); // Clear current page when changing dates
   };
 
@@ -268,6 +271,7 @@ function AppContent() {
         const todayPages = getPagesForDate(savedPages, todayKey);
 
         if (todayPages.length > 0 && !currentPage) {
+          setCurrentPageIndex('daily');
           setCurrentPage(todayPages[0]);
         }
       } catch (error) {
@@ -297,16 +301,31 @@ function AppContent() {
 
 
 
-  const handlePageSelect = (page: Page) => {
-    setCurrentPage(page);
+  const handleDailyIndexOpen = useCallback(() => {
+    const dailyPages = getPagesForDate(pagesRef.current, selectedDateKey);
 
-    // 날짜 소속이 있는 페이지를 선택하면 달력도 해당 날짜로 이동한다.
+    setCurrentPageIndex('daily');
+    setCurrentPage(previousPage => (
+      previousPage && dailyPages.some(page => page.id === previousPage.id)
+        ? previousPage
+        : dailyPages[0] || null
+    ));
+  }, [selectedDateKey]);
+
+  const handlePageSelect = (page: Page, source: PageSelectionSource = 'global') => {
     const pageDateKey = getPageDateKey(page);
-    if (!pageDateKey) return;
+    const nextSelectionState = resolvePageSelectionState({
+      currentDateKey: selectedDateKey,
+      pageDateKey,
+      isProjectPage: isProjectIndexPage(page),
+      requestedSource: source,
+    });
 
-    // 현재 선택된 날짜와 페이지의 날짜가 다르면 날짜 변경
-    if (selectedDateKey !== pageDateKey) {
-      setSelectedDate(parseDateKey(pageDateKey));
+    setCurrentPage(page);
+    setCurrentPageIndex(nextSelectionState.activeIndex);
+
+    if (selectedDateKey !== nextSelectionState.selectedDateKey) {
+      setSelectedDate(parseDateKey(nextSelectionState.selectedDateKey));
     }
   };
 
@@ -365,6 +384,7 @@ function AppContent() {
 
     // 폴더가 아니고 switchToNew가 true인 경우에만 새 페이지로 전환
     if (type === 'page' && switchToNew) {
+      setCurrentPageIndex(dateKey === null || normalizedProjectParentId !== null ? 'project' : 'daily');
       setCurrentPage(newPage);
     }
   };
@@ -442,6 +462,7 @@ function AppContent() {
 
     // If current page was deleted, select another page from filtered pages
     if (currentPage && pagesToDelete.includes(currentPage.id)) {
+      setCurrentPageIndex('daily');
       setCurrentPage(getPagesForDate(updatedPages, selectedDateKey)[0] || null);
     }
   };
@@ -596,7 +617,7 @@ function AppContent() {
   };
 
   return (
-    <div className={`h-screen flex flex-col bg-background text-foreground ${isFocusMode ? 'focus-mode' : ''}`}>
+    <div className={`memoji-app-shell h-screen flex flex-col bg-background text-foreground ${isFocusMode ? 'focus-mode' : ''}`}>
       {/* TopBar - 집중 모드에서 숨김 */}
       {!isFocusMode && (
         <TopBar
@@ -629,7 +650,9 @@ function AppContent() {
               pages={pages}
               dailyPages={getDailyPages()}
               currentPage={currentPage}
+              currentPageIndex={currentPageIndex}
               onPageSelect={handlePageSelect}
+              onDailyIndexOpen={handleDailyIndexOpen}
               onDailyPageCreate={handleDailyPageCreate}
               onProjectPageCreate={handleProjectPageCreate}
               onProjectFolderCreate={handleProjectFolderCreate}

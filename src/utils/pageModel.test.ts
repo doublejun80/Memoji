@@ -9,8 +9,28 @@ import {
 } from './pageModel';
 import { Page } from '../types';
 
-const legacyPage: Page = {
-  id: 'legacy',
+const legacyDailyPage: Page = {
+  id: 'legacy-daily',
+  title: '기존 날짜 메모',
+  icon: '📄',
+  parentId: null,
+  content: 'old content',
+  createdAt: '2026-05-01T09:30:00.000',
+  updatedAt: '2026-05-01T09:30:00.000',
+  type: 'page',
+  tags: [],
+  order: 2,
+};
+
+const normalizedLegacyDaily = normalizePage(legacyDailyPage, 0);
+
+assert.equal(normalizedLegacyDaily.dateKey, '2026-05-01');
+assert.equal(normalizedLegacyDaily.projectParentId, null);
+assert.equal(getPageDateKey(normalizedLegacyDaily), '2026-05-01');
+assert.equal(getProjectParentId(normalizedLegacyDaily), null);
+
+const legacyProjectPage: Page = {
+  id: 'legacy-project',
   title: '기존 날짜 메모',
   icon: '📄',
   parentId: 'legacy-folder',
@@ -22,12 +42,12 @@ const legacyPage: Page = {
   order: 2,
 };
 
-const normalizedLegacy = normalizePage(legacyPage, 0);
+const normalizedLegacyProject = normalizePage(legacyProjectPage, 0);
 
-assert.equal(normalizedLegacy.dateKey, '2026-05-01');
-assert.equal(normalizedLegacy.projectParentId, 'legacy-folder');
-assert.equal(getPageDateKey(normalizedLegacy), '2026-05-01');
-assert.equal(getProjectParentId(normalizedLegacy), 'legacy-folder');
+assert.equal(normalizedLegacyProject.dateKey, null);
+assert.equal(normalizedLegacyProject.projectParentId, 'legacy-folder');
+assert.equal(getPageDateKey(normalizedLegacyProject), null);
+assert.equal(getProjectParentId(normalizedLegacyProject), 'legacy-folder');
 
 const projectFolder: Page = normalizePage({
   id: 'project',

@@ -24,6 +24,7 @@ pub struct Gemma4Runtime {
     tokenizer: LocalTokenizer,
     model: Gemma4Model,
     eos_token_id: u32,
+    stop_token_ids: Vec<u32>,
     context_size: usize,
 }
 
@@ -56,6 +57,7 @@ impl Gemma4Runtime {
                     .or_else(|| tokenizer.token_to_id("</s>"))
                     .unwrap_or(1)
             });
+        let stop_token_ids = stop_token_ids_from_tokenizer(&tokenizer, eos_token_id);
 
         let model_info = LocalAiModelInfo {
             architecture: architecture.clone(),
@@ -77,6 +79,7 @@ impl Gemma4Runtime {
             tokenizer,
             model,
             eos_token_id,
+            stop_token_ids,
             context_size: config.context_size,
         })
     }
@@ -159,8 +162,12 @@ impl Gemma4Runtime {
                 .sample(&logits)
                 .map_err(|error| LocalAiError::GenerateFailed(error.to_string()))?;
 
-            if next_token == self.eos_token_id {
-                finish_reason = "eos_token".to_string();
+            if self.stop_token_ids.contains(&next_token) {
+                finish_reason = if next_token == self.eos_token_id {
+                    "eos_token".to_string()
+                } else {
+                    "stop_token".to_string()
+                };
                 break;
             }
 
@@ -900,24 +907,37 @@ fn rms_norm_no_weight(x: &Tensor, weight: &Tensor, eps: f64) -> CandleResult<Ten
 }
 
 fn build_prompt(request: &LocalAiGenerateRequest) -> String {
-    let mut system = String::from(
-        "You are Memoji's local note assistant. Answer concisely in Korean unless the user asks otherwise. Do not use tools or hidden reasoning.",
-    );
-
-    if let Some(context) = request
+    let system = "You are Memoji's local note assistant. Answer concisely in Korean unless the user asks otherwise. Do not use tools or hidden reasoning. Do not repeat the user's request. If note context is provided, transform that context instead of explaining the task.";
+    let user = if let Some(context) = request
         .page_context
         .as_ref()
         .filter(|value| !value.trim().is_empty())
     {
-        system.push_str("\n\nCurrent note context:\n");
-        system.push_str(context.trim());
-    }
+        format!(
+            "현재 문서:\n{}\n\n요청:\n{}",
+            context.trim(),
+            request.prompt.trim()
+        )
+    } else {
+        request.prompt.trim().to_string()
+    };
 
     format!(
         "<bos><|turn>system\n{}<turn|>\n<|turn>user\n{}<turn|>\n<|turn>model\n",
-        system,
-        request.prompt.trim()
+        system, user
     )
+}
+
+fn stop_token_ids_from_tokenizer(tokenizer: &LocalTokenizer, eos_token_id: u32) -> Vec<u32> {
+    let mut stop_token_ids = vec![eos_token_id];
+    for token in ["<|turn>", "<turn|>", "<|tool_response>"] {
+        if let Some(token_id) = tokenizer.token_to_id(token) {
+            if !stop_token_ids.contains(&token_id) {
+                stop_token_ids.push(token_id);
+            }
+        }
+    }
+    stop_token_ids
 }
 
 fn trim_prompt_tokens_for_generation(
@@ -1168,6 +1188,36 @@ mod tests {
             MIN_PROMPT_TOKENS_FOR_GENERATION - PROMPT_RESPONSE_SAFETY_TOKENS
         );
         assert_eq!(max_new_tokens, 448);
+    }
+
+    #[test]
+    fn prompt_places_note_context_in_user_turn() {
+        let prompt = build_prompt(&LocalAiGenerateRequest {
+            prompt: "현재 문서를 정리해줘.".to_string(),
+            page_context: Some("회의 결정: 금요일 배포".to_string()),
+            max_new_tokens: None,
+            temperature: None,
+            top_p: None,
+        });
+
+        assert!(prompt.contains("<|turn>system\n"));
+        assert!(prompt.contains("<|turn>user\n현재 문서:\n회의 결정: 금요일 배포\n\n요청:\n현재 문서를 정리해줘.<turn|>"));
+        assert!(prompt.ends_with("<|turn>model\n"));
+    }
+
+    #[test]
+    fn gemma4_tokenizer_stop_tokens_include_turn_boundaries() {
+        let tokenizer_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("models")
+            .join("tokenizer.json");
+        let tokenizer = LocalTokenizer::from_file(&tokenizer_path).expect("tokenizer should load");
+
+        let stop_token_ids = stop_token_ids_from_tokenizer(&tokenizer, 1);
+
+        assert!(stop_token_ids.contains(&1));
+        assert!(stop_token_ids.contains(&105));
+        assert!(stop_token_ids.contains(&106));
     }
 
     #[test]

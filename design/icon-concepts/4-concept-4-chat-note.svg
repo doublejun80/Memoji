@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <filter id="shadow-four" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="28" stdDeviation="34" flood-color="#130c25" flood-opacity="0.28"/>
+    </filter>
+    <filter id="inner-four" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#221527" flood-opacity="0.18"/>
+    </filter>
+
+        <linearGradient id="bg-four" x1="110" y1="100" x2="900" y2="920" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#232936"/>
+          <stop offset="0.52" stop-color="#111522"/>
+          <stop offset="1" stop-color="#4b243f"/>
+        </linearGradient>
+        <linearGradient id="bubble-four" x1="266" y1="196" x2="758" y2="790" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#ffffff"/>
+          <stop offset="1" stop-color="#eef3ff"/>
+        </linearGradient>
+  </defs>
+  <rect x="68" y="68" width="888" height="888" rx="210" fill="url(#bg-four)" filter="url(#shadow-four)"/>
+  <circle cx="806" cy="244" r="116" fill="#ff5f9c" opacity=".18"/><circle cx="238" cy="796" r="170" fill="#4ee8d5" opacity=".13"/>
+
+        <g filter="url(#inner-four)">
+          <path d="M244 294c0-62 50-112 112-112h312c62 0 112 50 112 112v276c0 62-50 112-112 112H488L334 806v-124c-51-10-90-55-90-110V294Z" fill="url(#bubble-four)"/>
+          <path d="M367 413h290" stroke="#202434" stroke-width="36" stroke-linecap="round"/>
+          <path d="M367 516h206" stroke="#202434" stroke-width="36" stroke-linecap="round" opacity=".66"/>
+          <path d="M674 182h22c46 0 84 38 84 84v22L674 182Z" fill="#5be8d8"/>
+          <path d="M616 658c55-8 94-32 116-72" stroke="#ffbf3f" stroke-width="34" stroke-linecap="round" fill="none"/>
+        </g>
+</svg>

@@ -408,8 +408,12 @@ fn local_ai_status(state: State<AppState>) -> Result<LocalAiStatus, String> {
 }
 
 #[tauri::command]
-fn local_ai_load(state: State<AppState>) -> Result<LocalAiStatus, String> {
-    state.local_ai.load().map_err(|error| error.to_string())
+async fn local_ai_load(state: State<'_, AppState>) -> Result<LocalAiStatus, String> {
+    let local_ai = state.local_ai.clone();
+
+    tauri::async_runtime::spawn_blocking(move || local_ai.load().map_err(|error| error.to_string()))
+        .await
+        .map_err(|error| format!("Local AI worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -430,11 +434,14 @@ fn local_ai_save_runtime_config(
 }
 
 #[tauri::command]
-fn local_ai_benchmark(state: State<AppState>) -> Result<LocalAiBenchmarkResult, String> {
-    state
-        .local_ai
-        .benchmark()
-        .map_err(|error| error.to_string())
+async fn local_ai_benchmark(state: State<'_, AppState>) -> Result<LocalAiBenchmarkResult, String> {
+    let local_ai = state.local_ai.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        local_ai.benchmark().map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Local AI worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -474,42 +481,51 @@ async fn local_ai_test_runtime_config(
 }
 
 #[tauri::command]
-fn local_ai_generate(
+async fn local_ai_generate(
     request: LocalAiGenerateRequest,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<LocalAiGenerateResponse, String> {
-    state
-        .local_ai
-        .generate(request)
-        .map_err(|error| error.to_string())
+    let local_ai = state.local_ai.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        local_ai
+            .generate(request)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Local AI worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn local_ai_generate_stream(
+async fn local_ai_generate_stream(
     request_id: String,
     request: LocalAiGenerateRequest,
     window: Window,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<LocalAiGenerateResponse, String> {
+    let local_ai = state.local_ai.clone();
     let stream_window = window.clone();
     let stream_request_id = request_id.clone();
-    let response = state
-        .local_ai
-        .generate_with_callback(request, move |token_text, generated_tokens| {
-            stream_window
-                .emit(
-                    "local-ai-generate-chunk",
-                    LocalAiGenerateStreamChunk {
-                        request_id: stream_request_id.clone(),
-                        token_text,
-                        generated_tokens,
-                        done: false,
-                        finish_reason: None,
-                    },
-                )
-                .map_err(|error| local_ai::LocalAiError::GenerateFailed(error.to_string()))
-        })
-        .map_err(|error| error.to_string())?;
+    let response = tauri::async_runtime::spawn_blocking(move || {
+        local_ai
+            .generate_with_callback(request, move |token_text, generated_tokens| {
+                stream_window
+                    .emit(
+                        "local-ai-generate-chunk",
+                        LocalAiGenerateStreamChunk {
+                            request_id: stream_request_id.clone(),
+                            token_text,
+                            generated_tokens,
+                            done: false,
+                            finish_reason: None,
+                        },
+                    )
+                    .map_err(|error| local_ai::LocalAiError::GenerateFailed(error.to_string()))
+            })
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Local AI worker failed: {error}"))??;
 
     window
         .emit(

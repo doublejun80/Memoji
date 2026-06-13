@@ -7,7 +7,14 @@ use gemma4::Gemma4Runtime;
 pub use mtp_client::{generate_mtp_stream, MtpConfig, DEFAULT_MTP_MODEL};
 use sampler::SamplingConfig;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fmt, path::PathBuf, sync::Mutex, thread, time::Instant};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    thread,
+    time::Instant,
+};
 
 const DEFAULT_CONTEXT_SIZE: usize = 2048;
 const MIN_CONTEXT_SIZE: usize = 512;
@@ -246,24 +253,24 @@ struct LocalAiInner {
     last_generation: Option<LocalAiGenerationStats>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LocalAiState {
     config: LocalAiConfig,
-    inner: Mutex<LocalAiInner>,
+    inner: Arc<Mutex<LocalAiInner>>,
 }
 
 impl LocalAiState {
     pub fn new(config: LocalAiConfig) -> Self {
         Self {
             config,
-            inner: Mutex::new(LocalAiInner {
+            inner: Arc::new(Mutex::new(LocalAiInner {
                 runtime: None,
                 load_state: LocalAiLoadState::NotLoaded,
                 model_info: None,
                 last_error: None,
                 last_load_ms: None,
                 last_generation: None,
-            }),
+            })),
         }
     }
 
@@ -669,6 +676,22 @@ mod tests {
             .expect_err("generation should fail before the model is loaded");
 
         assert!(matches!(error, LocalAiError::ModelNotLoaded));
+    }
+
+    #[test]
+    fn cloned_state_shares_status_for_background_generation() {
+        let state = LocalAiState::new(LocalAiConfig {
+            model_path: PathBuf::from("resources/models/missing.gguf"),
+            tokenizer_path: PathBuf::from("resources/models/missing-tokenizer.json"),
+            context_size: 2048,
+        });
+
+        let cloned_state = state.clone();
+
+        assert_eq!(
+            cloned_state.status().context_size,
+            state.status().context_size
+        );
     }
 
     #[test]

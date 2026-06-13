@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Page } from '../types';
+import { Page, PageNavigationIndex, PageSelectionSource } from '../types';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import {
@@ -34,7 +34,7 @@ import {
 } from 'lucide-react';
 import { CalendarWidget } from './CalendarWidget';
 import { toLocalISOString } from '../utils/dateUtils';
-import { getProjectIndexPages, getProjectParentId, isProjectIndexPage } from '../utils/pageModel';
+import { getProjectIndexPages, getProjectParentId } from '../utils/pageModel';
 
 const EMOJI_PALETTE = ['📝', '📄', '📌', '✅', '💡', '📚', '📅', '💼', '🚀', '⭐', '🔥', '🎯', '🔎', '🧠', '🛠️', '📊', '🔐', '🏠', '📁', '🙂'];
 const INDEX_ITEM_ROW_CLASS = 'group flex items-center gap-1 rounded px-1 py-2 hover:bg-accent';
@@ -74,7 +74,9 @@ interface SidebarProps {
   pages: Page[];
   dailyPages: Page[];
   currentPage: Page | null;
-  onPageSelect: (page: Page) => void;
+  currentPageIndex: PageNavigationIndex;
+  onPageSelect: (page: Page, source?: PageSelectionSource) => void;
+  onDailyIndexOpen: () => void;
   onDailyPageCreate: (title: string) => void;
   onProjectPageCreate: (title: string, parentId?: string) => void;
   onProjectFolderCreate: (title: string, parentId?: string) => void;
@@ -89,13 +91,13 @@ interface SidebarProps {
   onInsertText?: (text: string) => void;
 }
 
-type SidebarIndex = 'daily' | 'project';
-
 export const Sidebar: React.FC<SidebarProps> = ({
   pages,
   dailyPages,
   currentPage,
+  currentPageIndex,
   onPageSelect,
+  onDailyIndexOpen,
   onDailyPageCreate,
   onProjectPageCreate,
   onProjectFolderCreate,
@@ -112,7 +114,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [editTitle, setEditTitle] = useState('');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [emojiMenuPage, setEmojiMenuPage] = useState<string | null>(null);
-  const [activeIndex, setActiveIndex] = useState<SidebarIndex>('daily');
+  const [activeIndex, setActiveIndex] = useState<PageNavigationIndex>('daily');
   const [isWideLayout, setIsWideLayout] = useState(false);
   const [draggedPageId, setDraggedPageId] = useState<string | null>(null);
   const [dropTargetPageId, setDropTargetPageId] = useState<string | null>(null);
@@ -133,8 +135,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   useEffect(() => {
     if (!currentPage || isWideLayout) return;
-    setActiveIndex(isProjectIndexPage(currentPage) ? 'project' : 'daily');
-  }, [currentPage, isWideLayout]);
+    setActiveIndex(currentPageIndex);
+  }, [currentPage, currentPageIndex, isWideLayout]);
 
   const toggleExpanded = (pageId: string) => {
     setExpandedPages(prev => {
@@ -333,7 +335,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 >
                   <div
                     className={`${INDEX_ITEM_BUTTON_CLASS} cursor-pointer`}
-                    onClick={() => onPageSelect(page)}
+                    onClick={() => onPageSelect(page, 'daily')}
                   >
                     <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center text-xs">
                       {renderIndexIcon(page)}
@@ -530,7 +532,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 if (page.type === 'folder') {
                   toggleExpanded(page.id);
                 } else {
-                  onPageSelect(page);
+                  onPageSelect(page, 'project');
                 }
               }}
             >
@@ -834,7 +836,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
               className={`flex h-8 min-w-0 flex-1 items-center justify-center gap-1 rounded-md text-xs transition-colors ${
                 activeIndex === 'daily' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60'
               }`}
-              onClick={() => setActiveIndex('daily')}
+              onClick={() => {
+                setActiveIndex('daily');
+                onDailyIndexOpen();
+              }}
             >
               <CalendarDays className="h-3.5 w-3.5" />
               데일리

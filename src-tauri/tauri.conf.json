@@ -10,6 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "Memoji 2.0 - 로컬 AI 마크다운 노트",
@@ -23,7 +24,7 @@
         "closable": true,
         "center": true,
         "decorations": false,
-        "transparent": false,
+        "transparent": true,
         "shadow": true
       }
     ],
