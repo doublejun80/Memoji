@@ -27,6 +27,9 @@ const LOCAL_AI_RUNTIME_CONFIG_KEY: &str = "local_ai_runtime_config";
 const DEFAULT_LITERT_LM_ENDPOINT: &str = "http://127.0.0.1:9379/v1/chat/completions";
 const DEFAULT_LITERT_LM_MODEL: &str = "gemma4-e2b";
 const LEGACY_LITERT_LM_MODEL: &str = "gemma-4-E2B-it-litert-lm";
+// 2.0 초기 LiteRT-LM preset의 오타성 기본값. 사용자가 별도로 고른 endpoint는
+// 건드리지 않고, 이 정확한 이전 기본값만 현재 LiteRT-LM 기본 포트로 옮긴다.
+const LEGACY_LITERT_LM_ENDPOINT: &str = "http://127.0.0.1:8081/v1/chat/completions";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -124,6 +127,17 @@ impl LocalAiRuntimeConfig {
         model.to_string()
     }
 
+    fn migrate_legacy_litert_endpoint(&mut self) -> bool {
+        if self.normalized_runtime_kind() == LocalAiRuntimeKind::LitertLm
+            && self.endpoint.trim() == LEGACY_LITERT_LM_ENDPOINT
+        {
+            self.endpoint = DEFAULT_LITERT_LM_ENDPOINT.to_string();
+            return true;
+        }
+
+        false
+    }
+
     fn to_mtp_config(&self) -> Result<Option<MtpConfig>, String> {
         if !self.server_enabled {
             return Ok(None);
@@ -163,8 +177,20 @@ fn read_runtime_config_from_db(db: &Database) -> Result<LocalAiRuntimeConfig, St
         return Ok(LocalAiRuntimeConfig::default());
     };
 
-    match serde_json::from_str(&raw_config) {
-        Ok(config) => Ok(config),
+    match serde_json::from_str::<LocalAiRuntimeConfig>(&raw_config) {
+        Ok(mut config) => {
+            if config.migrate_legacy_litert_endpoint() {
+                if let Err(error) = save_runtime_config_to_db(db, &config) {
+                    log::warn!(
+                        "LiteRT-LM endpoint migration will be retried next launch: {}",
+                        error
+                    );
+                } else {
+                    log::info!("Migrated LiteRT-LM endpoint from port 8081 to 9379");
+                }
+            }
+            Ok(config)
+        }
         Err(error) => {
             log::warn!(
                 "AI runtime config is invalid; falling back to defaults: {}",
@@ -255,6 +281,20 @@ mod runtime_config_tests {
             .expect("server should be enabled");
 
         assert_eq!(mtp_config.model, DEFAULT_LITERT_LM_MODEL);
+    }
+
+    #[test]
+    fn previous_litert_default_port_is_migrated() {
+        let mut config = LocalAiRuntimeConfig {
+            server_enabled: true,
+            endpoint: LEGACY_LITERT_LM_ENDPOINT.to_string(),
+            model: DEFAULT_LITERT_LM_MODEL.to_string(),
+            draft_model: None,
+            runtime_kind: LocalAiRuntimeKind::LitertLm,
+        };
+
+        assert!(config.migrate_legacy_litert_endpoint());
+        assert_eq!(config.endpoint, DEFAULT_LITERT_LM_ENDPOINT);
     }
 }
 

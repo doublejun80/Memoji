@@ -71,10 +71,24 @@ function AppContent() {
         closing = true;
         try {
           await editorRef.current?.flushUnsaved();
-          if (!disposed) await appWindow.destroy();
         } catch (error) {
           closing = false;
           toast.error('마지막 편집 내용을 저장하지 못해 앱을 닫지 않았습니다: ' + String(error));
+          return;
+        }
+
+        if (disposed) return;
+
+        // destroy()가 다시 close-requested를 발생시키는 플랫폼에서는 이미 저장한
+        // 내용을 두 번째 handler가 가로채지 않도록 listener를 먼저 해제한다.
+        unlisten?.();
+        unlisten = undefined;
+        try {
+          await appWindow.destroy();
+        } catch (error) {
+          closing = false;
+          console.error('Failed to close window after saving:', error);
+          toast.error('저장은 완료됐지만 창을 닫지 못했습니다. 다시 시도해주세요.');
         }
       });
     }).catch((error) => {
