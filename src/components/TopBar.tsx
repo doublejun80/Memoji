@@ -23,7 +23,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { Button } from './ui/button';
 
 interface TopBarProps {
-  onSave: () => void;
+  onSave: () => void | Promise<void>;
   onShortcutsOpen?: () => void;
   onSettingsOpen?: () => void;
   onRightPanelToggle?: () => void;
@@ -31,7 +31,7 @@ interface TopBarProps {
   onLeftPanelToggle?: () => void;
   isLeftPanelOpen?: boolean;
   appTitle?: string;
-  onExport?: () => void;
+  onExport?: () => void | Promise<void>;
 }
 
 const iconButtonClass = 'h-8 w-8 rounded-md p-0';
@@ -59,8 +59,10 @@ export const TopBar: React.FC<TopBarProps> = ({
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      onSave();
+      await onSave();
       toast.success('저장되었습니다');
+    } catch (error) {
+      toast.error('저장하지 못했습니다: ' + String(error));
     } finally {
       setIsSaving(false);
     }
@@ -150,8 +152,11 @@ export const TopBar: React.FC<TopBarProps> = ({
               size="sm"
               className={iconButtonClass}
               onClick={() => {
-                onExport();
-                toast.success('파일이 다운로드되었습니다');
+                void Promise.resolve(onExport()).then(() => {
+                  toast.success('파일이 다운로드되었습니다');
+                }).catch((error) => {
+                  toast.error('내보내기 실패: ' + String(error));
+                });
               }}
               onMouseDown={stopDrag}
               title="Markdown 내보내기"

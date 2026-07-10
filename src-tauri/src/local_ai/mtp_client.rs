@@ -6,34 +6,75 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 pub const DEFAULT_MTP_MODEL: &str = "google/gemma-4-E2B-it";
 const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 600;
+const CONNECT_TIMEOUT_SECS: u64 = 2;
+const PROBE_TIMEOUT_MILLIS: u64 = 1_500;
 const MAX_MTP_ERROR_BODY_CHARS: usize = 600;
+static MTP_CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalAiRuntimeKind {
+    #[default]
+    BuiltinCandle,
+    LlamaCpp,
+    LitertLm,
+}
+
+impl LocalAiRuntimeKind {
+    fn server_default() -> Self {
+        Self::LlamaCpp
+    }
+
+    fn from_env_value(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "llama_cpp" | "llamacpp" | "llama.cpp" => Some(Self::LlamaCpp),
+            "litert_lm" | "litertlm" | "litert-lm" | "litert.lm" => Some(Self::LitertLm),
+            "builtin_candle" | "candle" | "builtin" => Some(Self::BuiltinCandle),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MtpConfig {
     pub endpoint: String,
     pub model: String,
     pub draft_model: Option<String>,
+    pub runtime_kind: LocalAiRuntimeKind,
     pub api_key: Option<String>,
 }
 
 impl MtpConfig {
     pub fn from_env() -> Option<Self> {
-        let endpoint = std::env::var("MEMOJI_MTP_ENDPOINT").ok()?;
+        Self::from_env_result().ok().flatten()
+    }
+
+    pub fn from_env_result() -> Result<Option<Self>, String> {
+        let endpoint = match std::env::var("MEMOJI_MTP_ENDPOINT") {
+            Ok(endpoint) => endpoint,
+            Err(std::env::VarError::NotPresent) => return Ok(None),
+            Err(error) => return Err(format!("MEMOJI_MTP_ENDPOINT is invalid: {error}")),
+        };
         let model = std::env::var("MEMOJI_MTP_MODEL").ok();
         let draft_model = std::env::var("MEMOJI_MTP_DRAFT_MODEL").ok();
+        let runtime_kind = std::env::var("MEMOJI_MTP_RUNTIME")
+            .ok()
+            .and_then(|value| LocalAiRuntimeKind::from_env_value(&value));
         let api_key = std::env::var("MEMOJI_MTP_API_KEY").ok();
 
-        Self::from_values(endpoint, model, draft_model, api_key).ok()
+        Self::from_values(endpoint, model, draft_model, runtime_kind, api_key).map(Some)
     }
 
     pub fn from_values(
         endpoint: String,
         model: Option<String>,
         draft_model: Option<String>,
+        runtime_kind: Option<LocalAiRuntimeKind>,
         api_key: Option<String>,
     ) -> Result<Self, String> {
         let endpoint = endpoint.trim().to_string();
@@ -44,6 +85,11 @@ impl MtpConfig {
             return Err("고속 로컬 서버는 localhost, 127.0.0.1, ::1만 허용합니다.".to_string());
         }
 
+        let runtime_kind = match runtime_kind.unwrap_or_else(LocalAiRuntimeKind::server_default) {
+            LocalAiRuntimeKind::BuiltinCandle => LocalAiRuntimeKind::server_default(),
+            runtime_kind => runtime_kind,
+        };
+
         Ok(Self {
             endpoint,
             model: model
@@ -53,6 +99,7 @@ impl MtpConfig {
             draft_model: draft_model
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty()),
+            runtime_kind,
             api_key: api_key
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty()),
@@ -113,6 +160,129 @@ struct ChatCompletionDelta {
     content: Option<String>,
 }
 
+#[derive(Debug, Default)]
+struct SseLineBuffer {
+    pending: Vec<u8>,
+}
+
+impl SseLineBuffer {
+    fn push(&mut self, bytes: &[u8]) -> Result<Vec<String>, LocalAiError> {
+        self.pending.extend_from_slice(bytes);
+        self.take_complete_lines()
+    }
+
+    fn finish(&mut self) -> Result<Vec<String>, LocalAiError> {
+        let mut lines = self.take_complete_lines()?;
+        if !self.pending.is_empty() {
+            let trailing = std::mem::take(&mut self.pending);
+            lines.push(decode_sse_line(&trailing)?);
+        }
+        Ok(lines)
+    }
+
+    fn take_complete_lines(&mut self) -> Result<Vec<String>, LocalAiError> {
+        let mut lines = Vec::new();
+        let mut consumed = 0usize;
+
+        while let Some(relative_end) = self.pending[consumed..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+        {
+            let line_end = consumed + relative_end;
+            lines.push(decode_sse_line(&self.pending[consumed..line_end])?);
+            consumed = line_end + 1;
+        }
+
+        if consumed > 0 {
+            self.pending.drain(..consumed);
+        }
+
+        Ok(lines)
+    }
+}
+
+fn decode_sse_line(bytes: &[u8]) -> Result<String, LocalAiError> {
+    let bytes = bytes.strip_suffix(b"\r").unwrap_or(bytes);
+    std::str::from_utf8(bytes)
+        .map(str::to_owned)
+        .map_err(|error| {
+            LocalAiError::GenerateFailed(format!("MTP stream returned invalid UTF-8: {error}"))
+        })
+}
+
+fn shared_mtp_client() -> Result<&'static reqwest::Client, LocalAiError> {
+    MTP_CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
+                .tcp_nodelay(true)
+                .timeout(Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS))
+                .redirect(Policy::none())
+                .build()
+                .map_err(|error| error.to_string())
+        })
+        .as_ref()
+        .map_err(|error| {
+            LocalAiError::GenerateFailed(format!("failed to build MTP HTTP client: {error}"))
+        })
+}
+
+fn models_endpoint(endpoint: &str) -> Result<reqwest::Url, LocalAiError> {
+    let mut url = reqwest::Url::parse(endpoint).map_err(|error| {
+        LocalAiError::GenerateFailed(format!("invalid MTP endpoint URL: {error}"))
+    })?;
+    url.set_path("/v1/models");
+    url.set_query(None);
+    url.set_fragment(None);
+    Ok(url)
+}
+
+pub async fn probe_mtp_endpoint(config: &MtpConfig) -> Result<(), LocalAiError> {
+    let client = shared_mtp_client()?;
+    let mut builder = client
+        .get(models_endpoint(&config.endpoint)?)
+        .timeout(Duration::from_millis(PROBE_TIMEOUT_MILLIS));
+
+    if let Some(api_key) = config.api_key.as_deref() {
+        builder = builder.header(AUTHORIZATION, format!("Bearer {api_key}"));
+    }
+
+    let response = builder
+        .send()
+        .await
+        .map_err(|error| LocalAiError::GenerateFailed(format!("MTP probe failed: {error}")))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = sanitize_error_body(&response.text().await.unwrap_or_default());
+        return Err(LocalAiError::GenerateFailed(format!(
+            "MTP probe returned {status}: {body}"
+        )));
+    }
+
+    #[derive(Deserialize)]
+    struct ModelsResponse {
+        data: Vec<ModelEntry>,
+    }
+
+    #[derive(Deserialize)]
+    struct ModelEntry {
+        id: String,
+    }
+
+    let models: ModelsResponse = response.json().await.map_err(|error| {
+        LocalAiError::GenerateFailed(format!("MTP models response is invalid: {error}"))
+    })?;
+    if !models.data.iter().any(|model| model.id == config.model) {
+        return Err(LocalAiError::GenerateFailed(format!(
+            "MTP server is reachable, but configured model '{}' is not registered",
+            config.model
+        )));
+    }
+
+    Ok(())
+}
+
 pub async fn generate_mtp_stream<F>(
     config: MtpConfig,
     request_id: String,
@@ -122,11 +292,7 @@ pub async fn generate_mtp_stream<F>(
 where
     F: FnMut(LocalAiGenerateStreamChunk) -> Result<(), LocalAiError>,
 {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS))
-        .redirect(Policy::none())
-        .build()
-        .map_err(|error| LocalAiError::GenerateFailed(error.to_string()))?;
+    let client = shared_mtp_client()?;
 
     let sampling = SamplingConfig::from_request(&request);
     let payload = ChatCompletionRequest {
@@ -160,26 +326,25 @@ where
         )));
     }
 
-    let mut pending = String::new();
+    let mut line_buffer = SseLineBuffer::default();
     let mut text = String::new();
     let mut generated_tokens = 0usize;
     let mut finish_reason = "stop".to_string();
     let mut received_done = false;
+    let mut received_finish_reason = false;
 
     while !received_done {
-        let Some(bytes) = response
+        let bytes = response
             .chunk()
             .await
-            .map_err(|error| LocalAiError::GenerateFailed(error.to_string()))?
-        else {
-            break;
+            .map_err(|error| LocalAiError::GenerateFailed(error.to_string()))?;
+        let reached_eof = bytes.is_none();
+        let lines = match bytes {
+            Some(bytes) => line_buffer.push(&bytes)?,
+            None => line_buffer.finish()?,
         };
 
-        pending.push_str(&String::from_utf8_lossy(&bytes));
-        while let Some(line_end) = pending.find('\n') {
-            let line = pending[..line_end].trim_end_matches('\r').to_string();
-            pending.replace_range(..=line_end, "");
-
+        for line in lines {
             let Some(data) = line.strip_prefix("data:").map(str::trim) else {
                 continue;
             };
@@ -194,6 +359,7 @@ where
             for event in parse_stream_event(data)? {
                 if let Some(reason) = event.finish_reason {
                     finish_reason = reason;
+                    received_finish_reason = true;
                 }
                 if let Some(token_text) = event.token_text.filter(|value| !value.is_empty()) {
                     text.push_str(&token_text);
@@ -207,6 +373,15 @@ where
                     })?;
                 }
             }
+        }
+
+        if reached_eof {
+            if !received_done && !received_finish_reason {
+                return Err(LocalAiError::GenerateFailed(
+                    "MTP stream ended before a completion marker was received".to_string(),
+                ));
+            }
+            break;
         }
     }
 
@@ -286,6 +461,48 @@ fn build_messages(request: &LocalAiGenerateRequest) -> Vec<ChatMessage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    fn spawn_probe_server(status: &str, body: &str) -> (String, thread::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("probe listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have an address");
+        let status = status.to_string();
+        let body = body.to_string();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("probe connection should arrive");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("read timeout should be configured");
+
+            let mut request = Vec::new();
+            let mut buffer = [0u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = stream
+                    .read(&mut buffer)
+                    .expect("request should be readable");
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..read]);
+            }
+
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("probe response should be writable");
+
+            String::from_utf8(request).expect("HTTP request should be UTF-8")
+        });
+
+        (format!("http://{address}/v1/chat/completions"), handle)
+    }
 
     #[test]
     fn parses_openai_style_delta_stream_chunk() {
@@ -319,6 +536,128 @@ mod tests {
     }
 
     #[test]
+    fn shared_http_client_is_reused() {
+        let first = shared_mtp_client().expect("shared client should build");
+        let second = shared_mtp_client().expect("shared client should remain available");
+
+        assert!(std::ptr::eq(first, second));
+    }
+
+    #[test]
+    fn models_endpoint_replaces_completion_path_and_query() {
+        let endpoint = models_endpoint(
+            "http://127.0.0.1:8080/custom/v1/chat/completions?request_id=secret#fragment",
+        )
+        .expect("models endpoint should be derived");
+
+        assert_eq!(endpoint.as_str(), "http://127.0.0.1:8080/v1/models");
+    }
+
+    #[test]
+    fn sse_line_buffer_preserves_split_korean_utf8_and_trailing_line() {
+        let first_line = r#"data: {"choices":[{"delta":{"content":"안녕"},"finish_reason":null}]}"#;
+        let mut first_line_with_newline = first_line.as_bytes().to_vec();
+        first_line_with_newline.push(b'\n');
+        let split_inside_korean = first_line.find('안').expect("Korean text should exist") + 1;
+        let mut buffer = SseLineBuffer::default();
+
+        assert!(buffer
+            .push(&first_line_with_newline[..split_inside_korean])
+            .expect("partial UTF-8 should remain buffered")
+            .is_empty());
+        assert_eq!(
+            buffer
+                .push(&first_line_with_newline[split_inside_korean..])
+                .expect("complete line should decode"),
+            vec![first_line.to_string()]
+        );
+
+        let trailing_line =
+            r#"data: {"choices":[{"delta":{"content":"하세요"},"finish_reason":"stop"}]}"#;
+        assert!(buffer
+            .push(trailing_line.as_bytes())
+            .expect("trailing line should remain buffered")
+            .is_empty());
+        assert_eq!(
+            buffer.finish().expect("EOF should flush trailing line"),
+            vec![trailing_line.to_string()]
+        );
+    }
+
+    #[test]
+    fn sse_line_buffer_rejects_invalid_utf8_after_complete_line() {
+        let mut buffer = SseLineBuffer::default();
+        let error = buffer
+            .push(b"data: \xff\n")
+            .expect_err("invalid UTF-8 should fail once the line is complete");
+
+        assert!(error.to_string().contains("invalid UTF-8"));
+    }
+
+    #[test]
+    fn probe_uses_models_endpoint_and_authorization_header() {
+        let (endpoint, server) = spawn_probe_server("200 OK", r#"{"data":[{"id":"gemma4-e2b"}]}"#);
+        let config = MtpConfig::from_values(
+            endpoint,
+            Some("gemma4-e2b".to_string()),
+            None,
+            Some(LocalAiRuntimeKind::LitertLm),
+            Some("test-key".to_string()),
+        )
+        .expect("probe config should be valid");
+
+        tauri::async_runtime::block_on(probe_mtp_endpoint(&config))
+            .expect("successful models response should pass the probe");
+        let request = server.join().expect("probe server should finish");
+        let lowercase_request = request.to_ascii_lowercase();
+
+        assert!(request.starts_with("GET /v1/models HTTP/1.1\r\n"));
+        assert!(lowercase_request.contains("authorization: bearer test-key\r\n"));
+    }
+
+    #[test]
+    fn probe_rejects_server_without_the_configured_model() {
+        let (endpoint, server) =
+            spawn_probe_server("200 OK", r#"{"data":[{"id":"another-model"}]}"#);
+        let config = MtpConfig::from_values(
+            endpoint,
+            Some("gemma4-e2b".to_string()),
+            None,
+            Some(LocalAiRuntimeKind::LitertLm),
+            None,
+        )
+        .expect("probe config should be valid");
+
+        let error = tauri::async_runtime::block_on(probe_mtp_endpoint(&config))
+            .expect_err("a missing configured model must not be reported ready");
+        server.join().expect("probe server should finish");
+
+        assert!(error.to_string().contains("gemma4-e2b"));
+        assert!(error.to_string().contains("not registered"));
+    }
+
+    #[test]
+    fn probe_rejects_non_success_status() {
+        let (endpoint, server) = spawn_probe_server("503 Service Unavailable", "model loading");
+        let config = MtpConfig::from_values(
+            endpoint,
+            Some("gemma4-e2b".to_string()),
+            None,
+            Some(LocalAiRuntimeKind::LitertLm),
+            None,
+        )
+        .expect("probe config should be valid");
+
+        let error = tauri::async_runtime::block_on(probe_mtp_endpoint(&config))
+            .expect_err("non-success models response should fail the probe");
+        let request = server.join().expect("probe server should finish");
+
+        assert!(request.starts_with("GET /v1/models HTTP/1.1\r\n"));
+        assert!(error.to_string().contains("503 Service Unavailable"));
+        assert!(error.to_string().contains("model loading"));
+    }
+
+    #[test]
     fn truncates_mtp_error_body_before_returning_to_ui() {
         let body = format!("error {}", "x".repeat(1200));
         let sanitized = sanitize_error_body(&body);
@@ -332,6 +671,7 @@ mod tests {
             " http://127.0.0.1:8080/v1/chat/completions ".to_string(),
             Some(" local-gemma ".to_string()),
             Some(" draft ".to_string()),
+            Some(LocalAiRuntimeKind::LlamaCpp),
             None,
         )
         .expect("loopback config should be accepted");
@@ -339,6 +679,21 @@ mod tests {
         assert_eq!(config.endpoint, "http://127.0.0.1:8080/v1/chat/completions");
         assert_eq!(config.model, "local-gemma");
         assert_eq!(config.draft_model.as_deref(), Some("draft"));
+        assert_eq!(config.runtime_kind, LocalAiRuntimeKind::LlamaCpp);
+    }
+
+    #[test]
+    fn server_config_normalizes_builtin_runtime_to_llama_cpp() {
+        let config = MtpConfig::from_values(
+            "http://127.0.0.1:8080/v1/chat/completions".to_string(),
+            None,
+            None,
+            Some(LocalAiRuntimeKind::BuiltinCandle),
+            None,
+        )
+        .expect("loopback config should be accepted");
+
+        assert_eq!(config.runtime_kind, LocalAiRuntimeKind::LlamaCpp);
     }
 
     #[test]

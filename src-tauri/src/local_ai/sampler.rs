@@ -1,6 +1,6 @@
 use super::LocalAiGenerateRequest;
 
-pub const DEFAULT_MAX_NEW_TOKENS: usize = 512;
+pub const DEFAULT_MAX_NEW_TOKENS: usize = 256;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SamplingConfig {
@@ -39,5 +39,22 @@ mod tests {
         let sampling = SamplingConfig::from_request(&request);
 
         assert_eq!(sampling.max_new_tokens, 2048);
+    }
+
+    #[test]
+    fn default_response_budget_is_vdi_friendly() {
+        let request = LocalAiGenerateRequest {
+            prompt: "요약해줘".to_string(),
+            page_context: None,
+            max_new_tokens: None,
+            temperature: None,
+            top_p: None,
+        };
+
+        assert_eq!(
+            SamplingConfig::from_request(&request).max_new_tokens,
+            DEFAULT_MAX_NEW_TOKENS
+        );
+        assert_eq!(DEFAULT_MAX_NEW_TOKENS, 256);
     }
 }

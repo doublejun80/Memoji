@@ -4,7 +4,9 @@ mod sampler;
 mod tokenizer;
 
 use gemma4::Gemma4Runtime;
-pub use mtp_client::{generate_mtp_stream, MtpConfig, DEFAULT_MTP_MODEL};
+pub use mtp_client::{
+    generate_mtp_stream, probe_mtp_endpoint, LocalAiRuntimeKind, MtpConfig, DEFAULT_MTP_MODEL,
+};
 use sampler::SamplingConfig;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -99,6 +101,9 @@ pub struct LocalAiStatus {
     pub mtp_endpoint: Option<String>,
     pub mtp_model: Option<String>,
     pub mtp_draft_model: Option<String>,
+    pub mtp_runtime_kind: Option<LocalAiRuntimeKind>,
+    pub mtp_reachable: Option<bool>,
+    pub mtp_probe_error: Option<String>,
     pub model_exists: bool,
     pub tokenizer_exists: bool,
     pub context_size: usize,
@@ -285,12 +290,29 @@ impl LocalAiState {
     }
 
     pub fn load(&self) -> Result<LocalAiStatus, LocalAiError> {
+        {
+            let inner = self.inner.lock().expect("local ai state poisoned");
+            if inner.runtime.is_some() && inner.load_state == LocalAiLoadState::Loaded {
+                return Ok(self.status_from_inner(&inner, MtpConfig::from_env()));
+            }
+            if inner.load_state == LocalAiLoadState::Loading {
+                return Err(LocalAiError::LoadFailed(
+                    "another model load is already in progress".to_string(),
+                ));
+            }
+        }
+
         self.validate_resource_paths()?;
 
         {
             let mut inner = self.inner.lock().expect("local ai state poisoned");
             if inner.runtime.is_some() && inner.load_state == LocalAiLoadState::Loaded {
                 return Ok(self.status_from_inner(&inner, MtpConfig::from_env()));
+            }
+            if inner.load_state == LocalAiLoadState::Loading {
+                return Err(LocalAiError::LoadFailed(
+                    "another model load is already in progress".to_string(),
+                ));
             }
             inner.load_state = LocalAiLoadState::Loading;
             inner.last_error = None;
@@ -464,7 +486,12 @@ impl LocalAiState {
             mtp_configured: mtp_config.is_some(),
             mtp_endpoint: mtp_config.as_ref().map(|config| config.endpoint.clone()),
             mtp_model: mtp_config.as_ref().map(|config| config.model.clone()),
-            mtp_draft_model: mtp_config.and_then(|config| config.draft_model),
+            mtp_draft_model: mtp_config
+                .as_ref()
+                .and_then(|config| config.draft_model.clone()),
+            mtp_runtime_kind: mtp_config.map(|config| config.runtime_kind),
+            mtp_reachable: None,
+            mtp_probe_error: None,
             model_exists,
             tokenizer_exists,
             context_size: self.config.context_size,
@@ -691,6 +718,22 @@ mod tests {
         assert_eq!(
             cloned_state.status().context_size,
             state.status().context_size
+        );
+    }
+
+    #[test]
+    fn duplicate_model_load_is_rejected_before_allocating_again() {
+        let state = LocalAiState::new(LocalAiConfig {
+            model_path: PathBuf::from("resources/models/missing.gguf"),
+            tokenizer_path: PathBuf::from("resources/models/missing-tokenizer.json"),
+            context_size: 2048,
+        });
+        state.inner.lock().expect("state lock").load_state = LocalAiLoadState::Loading;
+
+        let error = state.load().expect_err("parallel load must be rejected");
+
+        assert!(
+            matches!(error, LocalAiError::LoadFailed(message) if message.contains("already in progress"))
         );
     }
 

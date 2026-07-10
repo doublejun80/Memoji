@@ -127,13 +127,37 @@ Previously fixed/guarded areas:
 
 ## Local AI / VDI Runtime
 
-The bundled Gemma path remains available, but slow VDI CPUs may require loopback runtime mode.
+LiteRT-LM is the default local AI runtime. The bundled GGUF path remains as a
+downloadable compatibility shell for the built-in Candle and llama.cpp paths,
+but the large GGUF model is not required for the current default deployment.
+
+Current visible runtime selection:
+
+- `litert_lm`: Gemma 4 E2B through a VDI-local LiteRT-LM OpenAI-compatible
+  endpoint. This is the selected default for VDI CPU-only use.
+
+Hidden legacy runtime definitions:
+
+- `builtin_candle`: Gemma 4 E2B Q4_0 through the app's built-in Rust Candle
+  backend. Hidden from the UI until `gemma-4-e2b-it-q4.gguf` is downloaded again
+  and the selector is intentionally re-enabled.
+- `llama_cpp`: Gemma 4 E2B through a VDI-local `llama-server`
+  OpenAI-compatible endpoint. Hidden from the UI until the GGUF model is
+  downloaded again, a local `llama-server` is started, and the selector is
+  intentionally re-enabled.
+
+The AI panel and Settings > Local AI now share the same runtime preset. Selecting
+a model/runtime in the AI panel saves the config and the next request uses that
+runtime.
 
 Current intended fast path:
 
-- Configure a VDI-local OpenAI-compatible server on loopback only.
+- Run LiteRT-LM on a VDI-local OpenAI-compatible loopback endpoint.
 - Allowed endpoints are localhost/loopback addresses.
 - Cloud/API endpoints should not be accepted for this local mode.
+- Keep `builtin_candle` and `llama_cpp` in app code as hidden legacy definitions
+  so the GGUF model can be downloaded later without redesigning the runtime
+  layer.
 
 Relevant commands:
 
@@ -178,24 +202,28 @@ Result:
 
 ## Immediate Next Steps
 
-1. In Tauri dev mode, manually verify Settings > Data > all-pages ZIP export.
-2. Inspect the created ZIP:
+1. In Tauri dev mode, verify the AI panel runtime selector only shows
+   `Gemma 4 LiteRT-LM`.
+2. Verify Settings > Local AI also exposes only the LiteRT-LM runtime by
+   default.
+3. In Tauri dev mode, manually verify Settings > Data > all-pages ZIP export.
+4. Inspect the created ZIP:
    - daily paths
    - project folder paths
    - `manifest.json`
    - Korean filenames
-3. Re-test adding more than four child pages under the same folder.
-4. If VDI delivery is required, build a new Windows executable/pack from the latest pushed commit.
-5. If editor editing still feels inconsistent, isolate it at the Milkdown schema/command level instead of patching rendered output.
+5. Re-test adding more than four child pages under the same folder.
+6. If VDI delivery is required, build a new Windows executable/pack from the latest pushed commit.
+7. If editor editing still feels inconsistent, isolate it at the Milkdown schema/command level instead of patching rendered output.
 
 ## Git Notes
 
-The local working directory `/Users/doublejun_air/github/memoji` currently has no `.git` directory.
-
-For GitHub publishing, use a real clone of:
+The local working directory `/Users/doublejun_air/github/memoji` is now a git
+repo connected to:
 
 ```text
 https://github.com/doublejun80/Memoji.git
 ```
 
-Then copy the intended tracked source changes into that clone, review `git status` and `git diff`, commit intentionally, and push.
+Review work is prepared on `codex/review-settings-vdi-performance`; keep `main`
+clean and merge through the reviewed pull request.

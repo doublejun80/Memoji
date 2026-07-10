@@ -4,7 +4,8 @@ mod local_ai;
 use database::{build_page_export_entries, Database, ImportDatabaseSummary, Page};
 use local_ai::{
     LocalAiBenchmarkResult, LocalAiConfig, LocalAiGenerateRequest, LocalAiGenerateResponse,
-    LocalAiGenerateStreamChunk, LocalAiState, LocalAiStatus, MtpConfig, DEFAULT_MTP_MODEL,
+    LocalAiGenerateStreamChunk, LocalAiRuntimeKind, LocalAiState, LocalAiStatus, MtpConfig,
+    DEFAULT_MTP_MODEL,
 };
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
@@ -17,10 +18,15 @@ use zip::write::SimpleFileOptions;
 struct AppState {
     db: Mutex<Database>,
     local_ai: LocalAiState,
+    /// 시작할 때 결정한 경로를 모든 명령이 공유해야 일시적인 권한/네트워크
+    /// 변화로 열린 DB와 가져오기·내보내기 경로가 갈라지지 않는다.
+    data_dir: PathBuf,
 }
 
 const LOCAL_AI_RUNTIME_CONFIG_KEY: &str = "local_ai_runtime_config";
-const DEFAULT_MTP_ENDPOINT: &str = "http://127.0.0.1:8080/v1/chat/completions";
+const DEFAULT_LITERT_LM_ENDPOINT: &str = "http://127.0.0.1:9379/v1/chat/completions";
+const DEFAULT_LITERT_LM_MODEL: &str = "gemma4-e2b";
+const LEGACY_LITERT_LM_MODEL: &str = "gemma-4-E2B-it-litert-lm";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +35,8 @@ struct LocalAiRuntimeConfig {
     endpoint: String,
     model: String,
     draft_model: Option<String>,
+    #[serde(default)]
+    runtime_kind: LocalAiRuntimeKind,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -38,6 +46,7 @@ struct LocalAiRuntimeConfigView {
     endpoint: String,
     model: String,
     draft_model: Option<String>,
+    runtime_kind: LocalAiRuntimeKind,
     env_configured: bool,
     env_takes_precedence: bool,
 }
@@ -79,15 +88,42 @@ impl ImportDatabaseResult {
 impl Default for LocalAiRuntimeConfig {
     fn default() -> Self {
         Self {
-            server_enabled: false,
-            endpoint: DEFAULT_MTP_ENDPOINT.to_string(),
-            model: DEFAULT_MTP_MODEL.to_string(),
+            server_enabled: true,
+            endpoint: DEFAULT_LITERT_LM_ENDPOINT.to_string(),
+            model: DEFAULT_LITERT_LM_MODEL.to_string(),
             draft_model: None,
+            runtime_kind: LocalAiRuntimeKind::LitertLm,
         }
     }
 }
 
 impl LocalAiRuntimeConfig {
+    fn normalized_runtime_kind(&self) -> LocalAiRuntimeKind {
+        if !self.server_enabled {
+            return LocalAiRuntimeKind::BuiltinCandle;
+        }
+
+        match self.runtime_kind {
+            LocalAiRuntimeKind::BuiltinCandle => LocalAiRuntimeKind::LlamaCpp,
+            runtime_kind => runtime_kind,
+        }
+    }
+
+    fn normalized_model(&self) -> String {
+        let model = self.model.trim();
+        if self.normalized_runtime_kind() == LocalAiRuntimeKind::LitertLm
+            && (model.is_empty() || model == LEGACY_LITERT_LM_MODEL)
+        {
+            return DEFAULT_LITERT_LM_MODEL.to_string();
+        }
+
+        if model.is_empty() {
+            return DEFAULT_MTP_MODEL.to_string();
+        }
+
+        model.to_string()
+    }
+
     fn to_mtp_config(&self) -> Result<Option<MtpConfig>, String> {
         if !self.server_enabled {
             return Ok(None);
@@ -95,8 +131,9 @@ impl LocalAiRuntimeConfig {
 
         MtpConfig::from_values(
             self.endpoint.clone(),
-            Some(self.model.clone()),
+            Some(self.normalized_model()),
             self.draft_model.clone(),
+            Some(self.normalized_runtime_kind()),
             None,
         )
         .map(Some)
@@ -104,11 +141,14 @@ impl LocalAiRuntimeConfig {
 
     fn into_view(self) -> LocalAiRuntimeConfigView {
         let env_configured = MtpConfig::from_env().is_some();
+        let runtime_kind = self.normalized_runtime_kind();
+        let model = self.normalized_model();
         LocalAiRuntimeConfigView {
             server_enabled: self.server_enabled,
             endpoint: self.endpoint,
-            model: self.model,
+            model,
             draft_model: self.draft_model,
+            runtime_kind,
             env_configured,
             env_takes_precedence: env_configured,
         }
@@ -143,13 +183,79 @@ fn save_runtime_config_to_db(db: &Database, config: &LocalAiRuntimeConfig) -> Re
 }
 
 fn resolve_mtp_config(state: &State<AppState>) -> Result<Option<MtpConfig>, String> {
-    if let Some(config) = MtpConfig::from_env() {
+    if let Some(config) = MtpConfig::from_env_result()? {
         return Ok(Some(config));
     }
 
     let db = state.db.lock().map_err(|error| error.to_string())?;
     let config = read_runtime_config_from_db(&db)?;
     config.to_mtp_config()
+}
+
+#[cfg(test)]
+mod runtime_config_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_enabled_server_config_defaults_to_llama_cpp_runtime() {
+        let config: LocalAiRuntimeConfig = serde_json::from_str(
+            r#"{"serverEnabled":true,"endpoint":"http://127.0.0.1:8080/v1/chat/completions","model":"google/gemma-4-E2B-it","draftModel":null}"#,
+        )
+        .expect("legacy config should deserialize");
+
+        let mtp_config = config
+            .to_mtp_config()
+            .expect("legacy config should be valid")
+            .expect("server should be enabled");
+
+        assert_eq!(mtp_config.runtime_kind, LocalAiRuntimeKind::LlamaCpp);
+    }
+
+    #[test]
+    fn default_runtime_config_uses_litert_lm() {
+        let config = LocalAiRuntimeConfig::default();
+        let mtp_config = config
+            .to_mtp_config()
+            .expect("default LiteRT config should be valid")
+            .expect("default runtime should be server-backed");
+
+        assert_eq!(mtp_config.endpoint, DEFAULT_LITERT_LM_ENDPOINT);
+        assert_eq!(mtp_config.model, DEFAULT_LITERT_LM_MODEL);
+        assert_eq!(mtp_config.runtime_kind, LocalAiRuntimeKind::LitertLm);
+    }
+
+    #[test]
+    fn disabled_server_config_reports_builtin_candle_runtime() {
+        let config = LocalAiRuntimeConfig {
+            server_enabled: false,
+            endpoint: "http://127.0.0.1:8080/v1/chat/completions".to_string(),
+            model: DEFAULT_MTP_MODEL.to_string(),
+            draft_model: None,
+            runtime_kind: LocalAiRuntimeKind::BuiltinCandle,
+        };
+        let view = config.into_view();
+
+        assert!(!view.server_enabled);
+        assert_eq!(view.runtime_kind, LocalAiRuntimeKind::BuiltinCandle);
+    }
+
+    #[test]
+    fn legacy_litert_model_id_is_mapped_to_imported_local_model_ref() {
+        let config = LocalAiRuntimeConfig {
+            server_enabled: true,
+            endpoint: DEFAULT_LITERT_LM_ENDPOINT.to_string(),
+            model: LEGACY_LITERT_LM_MODEL.to_string(),
+            draft_model: None,
+            runtime_kind: LocalAiRuntimeKind::LitertLm,
+        };
+
+        let mtp_config = config
+            .to_mtp_config()
+            .expect("LiteRT config should be valid")
+            .expect("server should be enabled");
+
+        assert_eq!(mtp_config.model, DEFAULT_LITERT_LM_MODEL);
+    }
 }
 
 /// 데이터 저장 디렉토리 결정
@@ -159,7 +265,7 @@ fn get_data_directory() -> Result<PathBuf, String> {
     // 1. 환경 변수 확인 (고급 사용자용 - 선택사항)
     if let Ok(custom_path) = std::env::var("MEMOJI_DATA_PATH") {
         let path = PathBuf::from(custom_path);
-        println!("📁 Using custom data path: {:?}", path);
+        log::info!("Using custom data path: {:?}", path);
         return Ok(path);
     }
 
@@ -170,14 +276,14 @@ fn get_data_directory() -> Result<PathBuf, String> {
 
     let portable_data_dir = exe_dir.join("data");
     if directory_is_writable(&portable_data_dir) {
-        println!("📁 Using portable data directory: {:?}", portable_data_dir);
+        log::info!("Using portable data directory: {:?}", portable_data_dir);
         return Ok(portable_data_dir);
     }
 
     if let Some(local_data_dir) = dirs::data_local_dir() {
         let fallback_data_dir = local_data_dir.join("Memoji").join("data");
-        println!(
-            "📁 Portable data directory is not writable, using local data directory: {:?}",
+        log::warn!(
+            "Portable data directory is not writable. Falling back to the OS-local data directory; verify that this path is persistent in your VDI profile: {:?}",
             fallback_data_dir
         );
         return Ok(fallback_data_dir);
@@ -243,21 +349,22 @@ fn get_app_title(state: State<AppState>) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn get_app_data_dir() -> Result<String, String> {
-    let data_dir = get_data_directory()?;
-    Ok(data_dir.to_string_lossy().to_string())
+fn get_app_data_dir(state: State<AppState>) -> String {
+    state.data_dir.to_string_lossy().to_string()
 }
 
 #[tauri::command]
-fn get_data_path() -> Result<String, String> {
-    let data_dir = get_data_directory()?;
-    let db_path = data_dir.join("memoji.db");
-    Ok(db_path.to_string_lossy().to_string())
+fn get_data_path(state: State<AppState>) -> String {
+    state
+        .data_dir
+        .join("memoji.db")
+        .to_string_lossy()
+        .to_string()
 }
 
 #[tauri::command]
-fn open_data_folder() -> Result<(), String> {
-    let data_dir = get_data_directory()?;
+fn open_data_folder(state: State<AppState>) -> Result<(), String> {
+    let data_dir = state.data_dir.clone();
 
     // Windows에서 explorer로 폴더 열기
     #[cfg(target_os = "windows")]
@@ -295,7 +402,9 @@ fn import_memoji_database(
     state: State<AppState>,
 ) -> Result<ImportDatabaseResult, String> {
     const SQLITE_HEADER: &[u8] = b"SQLite format 3\0";
-    const MAX_IMPORT_BYTES: usize = 256 * 1024 * 1024;
+    // 현재 프런트 IPC는 byte 배열을 JSON 숫자 배열로 직렬화하므로 원본보다
+    // 훨씬 큰 메모리를 사용한다. 파일 경로 기반 import로 바꾸기 전까지 보수적으로 제한한다.
+    const MAX_IMPORT_BYTES: usize = 32 * 1024 * 1024;
 
     if db_bytes.len() < SQLITE_HEADER.len() || !db_bytes.starts_with(SQLITE_HEADER) {
         return Err("SQLite memoji.db 파일이 아닙니다.".to_string());
@@ -305,7 +414,7 @@ fn import_memoji_database(
         return Err("DB 파일이 너무 큽니다. data 폴더에서 직접 백업 후 교체해주세요.".to_string());
     }
 
-    let data_dir = get_data_directory()?;
+    let data_dir = state.data_dir.clone();
     std::fs::create_dir_all(&data_dir)
         .map_err(|error| format!("Failed to create data directory: {}", error))?;
 
@@ -359,7 +468,7 @@ fn export_pages_zip(state: State<AppState>) -> Result<PagesZipExportResult, Stri
     }
 
     let entries = build_page_export_entries(&pages);
-    let data_dir = get_data_directory()?;
+    let data_dir = state.data_dir.clone();
     let export_dir = data_dir.join("exports");
     std::fs::create_dir_all(&export_dir)
         .map_err(|error| format!("Failed to create export directory: {}", error))?;
@@ -402,9 +511,21 @@ fn export_pages_zip(state: State<AppState>) -> Result<PagesZipExportResult, Stri
 }
 
 #[tauri::command]
-fn local_ai_status(state: State<AppState>) -> Result<LocalAiStatus, String> {
+async fn local_ai_status(state: State<'_, AppState>) -> Result<LocalAiStatus, String> {
     let mtp_config = resolve_mtp_config(&state)?;
-    Ok(state.local_ai.status_with_mtp_config(mtp_config))
+    let mut status = state.local_ai.status_with_mtp_config(mtp_config.clone());
+
+    if let Some(config) = mtp_config {
+        match local_ai::probe_mtp_endpoint(&config).await {
+            Ok(()) => status.mtp_reachable = Some(true),
+            Err(error) => {
+                status.mtp_reachable = Some(false);
+                status.mtp_probe_error = Some(error.to_string().chars().take(240).collect());
+            }
+        }
+    }
+
+    Ok(status)
 }
 
 #[tauri::command]
@@ -418,6 +539,18 @@ async fn local_ai_load(state: State<'_, AppState>) -> Result<LocalAiStatus, Stri
 
 #[tauri::command]
 fn local_ai_get_runtime_config(state: State<AppState>) -> Result<LocalAiRuntimeConfigView, String> {
+    if let Some(env_config) = MtpConfig::from_env_result()? {
+        return Ok(LocalAiRuntimeConfigView {
+            server_enabled: true,
+            endpoint: env_config.endpoint,
+            model: env_config.model,
+            draft_model: env_config.draft_model,
+            runtime_kind: env_config.runtime_kind,
+            env_configured: true,
+            env_takes_precedence: true,
+        });
+    }
+
     let db = state.db.lock().map_err(|error| error.to_string())?;
     Ok(read_runtime_config_from_db(&db)?.into_view())
 }
@@ -472,7 +605,7 @@ async fn local_ai_test_runtime_config(
     Ok(LocalAiRuntimeTestResult {
         ok: true,
         message: format!(
-            "연결 성공: {} chunks, {:.2} tok/s",
+            "연결 성공: {} chunks, {:.2} chunks/s",
             response.generated_tokens, tokens_per_second
         ),
         generated_tokens: response.generated_tokens,
@@ -508,7 +641,7 @@ async fn local_ai_generate_stream(
     let stream_request_id = request_id.clone();
     let response = tauri::async_runtime::spawn_blocking(move || {
         local_ai
-            .generate_with_callback(request, move |token_text, generated_tokens| {
+            .generate_with_callback(request, |token_text, generated_tokens| {
                 stream_window
                     .emit(
                         "local-ai-generate-chunk",
@@ -520,7 +653,8 @@ async fn local_ai_generate_stream(
                             finish_reason: None,
                         },
                     )
-                    .map_err(|error| local_ai::LocalAiError::GenerateFailed(error.to_string()))
+                    .map_err(|error| local_ai::LocalAiError::GenerateFailed(error.to_string()))?;
+                Ok(())
             })
             .map_err(|error| error.to_string())
     })
@@ -532,7 +666,7 @@ async fn local_ai_generate_stream(
             "local-ai-generate-chunk",
             LocalAiGenerateStreamChunk {
                 request_id,
-                token_text: response.text.clone(),
+                token_text: String::new(),
                 generated_tokens: response.generated_tokens,
                 done: true,
                 finish_reason: Some(response.finish_reason.clone()),
@@ -555,21 +689,21 @@ async fn local_ai_generate_mtp_stream(
     let stream_window = window.clone();
     let stream_request_id = request_id.clone();
 
-    let response =
-        local_ai::generate_mtp_stream(config, request_id.clone(), request, move |chunk| {
-            stream_window
-                .emit("local-ai-generate-chunk", chunk)
-                .map_err(|error| local_ai::LocalAiError::GenerateFailed(error.to_string()))
-        })
-        .await
-        .map_err(|error| error.to_string())?;
+    let response = local_ai::generate_mtp_stream(config, request_id, request, |chunk| {
+        stream_window
+            .emit("local-ai-generate-chunk", chunk)
+            .map_err(|error| local_ai::LocalAiError::GenerateFailed(error.to_string()))?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?;
 
     window
         .emit(
             "local-ai-generate-chunk",
             LocalAiGenerateStreamChunk {
                 request_id: stream_request_id,
-                token_text: response.text.clone(),
+                token_text: String::new(),
                 generated_tokens: response.generated_tokens,
                 done: true,
                 finish_reason: Some(response.finish_reason.clone()),
@@ -672,6 +806,7 @@ pub fn run() {
             app.manage(AppState {
                 db: Mutex::new(db),
                 local_ai: LocalAiState::new(LocalAiConfig::from_resource_dir(resource_dir)),
+                data_dir,
             });
 
             log::info!("🚀 Memoji application started successfully!");

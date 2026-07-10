@@ -1,280 +1,138 @@
-# 🖥️ Memoji VDI 환경 사용 가이드
+# Memoji VDI 사용 가이드
 
-## 🎯 VDI 환경에서 Memoji 사용하기
+Memoji는 VDI에서 로컬 SQLite DB와 로컬 AI 서버를 사용할 수 있습니다. 다만 VDI의
+야간 초기화로부터 데이터를 자동 보호하거나 자동 백업하지는 않습니다. 첫 사용 전에
+실제 저장 경로가 조직의 영구 저장 영역인지 확인하세요.
 
-**Memoji는 기본적으로 VDI 환경을 지원합니다.**
+## 빠른 시작
 
-데이터가 실행 파일과 같은 폴더의 `data` 디렉토리에 자동으로 저장되므로,
-VDI 야간 정리 작업의 영향을 받지 않습니다.
+### 1. 데이터 경로 지정
 
----
+관리자가 안내한 사용자 전용 영구 폴더를 `MEMOJI_DATA_PATH`로 지정합니다.
 
-## 🚀 빠른 시작 (3단계)
-
-### 1단계: Memoji.exe 복사
-```
-VDI 환경의 원하는 위치에 Memoji.exe를 복사하세요.
-예: C:\Memoji\Memoji.exe
-```
-
-### 2단계: 실행
-```
-Memoji.exe를 더블클릭하여 실행하세요.
-```
-
-### 3단계: 확인
-```
-메모를 작성하고 저장하세요.
-데이터는 자동으로 C:\Memoji\data\memoji.db에 저장됩니다.
-```
-
-**끝! 이게 전부입니다.**
-
----
-
-## 📁 데이터 저장 위치
-
-Memoji는 실행 파일과 같은 폴더에 `data` 디렉토리를 자동으로 생성합니다:
-
-```
-C:\Memoji\
-├── Memoji.exe          ← 실행 파일
-└── data\               ← 자동 생성됨
-    └── memoji.db       ← 데이터베이스
-```
-
-**VDI 환경에서도 안전:**
-- ✅ 야간 정리 작업의 영향 없음
-- ✅ 로그아웃 후에도 데이터 유지
-- ✅ 별도 설정 불필요
-
-## 🔧 고급 설정 (선택사항)
-
-### 환경 변수로 데이터 경로 변경
-
-특별한 경우에만 사용하세요. 대부분의 사용자는 이 설정이 필요 없습니다.
-
-**PowerShell에서 실행:**
 ```powershell
-# 환경 변수 설정
-setx MEMOJI_DATA_PATH "D:\MyData\Memoji"
-
-# Memoji 재실행
+setx MEMOJI_DATA_PATH "H:\Memoji\data"
 ```
 
-**사용 예:**
-- 특정 폴더에 데이터를 저장하고 싶을 때
-- 여러 Memoji 인스턴스를 다른 데이터로 실행하고 싶을 때
+새 로그인 세션에서 적용됩니다. `H:`는 예시이며 조직이 보존을 보장하는 경로로
+바꿔야 합니다. `portable.txt`를 만드는 방법은 현재 버전에서 동작하지 않습니다.
 
----
+### 2. Memoji 실행과 경로 확인
 
-## 💾 데이터 백업 (선택사항)
+Memoji를 실행한 뒤 설정 → 데이터에서 다음을 확인합니다.
 
-### 간단한 백업 방법
+- 표시된 경로가 예상한 `...\memoji.db`인지
+- 해당 폴더에 쓰기 권한이 있는지
+- 테스트 메모 저장 후 앱을 다시 열어도 내용이 남는지
+- 로그아웃/재접속과 야간 초기화 뒤에도 내용이 남는지
 
-데이터베이스 파일을 복사하면 됩니다:
+환경 변수가 없으면 앱은 실행 파일 옆의 쓰기 가능한 `data` 폴더를 사용합니다. 그곳에
+쓸 수 없으면 Windows에서는 보통 `%LOCALAPPDATA%\Memoji\data`로 전환됩니다. 이
+폴더가 비영구 프로필이면 다음 로그인에서 삭제될 수 있습니다.
 
-```
-C:\Memoji\data\memoji.db
-```
+## 로컬 AI 사용
 
-이 파일을 USB나 다른 위치에 복사해두세요.
+기본 AI는 같은 VDI 세션의 LiteRT-LM 서버에 연결합니다. 앱이 서버를 자동 설치하거나
+시작하지 않으므로, 관리자가 이미지 준비 단계에서 모델을 가져와야 합니다.
 
-**복원:**
-```
-1. Memoji 종료
-2. 백업한 memoji.db 파일을 C:\Memoji\data\ 폴더에 복사
-3. Memoji 재실행
-```
-
----
-
-## 🛠️ 문제 해결
-
-### Q1: Portable 모드가 활성화되지 않아요
-
-**확인 사항:**
-```
-1. portable.txt 파일이 Memoji.exe와 같은 폴더에 있는지 확인
-2. 파일 이름이 정확한지 확인 (portable.txt, 대소문자 구분 없음)
-3. Memoji를 완전히 종료하고 재실행
-```
-
-**확인 방법:**
 ```powershell
-# PowerShell에서 실행
-cd "H:\Memoji"
-dir portable.txt
-# 파일이 보이면 OK
+# 이미지 준비 단계에서 한 번 수행
+uv tool install litert-lm
+litert-lm import --from-huggingface-repo=litert-community/gemma-4-E2B-it-litert-lm `
+  gemma-4-E2B-it.litertlm gemma4-e2b
+
+# 각 사용자 세션에서 Memoji보다 먼저 실행
+litert-lm serve --host 127.0.0.1 --port 9379
 ```
 
-### Q2: 데이터가 여전히 사라져요
+기본 엔드포인트는 `http://127.0.0.1:9379/v1/chat/completions`, 모델 ID는
+`gemma4-e2b`입니다. 설정 → 로컬 AI의 연결 상태가 성공해야 사용할 수 있습니다.
+가져온 모델과 레지스트리가 사용자 세션에 함께 배포되어 있다면 실행 중 인터넷은
+필요하지 않습니다.
 
-**원인 분석:**
-```
-1. 설정 → 데이터 저장 위치 확인
-2. 경로에 "data\memoji.db"가 포함되어 있는지 확인
-3. 포함되어 있지 않으면 Portable 모드가 활성화되지 않은 것
-```
+### 느린 VDI에서
 
-**해결 방법:**
-```
-1. Memoji 완전 종료
-2. portable.txt 파일 다시 생성
-3. Memoji 재실행
-4. 설정에서 경로 다시 확인
-```
+1. 로그인할 때 LiteRT-LM을 미리 시작합니다.
+2. 먼저 256 토큰으로 사용하고, 긴 대화가 느리면 64 토큰을 선택합니다.
+3. 불필요하게 긴 페이지 전체를 프롬프트로 보내지 않습니다.
+4. 실제 VDI에서 첫 응답 지연과 생성 시간을 측정합니다.
+5. GPU가 제공되는 풀은 LiteRT-LM의 지원 백엔드로 별도 검증합니다.
 
-### Q3: 네트워크 드라이브에서 느려요
+MTP/speculative decoding은 서버 프로세스가 지원하는 모델과 옵션에서 서버 측으로
+활성화해야 합니다. Memoji 설정의 draft 문자열만으로 가속이 켜지지는 않습니다.
 
-**원인:**
-- 네트워크 지연
-- VPN 연결 불안정
+## 백업
 
-**해결 방법:**
-```
-1. 로컬 드라이브 사용 (C:\Memoji)
-2. portable.txt 생성
-3. 매일 백업 스크립트로 네트워크 드라이브에 백업
-```
+Memoji에는 예약 또는 종료 시 자동 백업 기능이 없습니다.
 
-**백업 스크립트 수정:**
+### 페이지 콘텐츠 내보내기
+
+설정 → 데이터 → 전체 페이지 ZIP 내보내기를 사용합니다. ZIP은 Markdown 페이지와
+manifest를 담으며, 앱 설정을 포함한 완전한 DB 백업은 아닙니다.
+
+### 전체 DB 백업
+
+1. Memoji를 완전히 종료합니다.
+2. 설정에서 확인한 데이터 폴더의 `memoji.db`를 백업 위치에 복사합니다.
+3. 날짜가 포함된 이름으로 보관하고 주기적으로 복원 테스트를 합니다.
+
 ```powershell
-# 로컬에서 작업, 네트워크로 백업
-$source = "C:\Memoji\data\memoji.db"
-$destination = "H:\Memoji\backup\memoji_$(Get-Date -Format 'yyyyMMdd_HHmmss').db"
+$source = "H:\Memoji\data\memoji.db"
+$backupDir = "H:\Memoji\backup"
 
-Copy-Item -Path $source -Destination $destination
-```
-
-### Q4: 여러 VDI에서 같은 데이터를 사용하고 싶어요
-
-**방법 1: 네트워크 드라이브 사용**
-```
-1. 네트워크 드라이브에 Memoji 설치 (H:\Memoji)
-2. portable.txt 생성
-3. 모든 VDI에서 H:\Memoji\Memoji.exe 실행
-```
-
-**방법 2: 동기화 스크립트**
-```powershell
-# sync.ps1
-$local = "C:\Memoji\data\memoji.db"
-$network = "H:\Memoji\data\memoji.db"
-
-# 시작 시: 네트워크 → 로컬
-if (Test-Path $network) {
-    Copy-Item $network $local -Force
-    Write-Host "✅ 데이터 동기화 완료 (네트워크 → 로컬)"
+if (Get-Process Memoji -ErrorAction SilentlyContinue) {
+  throw "Memoji를 종료한 뒤 백업하세요."
 }
 
-# Memoji 실행
-Start-Process "C:\Memoji\Memoji.exe"
-
-# 종료 시: 로컬 → 네트워크
-# (작업 스케줄러로 종료 시 실행)
+New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+Copy-Item $source (Join-Path $backupDir "memoji-$stamp.db")
 ```
 
-### Q5: 데이터베이스 파일이 손상되었어요
+복원할 때도 앱을 종료하고 현재 DB를 별도 보관한 뒤 교체합니다. 설정의 기존 DB
+가져오기는 페이지를 병합하고 가져오기 전 백업을 만들지만, 32MB 이하 DB만 지원합니다.
 
-**증상:**
-- 앱이 실행되지 않음
-- 데이터가 보이지 않음
-- 오류 메시지 표시
+## 여러 VDI에서 같은 데이터 사용
 
-**해결 방법:**
-```powershell
-# 1. 백업에서 복원
-Copy-Item "H:\Memoji\backup\memoji_최신날짜.db" `
-    "H:\Memoji\data\memoji.db" -Force
+하나의 `memoji.db`를 여러 세션이 동시에 열도록 구성하지 마세요. SQLite 네트워크 파일
+잠금과 동기화 충돌로 손상되거나 변경이 유실될 수 있습니다.
 
-# 2. 데이터베이스 무결성 검사 (SQLite 도구 필요)
-sqlite3 memoji.db "PRAGMA integrity_check;"
+안전한 운영 방식은 다음 중 하나입니다.
 
-# 3. 복구 시도
-sqlite3 memoji.db ".recover" | sqlite3 memoji_recovered.db
-```
+- 사용자마다 별도의 DB를 사용합니다.
+- 한 번에 한 인스턴스만 사용하고, 모두 종료한 상태에서 관리자 절차로 DB를 이동합니다.
+- 페이지 ZIP 내보내기와 DB 가져오기로 명시적으로 이전합니다.
 
----
+열린 DB를 OneDrive류 동기화 도구나 자체 복사 스크립트로 양방향 동기화하지 마세요.
 
-## 📊 권장 설정
+## 문제 해결
 
-### VDI 환경별 권장 설정
+### 다음 날 메모가 사라짐
 
-| VDI 유형 | 권장 설정 | 백업 주기 |
-|---------|----------|----------|
-| **비영구 VDI** | Portable 모드 + 네트워크 드라이브 | 매일 |
-| **영구 VDI** | 기본 설정 또는 Portable 모드 | 주 1회 |
-| **Citrix** | Portable 모드 + 로컬 드라이브 | 매일 |
-| **VMware Horizon** | Portable 모드 + 네트워크 드라이브 | 매일 |
+1. 설정 → 데이터의 실제 경로를 확인합니다.
+2. 해당 경로가 VDI 보존 대상인지 관리자에게 확인합니다.
+3. `%LOCALAPPDATA%`라면 실행 파일 옆 폴더가 쓰기 불가능해 fallback된 것입니다.
+4. `MEMOJI_DATA_PATH`를 영구 경로로 지정하고 기존 DB는 앱 종료 후 옮깁니다.
 
-### 최적 폴더 구조
+### AI가 준비되지 않음
 
-```
-H:\Memoji\                    ← 네트워크 드라이브
-├── Memoji.exe                ← 실행 파일
-├── portable.txt              ← Portable 모드 활성화
-├── data\                     ← 데이터 폴더
-│   └── memoji.db             ← 데이터베이스
-├── backup\                   ← 백업 폴더
-│   ├── memoji_20250121.db
-│   ├── memoji_20250122.db
-│   └── memoji_20250123.db
-└── scripts\                  ← 스크립트 폴더
-    ├── backup.ps1
-    └── sync.ps1
-```
+1. 같은 세션에서 `litert-lm serve --host 127.0.0.1 --port 9379`가 실행 중인지 확인합니다.
+2. 브라우저나 운영 도구로 `http://127.0.0.1:9379/v1/models` 응답을 확인합니다.
+3. 모델 레지스트리에 `gemma4-e2b`가 등록되어 있는지 확인합니다.
+4. 방화벽/EDR의 루프백 차단 여부를 확인합니다.
 
----
+### 네트워크 저장소에서 느림
 
-## 🎯 체크리스트
+DB를 열린 채로 로컬과 네트워크 간 복제하지 마세요. 관리자가 제공하는 영구 로컬
+프로필/컨테이너를 우선 사용하고, 네트워크 저장소를 써야 한다면 단일 인스턴스와 SQLite
+파일 잠금 지원을 먼저 검증합니다.
 
-### 초기 설정 체크리스트
+## 사용자 체크리스트
 
-- [ ] Memoji.exe를 네트워크 드라이브에 복사
-- [ ] portable.txt 파일 생성
-- [ ] Memoji 실행 및 Portable 모드 확인
-- [ ] 테스트 메모 작성
-- [ ] 앱 재시작 후 메모 유지 확인
-- [ ] 백업 스크립트 설정
-- [ ] 작업 스케줄러 등록
-
-### 일일 사용 체크리스트
-
-- [ ] Memoji 실행
-- [ ] 메모 작성
-- [ ] 저장 확인 (Ctrl+S)
-- [ ] 종료 전 백업 확인 (자동)
-
-### 주간 점검 체크리스트
-
-- [ ] 백업 파일 확인
-- [ ] 데이터베이스 크기 확인
-- [ ] 오래된 백업 정리
-- [ ] 데이터 무결성 확인
-
----
-
-## 📞 지원
-
-문제가 계속되면:
-1. GitHub Issues에 보고
-2. 데이터베이스 경로 스크린샷 첨부
-3. 오류 메시지 복사
-
-**디버그 정보 수집:**
-```powershell
-# debug_info.ps1
-Write-Host "=== Memoji 디버그 정보 ===" -ForegroundColor Cyan
-Write-Host "실행 파일 경로: $(Get-Location)\Memoji.exe"
-Write-Host "portable.txt 존재: $(Test-Path portable.txt)"
-Write-Host "data 폴더 존재: $(Test-Path data)"
-Write-Host "memoji.db 존재: $(Test-Path data\memoji.db)"
-Write-Host "환경 변수 MEMOJI_DATA_PATH: $env:MEMOJI_DATA_PATH"
-Write-Host "APPDATA: $env:APPDATA"
-```
-
----
-
-**이 가이드로 VDI 환경에서도 안전하게 Memoji를 사용하세요! 🚀**
-
+- [ ] 설정에 표시된 DB 경로가 영구 저장 대상임
+- [ ] 앱 재실행 후 테스트 메모가 유지됨
+- [ ] 야간 초기화 후 테스트 메모가 유지됨
+- [ ] 동일 DB를 다른 VDI에서 동시에 열지 않음
+- [ ] 별도 백업 일정과 복원 절차가 있음
+- [ ] LiteRT-LM 서버 연결 상태가 성공임
+- [ ] 느린 VDI에서는 응답 길이를 64/256 토큰으로 제한함

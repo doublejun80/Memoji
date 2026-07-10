@@ -1,6 +1,6 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
-import { MarkdownEditor } from './components/MarkdownEditor';
+import { MarkdownEditor, MarkdownEditorHandle } from './components/MarkdownEditor';
 import { TopBar } from './components/TopBar';
 import { SearchModal } from './components/SearchModal';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
@@ -10,12 +10,13 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { FocusModeProvider, useFocusMode } from './contexts/FocusModeContext';
 import { Page, PageNavigationIndex, PageSelectionSource } from './types';
 import { tauriStorage } from './utils/tauriStorage';
-import { logEnvironmentInfo } from './utils/environment';
+import { getEnvironment, logEnvironmentInfo } from './utils/environment';
 import { formatDateKey, parseDateKey, toLocalISOString } from './utils/dateUtils';
 import { pageWithMarkdownMetadata } from './utils/markdownMetadata';
 import { getPageDateKey, getPagesForDate, getProjectParentId, isProjectIndexPage, normalizePage } from './utils/pageModel';
 import { resolvePageSelectionState } from './utils/navigationState';
 import { Toaster } from './components/ui/sonner';
+import { toast } from 'sonner';
 
 interface CreatePageOptions {
   title: string;
@@ -50,10 +51,41 @@ function AppContent() {
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true); // 우측 패널 상태
   const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true); // 좌측 패널 상태
   const [appTitle, setAppTitle] = useState<string>('Memoji');
-  const [saveTriggered, setSaveTriggered] = useState(0); // 저장 트리거 카운터
   const [startupError, setStartupError] = useState<string | null>(null);
   const { isFocusMode } = useFocusMode();
   const pagesRef = useRef<Page[]>([]);
+  const editorRef = useRef<MarkdownEditorHandle>(null);
+
+  useEffect(() => {
+    if (!getEnvironment().isTauri) return;
+
+    let disposed = false;
+    let closing = false;
+    let unlisten: (() => void) | undefined;
+
+    void import('@tauri-apps/api/window').then(async ({ getCurrentWindow }) => {
+      const appWindow = getCurrentWindow();
+      unlisten = await appWindow.onCloseRequested(async (event) => {
+        event.preventDefault();
+        if (closing) return;
+        closing = true;
+        try {
+          await editorRef.current?.flushUnsaved();
+          if (!disposed) await appWindow.destroy();
+        } catch (error) {
+          closing = false;
+          toast.error('마지막 편집 내용을 저장하지 못해 앱을 닫지 않았습니다: ' + String(error));
+        }
+      });
+    }).catch((error) => {
+      console.error('Failed to register close safeguard:', error);
+    });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     pagesRef.current = pages;
@@ -121,7 +153,9 @@ function AppContent() {
       const saveKey = getShortcutKey('save', 'Ctrl+S');
       if (matchesShortcut(e, saveKey)) {
         e.preventDefault();
-        handleSave();
+        void handleSave()
+          .then(() => toast.success('저장되었습니다.'))
+          .catch((error) => toast.error('저장하지 못했습니다: ' + String(error)));
         return;
       }
 
@@ -161,17 +195,11 @@ function AppContent() {
     return getPagesForDate(pages, selectedDateKey);
   };
 
-  // Check if page has content (markdown text)
-  const pageHasContent = (pageId: string) => {
-    const page = pages.find(p => p.id === pageId);
-    return page ? page.content.trim().length > 0 : false;
-  };
-
   // Get dates that have pages with content
   const getDatesWithPages = () => {
     const datesSet = new Set<string>();
     pages.forEach(page => {
-      if (pageHasContent(page.id)) {
+      if (page.content.trim().length > 0) {
         const dateKey = getPageDateKey(page);
         if (dateKey) {
           datesSet.add(dateKey);
@@ -181,40 +209,21 @@ function AppContent() {
     return Array.from(datesSet);
   };
 
-
-
-  // Clean up empty pages
-  const cleanupEmptyPages = async () => {
-    const pagesToDelete: string[] = [];
-    
-    pages.forEach(page => {
-      if (!pageHasContent(page.id)) {
-        pagesToDelete.push(page.id);
-      }
-    });
-
-    if (pagesToDelete.length > 0) {
-      await Promise.all(pagesToDelete.map(pageId => tauriStorage.deletePage(pageId)));
-      const updatedPages = pages.filter(page => !pagesToDelete.includes(page.id));
-      pagesRef.current = updatedPages;
-      setPages(updatedPages);
-      
-      // If current page was deleted, clear it
-      if (currentPage && pagesToDelete.includes(currentPage.id)) {
-        setCurrentPage(null);
-      }
+  const handleDateSelect = async (date: Date) => {
+    try {
+      await editorRef.current?.flushUnsaved();
+    } catch (error) {
+      toast.error('날짜를 바꾸기 전에 저장하지 못했습니다: ' + String(error));
+      return;
     }
-  };
-
-  const handleDateSelect = (date: Date) => {
     setSelectedDate(date);
     setCurrentPageIndex('daily');
     setCurrentPage(null); // Clear current page when changing dates
   };
 
   const handleAppTitleChange = async (newTitle: string) => {
-    setAppTitle(newTitle);
     await tauriStorage.saveAppTitle(newTitle);
+    setAppTitle(newTitle);
   };
 
   const handleInsertText = (text: string) => {
@@ -301,7 +310,13 @@ function AppContent() {
 
 
 
-  const handleDailyIndexOpen = useCallback(() => {
+  const handleDailyIndexOpen = useCallback(async () => {
+    try {
+      await editorRef.current?.flushUnsaved();
+    } catch (error) {
+      toast.error('목록을 바꾸기 전에 저장하지 못했습니다: ' + String(error));
+      return;
+    }
     const dailyPages = getPagesForDate(pagesRef.current, selectedDateKey);
 
     setCurrentPageIndex('daily');
@@ -312,7 +327,15 @@ function AppContent() {
     ));
   }, [selectedDateKey]);
 
-  const handlePageSelect = (page: Page, source: PageSelectionSource = 'global') => {
+  const handlePageSelect = async (page: Page, source: PageSelectionSource = 'global') => {
+    if (currentPage?.id !== page.id) {
+      try {
+        await editorRef.current?.flushUnsaved();
+      } catch (error) {
+        toast.error('페이지를 바꾸기 전에 저장하지 못했습니다: ' + String(error));
+        return;
+      }
+    }
     const pageDateKey = getPageDateKey(page);
     const nextSelectionState = resolvePageSelectionState({
       currentDateKey: selectedDateKey,
@@ -453,10 +476,17 @@ function AppContent() {
   };
 
   const handlePageDelete = async (pageId: string) => {
-    const pagesToDelete = getAllChildPages(pageId, pages);
+    try {
+      await editorRef.current?.flushUnsaved();
+    } catch (error) {
+      toast.error('삭제 전에 저장하지 못했습니다: ' + String(error));
+      return;
+    }
+    const pagesToDelete = getAllChildPages(pageId, pagesRef.current);
     await tauriStorage.deletePage(pageId);
 
-    const updatedPages = pages.filter(page => !pagesToDelete.includes(page.id));
+    const deletedIds = new Set(pagesToDelete);
+    const updatedPages = pagesRef.current.filter(page => !deletedIds.has(page.id));
     pagesRef.current = updatedPages;
     setPages(updatedPages);
 
@@ -560,44 +590,57 @@ function AppContent() {
   };
 
   const getAllChildPages = (pageId: string, allPages: Page[]): string[] => {
-    const result = [pageId];
-    const children = allPages.filter(page => getProjectParentId(page) === pageId);
-    
-    children.forEach(child => {
-      result.push(...getAllChildPages(child.id, allPages));
-    });
-    
+    const childrenByParent = new Map<string, string[]>();
+    for (const page of allPages) {
+      const parentId = getProjectParentId(page);
+      if (!parentId) continue;
+      const children = childrenByParent.get(parentId) ?? [];
+      children.push(page.id);
+      childrenByParent.set(parentId, children);
+    }
+
+    const result: string[] = [];
+    const visited = new Set<string>();
+    const pending = [pageId];
+    while (pending.length > 0) {
+      const nextId = pending.pop()!;
+      if (visited.has(nextId)) continue;
+      visited.add(nextId);
+      result.push(nextId);
+      pending.push(...(childrenByParent.get(nextId) ?? []));
+    }
     return result;
   };
 
   const handleSave = async () => {
-    setSaveTriggered(prev => prev + 1);
+    await editorRef.current?.flushUnsaved();
   };
 
   const handleExport = async () => {
     if (!currentPage) {
-      alert('내보낼 페이지가 없습니다.');
-      return;
+      throw new Error('내보낼 페이지가 없습니다.');
     }
 
     try {
+      await handleSave();
+      const pageToExport = pagesRef.current.find(page => page.id === currentPage.id) ?? currentPage;
       // 파일 이름 생성 (특수문자 제거)
-      const fileName = `${currentPage.title.replace(/[<>:"/\\|?*]/g, '_')}.md`;
+      const fileName = `${pageToExport.title.replace(/[<>:"/\\|?*]/g, '_')}.md`;
 
       // Markdown 콘텐츠 생성
-      let markdownContent = `# ${currentPage.title}\n\n`;
+      let markdownContent = `# ${pageToExport.title}\n\n`;
 
       // 메타데이터 추가
       markdownContent += `---\n`;
-      markdownContent += `생성일: ${new Date(currentPage.createdAt).toLocaleString('ko-KR')}\n`;
-      markdownContent += `수정일: ${new Date(currentPage.updatedAt).toLocaleString('ko-KR')}\n`;
-      if (currentPage.tags && currentPage.tags.length > 0) {
-        markdownContent += `태그: ${currentPage.tags.map(tag => `#${tag}`).join(' ')}\n`;
+      markdownContent += `생성일: ${new Date(pageToExport.createdAt).toLocaleString('ko-KR')}\n`;
+      markdownContent += `수정일: ${new Date(pageToExport.updatedAt).toLocaleString('ko-KR')}\n`;
+      if (pageToExport.tags && pageToExport.tags.length > 0) {
+        markdownContent += `태그: ${pageToExport.tags.map(tag => `#${tag}`).join(' ')}\n`;
       }
       markdownContent += `---\n\n`;
 
       // 본문 내용
-      markdownContent += currentPage.content || '';
+      markdownContent += pageToExport.content || '';
 
       // Blob 생성 및 다운로드
       const blob = new Blob([markdownContent], { type: 'text/markdown;charset=utf-8' });
@@ -612,7 +655,7 @@ function AppContent() {
 
     } catch (error) {
       console.error('내보내기 실패:', error);
-      alert('내보내기 중 오류가 발생했습니다.');
+      throw error;
     }
   };
 
@@ -620,10 +663,14 @@ function AppContent() {
     <div className={`memoji-app-shell h-screen flex flex-col bg-background text-foreground ${isFocusMode ? 'focus-mode' : ''}`}>
       {/* TopBar - 집중 모드에서 숨김 */}
       {!isFocusMode && (
-        <TopBar
-          onSave={handleSave}
+          <TopBar
+            onSave={handleSave}
           onShortcutsOpen={() => setIsShortcutsOpen(true)}
-          onSettingsOpen={() => setIsSettingsOpen(true)}
+            onSettingsOpen={() => {
+              void handleSave()
+                .then(() => setIsSettingsOpen(true))
+                .catch((error) => toast.error('설정을 열기 전에 저장하지 못했습니다: ' + String(error)));
+            }}
           onRightPanelToggle={() => setIsRightPanelOpen(!isRightPanelOpen)}
           isRightPanelOpen={isRightPanelOpen}
           onLeftPanelToggle={() => setIsLeftPanelOpen(!isLeftPanelOpen)}
@@ -672,12 +719,12 @@ function AppContent() {
         {/* Main Editor */}
         <div className="flex-1 overflow-hidden flex flex-col min-h-0 border-r border-border">
           <MarkdownEditor
+            ref={editorRef}
             currentPage={currentPage}
             onPageUpdate={handlePageUpdate}
             pages={pages}
             onPageSelect={handlePageSelect}
             onPageCreate={handlePageCreate}
-            onSaveRequest={saveTriggered}
           />
         </div>
 

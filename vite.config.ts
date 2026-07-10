@@ -1,12 +1,13 @@
 
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react-swc';
+import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   // prevent vite from obscuring rust errors
   clearScreen: false,
   resolve: {

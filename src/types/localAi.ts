@@ -42,6 +42,9 @@ export interface LocalAiStatus {
   mtpEndpoint?: string | null;
   mtpModel?: string | null;
   mtpDraftModel?: string | null;
+  mtpRuntimeKind?: LocalAiRuntimeKind | null;
+  mtpReachable?: boolean | null;
+  mtpProbeError?: string | null;
   modelExists: boolean;
   tokenizerExists: boolean;
   contextSize: number;
@@ -98,6 +101,7 @@ export interface LocalAiRuntimeConfig {
   endpoint: string;
   model: string;
   draftModel?: string;
+  runtimeKind?: LocalAiRuntimeKind;
 }
 
 export interface LocalAiRuntimeConfigView extends LocalAiRuntimeConfig {
@@ -113,11 +117,134 @@ export interface LocalAiRuntimeTestResult {
 }
 
 export const LOCAL_AI_MAX_NEW_TOKENS_MIN = 32;
-export const LOCAL_AI_MAX_NEW_TOKENS_MAX = 4096;
-export const LOCAL_AI_MAX_NEW_TOKENS_DEFAULT = 512;
+export const LOCAL_AI_MAX_NEW_TOKENS_MAX = 2048;
+export const LOCAL_AI_MAX_NEW_TOKENS_DEFAULT = 256;
 export const LOCAL_AI_MAX_NEW_TOKENS_STEP = 16;
 export const LOCAL_AI_MAX_NEW_TOKENS_STORAGE_KEY = 'memoji.localAi.maxNewTokens';
 export const LOCAL_AI_SETTINGS_CHANGED_EVENT = 'memoji-local-ai-settings-changed';
+
+export type LocalAiRuntimeKind = 'builtin_candle' | 'llama_cpp' | 'litert_lm';
+export const DEFAULT_LOCAL_AI_RUNTIME_KIND: LocalAiRuntimeKind = 'litert_lm';
+
+export interface LocalAiRuntimePreset {
+  id: LocalAiRuntimeKind;
+  label: string;
+  shortLabel: string;
+  modeLabel: string;
+  description: string;
+  serverEnabled: boolean;
+  endpoint: string;
+  model: string;
+  draftModel?: string;
+}
+
+export const LOCAL_AI_RUNTIME_PRESETS: LocalAiRuntimePreset[] = [
+  {
+    id: 'litert_lm',
+    label: 'Gemma 4 E2B · LiteRT-LM',
+    shortLabel: 'Gemma 4 LiteRT-LM',
+    modeLabel: 'LiteRT-LM',
+    description: '기본 런타임. VDI CPU-only 운영용 LiteRT-LM 로컬 서버',
+    serverEnabled: true,
+    endpoint: 'http://127.0.0.1:9379/v1/chat/completions',
+    model: 'gemma4-e2b',
+  },
+];
+
+const LEGACY_LOCAL_AI_RUNTIME_PRESETS: LocalAiRuntimePreset[] = [
+  {
+    id: 'builtin_candle',
+    label: 'Gemma 4 E2B Q4_0',
+    shortLabel: 'Gemma 4 E2B Q4_0',
+    modeLabel: '로컬',
+    description: '호환성용 껍데기. GGUF 모델 파일을 다시 받으면 사용 가능',
+    serverEnabled: false,
+    endpoint: 'http://127.0.0.1:8080/v1/chat/completions',
+    model: 'google/gemma-4-E2B-it',
+  },
+  {
+    id: 'llama_cpp',
+    label: 'Gemma 4 E2B · llama.cpp',
+    shortLabel: 'Gemma 4 llama.cpp',
+    modeLabel: 'llama.cpp',
+    description: '호환성용 껍데기. GGUF 모델과 llama-server를 다시 준비하면 사용 가능',
+    serverEnabled: true,
+    endpoint: 'http://127.0.0.1:8080/v1/chat/completions',
+    model: 'google/gemma-4-E2B-it',
+    draftModel: 'ngram speculative',
+  },
+];
+
+const ALL_LOCAL_AI_RUNTIME_PRESETS: LocalAiRuntimePreset[] = [
+  ...LOCAL_AI_RUNTIME_PRESETS,
+  ...LEGACY_LOCAL_AI_RUNTIME_PRESETS,
+];
+
+export const findLocalAiRuntimePreset = (
+  runtimeKind?: LocalAiRuntimeKind | null
+): LocalAiRuntimePreset => (
+  ALL_LOCAL_AI_RUNTIME_PRESETS.find((preset) => preset.id === runtimeKind) ??
+  ALL_LOCAL_AI_RUNTIME_PRESETS.find((preset) => preset.id === DEFAULT_LOCAL_AI_RUNTIME_KIND) ??
+  ALL_LOCAL_AI_RUNTIME_PRESETS[0]
+);
+
+export const configFromLocalAiRuntimePreset = (
+  runtimeKind: LocalAiRuntimeKind
+): LocalAiRuntimeConfig => {
+  const preset = findLocalAiRuntimePreset(runtimeKind);
+  return {
+    runtimeKind: preset.id,
+    serverEnabled: preset.serverEnabled,
+    endpoint: preset.endpoint,
+    model: preset.model,
+    draftModel: preset.draftModel,
+  };
+};
+
+export const runtimeKindFromLocalAiStatus = (
+  status?: LocalAiStatus | null
+): LocalAiRuntimeKind => {
+  if (!status) return DEFAULT_LOCAL_AI_RUNTIME_KIND;
+  if (!status?.mtpConfigured) return 'builtin_candle';
+  return findLocalAiRuntimePreset(status.mtpRuntimeKind ?? null).id;
+};
+
+export const runtimeKindFromLocalAiConfig = (
+  config?: LocalAiRuntimeConfig | null
+): LocalAiRuntimeKind => {
+  if (!config) return DEFAULT_LOCAL_AI_RUNTIME_KIND;
+  if (!config?.serverEnabled) return 'builtin_candle';
+  const runtimeKind = findLocalAiRuntimePreset(config.runtimeKind ?? 'llama_cpp').id;
+  return runtimeKind === 'builtin_candle' ? 'llama_cpp' : runtimeKind;
+};
+
+export const localAiRuntimeBadgeLabel = (status?: LocalAiStatus | null): string => {
+  return findLocalAiRuntimePreset(runtimeKindFromLocalAiStatus(status)).modeLabel;
+};
+
+export const formatLocalAiGenerateError = (
+  error: unknown,
+  status?: LocalAiStatus | null
+): string => {
+  const rawMessage = String(error);
+  if (status?.mtpConfigured) {
+    const runtimePreset = findLocalAiRuntimePreset(status.mtpRuntimeKind ?? null);
+    const endpoint = status.mtpEndpoint || runtimePreset.endpoint;
+    const serverConnectionFailed =
+      rawMessage.includes('error sending request') ||
+      rawMessage.includes('Connection refused') ||
+      rawMessage.includes('tcp connect error') ||
+      rawMessage.includes('operation timed out');
+
+    if (serverConnectionFailed) {
+      return `${runtimePreset.modeLabel} 서버가 켜져 있지 않습니다.\n\n${endpoint} 에서 OpenAI 호환 서버를 먼저 실행하거나, 설정에서 사용 가능한 런타임을 선택하세요.`;
+    }
+
+    return `${runtimePreset.modeLabel} 서버 오류: ${rawMessage}\n\n설정에서 endpoint와 서버 실행 상태를 확인하세요.`;
+  }
+
+  return `로컬 AI 오류: ${rawMessage}\n\n설정에서 모델 파일, 토크나이저, CPU 가속 상태를 확인해주세요.`;
+};
 
 export const clampLocalAiMaxNewTokens = (value: number): number => {
   if (!Number.isFinite(value)) return LOCAL_AI_MAX_NEW_TOKENS_DEFAULT;
@@ -195,9 +322,18 @@ export const localAiStateLabel = (state?: LocalAiLoadState): string => {
 export const localAiStateHelp = (status?: LocalAiStatus | null): string => {
   if (!status) return '로컬 Gemma 상태를 확인하고 있습니다.';
   if (status.mtpConfigured) {
+    const preset = findLocalAiRuntimePreset(status.mtpRuntimeKind ?? null);
+    if (status.mtpReachable === false) {
+      return status.mtpProbeError
+        ? `${preset.modeLabel} 서버 연결 실패: ${status.mtpProbeError}`
+        : `${preset.modeLabel} 서버를 시작한 뒤 상태를 새로고침하세요.`;
+    }
+    if (status.mtpReachable == null) {
+      return `${preset.modeLabel} 로컬 서버 연결 상태를 확인하고 있습니다.`;
+    }
     return status.mtpDraftModel
       ? `VDI 내부 로컬 추론 서버로 스트리밍합니다. Draft 설정: ${status.mtpDraftModel}`
-      : 'VDI 내부 로컬 추론 서버로 스트리밍합니다. Drafter는 서버 실행 옵션에서 설정됩니다.';
+      : `${preset.modeLabel} 로컬 추론 서버로 스트리밍합니다. Drafter는 서버 실행 옵션에서 설정됩니다.`;
   }
 
   switch (status.state) {
@@ -221,8 +357,9 @@ export const localAiStateHelp = (status?: LocalAiStatus | null): string => {
 };
 
 export const localAiModelLabel = (status?: LocalAiStatus | null): string => {
-  if (status?.mtpConfigured && status.mtpModel) {
-    return status.mtpModel;
+  if (!status) return '상태 확인 중';
+  if (status?.mtpConfigured) {
+    return findLocalAiRuntimePreset(status.mtpRuntimeKind ?? null).shortLabel;
   }
 
   const path = status?.modelPath?.toLowerCase() || '';
@@ -237,5 +374,7 @@ export const localAiModelLabel = (status?: LocalAiStatus | null): string => {
   return 'Gemma 4 E2B';
 };
 
-export const isLocalAiReady = (status?: LocalAiStatus | null): boolean =>
-  status?.state === 'loaded' || status?.mtpConfigured === true;
+export const isLocalAiReady = (status?: LocalAiStatus | null): boolean => {
+  if (status?.mtpConfigured) return status.mtpReachable === true;
+  return status?.state === 'loaded';
+};

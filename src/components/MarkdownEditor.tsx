@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { forwardRef, useImperativeHandle } from 'react';
 import { Code2, Edit3 } from 'lucide-react';
 import { Page } from '../types';
 import { Button } from './ui/button';
@@ -11,25 +11,29 @@ interface MarkdownEditorProps {
   pages?: Page[];
   onPageSelect?: (page: Page) => void;
   onPageCreate?: (title: string) => void;
-  onSaveRequest?: number;
 }
 
-export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
+export interface MarkdownEditorHandle {
+  flushUnsaved: () => Promise<void>;
+}
+
+export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(({
   currentPage,
   onPageUpdate,
-  onSaveRequest,
-}) => {
+}, ref) => {
   const {
     content,
     mode,
     setMode,
     hasUnsavedChanges,
+    flushUnsaved,
     handleContentChange,
   } = useMarkdownPageEditor({
     currentPage,
     onPageUpdate,
-    onSaveRequest,
   });
+
+  useImperativeHandle(ref, () => ({ flushUnsaved }), [flushUnsaved]);
 
   if (!currentPage) {
     return (
@@ -111,4 +115,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       )}
     </div>
   );
-};
+});
+
+MarkdownEditor.displayName = 'MarkdownEditor';

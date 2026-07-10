@@ -212,22 +212,29 @@ class TauriStorage {
     }
 
     const existingPages = await invoke('get_pages') as any[];
-    if (Array.isArray(existingPages) && existingPages.length > 0) {
-      return;
-    }
+    const existingIds = new Set(
+      (Array.isArray(existingPages) ? existingPages : [])
+        .map((page) => String(page?.id ?? ''))
+        .filter(Boolean)
+    );
 
     const backupKey = 'memoji-localstorage-pages-backup-before-sqlite';
     if (!localStorage.getItem(backupKey)) {
       localStorage.setItem(backupKey, legacyRawPages);
     }
 
+    let migratedCount = 0;
     for (const page of legacyPages) {
+      if (existingIds.has(page.id)) continue;
       await invoke('save_page', { page: this.toTauriPage(page) });
+      existingIds.add(page.id);
+      migratedCount += 1;
     }
 
     localStorage.setItem(migrationMarkerKey, JSON.stringify({
       migratedAt: new Date().toISOString(),
-      count: legacyPages.length,
+      count: migratedCount,
+      totalLegacyPages: legacyPages.length,
     }));
   }
 
@@ -347,9 +354,11 @@ class TauriStorage {
       throw new Error('memoji.db 파일을 선택해주세요.');
     }
 
-    const maxImportBytes = 256 * 1024 * 1024;
+    // IPC serializes this Uint8Array as JSON numbers today. Keep the cap low enough
+    // that a 4 GB VDI does not transiently allocate multiple gigabytes while importing.
+    const maxImportBytes = 32 * 1024 * 1024;
     if (file.size > maxImportBytes) {
-      throw new Error('DB 파일이 너무 큽니다. data 폴더에서 직접 백업 후 교체해주세요.');
+      throw new Error('32MB보다 큰 DB는 앱을 종료한 뒤 data 폴더에서 직접 백업·교체해주세요.');
     }
 
     const buffer = await file.arrayBuffer();

@@ -121,6 +121,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const sidebarRef = useRef<HTMLDivElement>(null);
 
   const projectPages = useMemo(() => getProjectIndexPages(pages), [pages]);
+  const projectPageById = useMemo(
+    () => new Map(projectPages.map((page) => [page.id, page])),
+    [projectPages]
+  );
+  const projectChildrenByParent = useMemo(() => {
+    const children = new Map<string | null, Page[]>();
+    for (const page of projectPages) {
+      const parentId = getProjectParentId(page);
+      const siblings = children.get(parentId) ?? [];
+      siblings.push(page);
+      children.set(parentId, siblings);
+    }
+    return children;
+  }, [projectPages]);
 
   useEffect(() => {
     if (!sidebarRef.current) return;
@@ -204,15 +218,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const getProjectChildren = (parentId: string | null) => (
-    projectPages.filter(page => getProjectParentId(page) === parentId)
+    projectChildrenByParent.get(parentId) ?? []
   );
 
   const isDescendantOf = (candidateId: string, ancestorId: string): boolean => {
-    const candidatePage = projectPages.find(page => page.id === candidateId);
+    const candidatePage = projectPageById.get(candidateId);
     let cursor = candidatePage ? getProjectParentId(candidatePage) : null;
-    while (cursor) {
+    const visited = new Set<string>();
+    while (cursor && visited.add(cursor)) {
       if (cursor === ancestorId) return true;
-      const parentPage = projectPages.find(page => page.id === cursor);
+      const parentPage = projectPageById.get(cursor);
       cursor = parentPage ? getProjectParentId(parentPage) : null;
     }
     return false;
@@ -450,8 +465,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     </section>
   );
 
-  const renderProjectTree = (parentId: string | null = null, level: number = 0): React.ReactNode => {
-    const children = getProjectChildren(parentId);
+  const renderProjectTree = (
+    parentId: string | null = null,
+    level: number = 0,
+    ancestorIds: ReadonlySet<string> = new Set()
+  ): React.ReactNode => {
+    if (level > 64) return null;
+    const children = getProjectChildren(parentId).filter((page) => !ancestorIds.has(page.id));
 
     return children.map((page, index) => {
       const childPages = getProjectChildren(page.id);
@@ -462,12 +482,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       const isMenuOpen = openMenu === page.id;
       const canMoveUp = index > 0;
       const canMoveDown = index < children.length - 1;
+      const nextAncestorIds = new Set(ancestorIds).add(page.id);
       const previousSiblingFolder = [...children]
         .slice(0, index)
         .reverse()
         .find(sibling => sibling.type === 'folder') || null;
       const parentIdForPage = getProjectParentId(page);
-      const parentPage = parentIdForPage ? pages.find(candidate => candidate.id === parentIdForPage) : null;
+      const parentPage = parentIdForPage ? projectPageById.get(parentIdForPage) : null;
       const canMoveIntoPreviousFolder = !!previousSiblingFolder && previousSiblingFolder.id !== page.id;
       const canMoveOut = !!parentIdForPage;
 
@@ -740,7 +761,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {hasChildren && isExpanded && (
             <div className="mt-1" style={INDEX_LIST_STYLE}>
-              {renderProjectTree(page.id, level + 1)}
+              {renderProjectTree(page.id, level + 1, nextAncestorIds)}
             </div>
           )}
         </div>

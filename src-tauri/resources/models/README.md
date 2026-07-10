@@ -1,9 +1,11 @@
 # Local Gemma Model Resources
 
-Place local Gemma 4 E2B GGUF assets in this directory before packaging or running
-the local assistant. Large model files are intentionally ignored by git.
+LiteRT-LM is the current default local AI runtime. The app keeps this directory
+as the optional GGUF resource slot for the built-in Candle backend and llama.cpp
+fallbacks. Large model files are intentionally ignored by git and are not
+required when LiteRT-LM is selected.
 
-Default runtime paths:
+Optional GGUF runtime paths:
 
 - `gemma-4-e2b-it-q4.gguf`
 - `tokenizer.json`
@@ -15,42 +17,75 @@ You can override these paths without rebuilding:
 - `MEMOJI_LOCAL_AI_CONTEXT=2048`
 
 The built-in backend never downloads models and never falls back to a network
-inference API. Keep the default context at 2048 or 4096 for VDI CPU memory
-safety.
+inference API. If `gemma-4-e2b-it-q4.gguf` is missing, the Candle and llama.cpp
+runtime definitions remain available internally, but they are not shown in the
+default UI. Re-enable them only after the GGUF file is downloaded again. Keep
+the default context at 2048 or 4096 for VDI CPU memory safety.
 
-Memoji can also use a separate high-speed local server for long answers. That
-mode is still local-only: Settings saves only a loopback endpoint and Rust
-rejects public, LAN, and cloud hosts.
+## Default LiteRT-LM runtime
+
+LiteRT-LM runs as a separate process in the same user/VDI session. Memoji does
+not install it, import its model, or start the server automatically. During
+image preparation, import the model into the LiteRT-LM registry:
+
+```powershell
+uv tool install litert-lm
+litert-lm import --from-huggingface-repo=litert-community/gemma-4-E2B-it-litert-lm `
+  gemma-4-E2B-it.litertlm gemma4-e2b
+```
+
+Provision that registry so it is visible to the user account that will run the
+server. Once the model has been imported into the image, runtime inference can
+remain offline. Start the server before Memoji:
+
+```powershell
+litert-lm serve --host 127.0.0.1 --port 9379
+```
+
+The application defaults are:
+
+```text
+Endpoint: http://127.0.0.1:9379/v1/chat/completions
+Model: gemma4-e2b
+```
+
+Memoji probes the matching `/v1/models` endpoint and reports the AI as ready
+only after it responds successfully and lists `gemma4-e2b`. Saving the endpoint is not enough. Rust
+rejects public, LAN, and cloud hosts; only `localhost`, `127.0.0.0/8`, and
+`::1` loopback endpoints are accepted.
 
 ## VDI performance diagnosis
 
-Because VDI CPU, storage, and policy settings vary by host, use Settings →
-Local AI → VDI performance diagnosis on the actual VDI image. The benchmark
-loads the bundled Gemma model if needed, generates a short fixed 16-token
-sample, and reports load time, generation time, tokens per second, and a
-recommendation. If the result is below roughly 3 tok/s, keep answers short or
-consider the loopback MTP/server mode below.
+Because VDI CPU, storage, and policy settings vary by host, measure on the
+actual VDI pool. Start with the 256-token response limit and reduce it to 64 on
+slow CPU-only sessions. Start LiteRT-LM at login so its registry and model are
+ready before the first user request. If a supported GPU backend is available,
+validate it on the golden image rather than assuming the virtual GPU is exposed.
 
-## VDI MTP streaming
+Settings → Local AI → VDI performance diagnosis benchmarks only the optional
+built-in GGUF backend and is disabled while the default server runtime is
+selected. It is not a LiteRT-LM benchmark.
 
-For faster VDI deployments, run an OpenAI-compatible inference process inside
-the same VDI machine. This is not an internet fallback: Memoji accepts only
-`localhost`, `127.0.0.0/8`, or `::1` endpoints for MTP streaming.
+## Optional server overrides and MTP
 
-- `MEMOJI_MTP_ENDPOINT=http://127.0.0.1:8080/v1/chat/completions`
-- `MEMOJI_MTP_MODEL=google/gemma-4-E2B-it`
-- `MEMOJI_MTP_DRAFT_MODEL=google/gemma-4-E2B-it-assistant`
+Environment variables can lock the runtime configuration for a managed image:
 
-When `MEMOJI_MTP_ENDPOINT` points at an allowed VDI-local endpoint, the Tauri
-command streams through that local process and skips the built-in Candle GGUF
-generator. Public internet endpoints are ignored; when no allowed endpoint is
-configured, the app uses the local GGUF files above.
+- `MEMOJI_MTP_ENDPOINT=http://127.0.0.1:9379/v1/chat/completions`
+- `MEMOJI_MTP_MODEL=gemma4-e2b`
+- `MEMOJI_MTP_RUNTIME=litert_lm`
+- `MEMOJI_MTP_DRAFT_MODEL=<operator-facing metadata>` (optional)
+- `MEMOJI_MTP_API_KEY=<local-server key>` (optional)
 
-Memoji does not send `MEMOJI_MTP_DRAFT_MODEL` as a cloud-style API field. Treat
-it as operator-facing metadata; configure speculative decoding or MTP on the
-local inference server process itself.
+Environment configuration takes precedence over Settings. An invalid or
+unreachable configured endpoint produces an error; Memoji does not silently
+fall back to another model or a cloud service.
 
-Example llama.cpp server command for long responses:
+Speculative decoding/MTP must be enabled in a LiteRT-LM server version and
+model/backend combination that supports it. `MEMOJI_MTP_DRAFT_MODEL` is not
+sent as a cloud-style API request field and does not enable acceleration by
+itself.
+
+The optional llama.cpp compatibility path can use a separate loopback server:
 
 ```powershell
 .\llama-server.exe `
@@ -62,12 +97,18 @@ Example llama.cpp server command for long responses:
   --spec-draft-n-max 64
 ```
 
-Then set Settings → Local AI → High-speed local server:
+Then set the managed runtime override:
 
 ```text
 Endpoint: http://127.0.0.1:8080/v1/chat/completions
 Model: google/gemma-4-E2B-it
+Runtime: llama_cpp
 ```
 
-For vLLM or ONNX Runtime GenAI, expose an OpenAI-compatible
-`/v1/chat/completions` endpoint on `127.0.0.1` and use the same Settings card.
+Only OpenAI-compatible streaming responses on an allowed loopback endpoint are
+supported. Verify `/v1/models` and `/v1/chat/completions` on the target VDI.
+
+## Official references
+
+- [LiteRT-LM OpenAI-compatible server](https://developers.google.com/edge/litert-lm/cli/openai_server)
+- [LiteRT-LM Gemma 4 model guide](https://developers.google.com/edge/litert-lm/models/gemma-4)

@@ -1,427 +1,131 @@
-# 🎯 Memoji VDI 데이터 손실 문제 해결 완료
+# Memoji VDI 구현 현황
 
-## 📋 문제 요약
+이 문서는 과거의 “VDI 데이터 손실 문제 해결 완료” 주장을 현재 코드 기준으로 바로잡은
+현황 보고서입니다. Memoji는 저장 경로를 제어할 수 있지만, VDI 데이터 보존은 인프라
+정책과 운영 절차까지 함께 구성해야 달성됩니다.
 
-### 발생한 문제
-```
-VDI 환경에서 Memoji 사용 시:
-- 첫날: 메모 작성 및 저장 성공 ✅
-- 다음날: 달력에 날짜 표시는 있지만 메모 내용 사라짐 ❌
-```
+## 결론
 
-### 근본 원인
-```
-기본 데이터 저장 경로:
-%APPDATA%\com.memoji.app\memoji.db
-         ↓
-VDI 야간 정리 작업으로 삭제됨
-         ↓
-데이터 손실 발생
-```
+- 구현됨: 환경 변수로 데이터 경로 지정, 실행 파일 옆 쓰기 가능 경로 사용, OS 로컬
+  데이터 폴더 fallback, 설정에서 실제 DB 경로 확인, 수동 내보내기/가져오기.
+- 구현되지 않음: `portable.txt`, VDI 자동 감지, 예약/종료 시 자동 백업, 자동 동기화,
+  여러 VDI 인스턴스의 DB 동시 공유 보호.
+- 기본 AI: 외부 클라우드가 아닌 VDI 내부 LiteRT-LM 루프백 서버. 단, 서버 설치·모델
+  가져오기·프로세스 시작은 운영자가 해야 함.
 
----
+따라서 “실행 파일만 복사하면 데이터가 절대 사라지지 않는다”거나 “VDI에서 완벽하게
+안전하다”는 표현은 정확하지 않습니다.
 
-## ✅ 구현된 솔루션
+## 현재 데이터 경로 로직
 
-### 1. Portable 모드 구현
+앱 시작 시 아래 순서로 한 경로를 결정하고, 실행 중에는 같은 경로를 사용합니다.
 
-**핵심 기능:**
-- 실행 파일과 같은 폴더의 `data` 디렉토리에 데이터 저장
-- VDI 정리 작업의 영향을 받지 않음
-- 네트워크 드라이브에서 안전하게 사용 가능
-
-**활성화 방법:**
-
-**방법 1: GUI에서 활성화**
-```
-1. Memoji 실행
-2. 설정 (⚙️) 클릭
-3. "데이터 저장 위치" 섹션에서
-4. "🔒 Portable 모드 활성화" 버튼 클릭
-5. 앱 재시작
+```text
+MEMOJI_DATA_PATH
+        ↓ 없으면
+실행 파일 옆 data 폴더가 쓰기 가능한가?
+        ↓ 아니면
+OS 로컬 데이터 폴더/Memoji/data
 ```
 
-**방법 2: portable.txt 파일 생성**
-```
-Memoji.exe와 같은 폴더에 portable.txt 파일 생성
-→ 자동으로 Portable 모드 활성화
-```
+Windows의 마지막 경로는 일반적으로 `%LOCALAPPDATA%\Memoji\data`입니다. 비영구
+VDI가 `%LOCALAPPDATA%`를 초기화하면 이 fallback 경로의 DB도 사라질 수 있습니다.
+앱은 폴더명이나 환경 변수 패턴으로 VDI를 판별하지 않습니다.
 
-**방법 3: 환경 변수 사용**
+### 운영 권장안
+
 ```powershell
 setx MEMOJI_DATA_PATH "H:\Memoji\data"
 ```
 
-### 2. VDI 환경 자동 감지
+관리자가 보존하는 사용자 전용 경로를 지정하고, 새 세션에서 설정 → 데이터의 실제
+`memoji.db` 경로를 확인합니다. 로그아웃/재접속과 야간 이미지 초기화 후 테스트 메모가
+남는지 배포 승인 전에 검증해야 합니다.
 
-**구현 내용:**
-```rust
-// src-tauri/src/lib.rs
-fn is_vdi_environment() -> bool {
-    // APPDATA 경로에서 VDI 패턴 감지
-    // - "temp", "temporary"
-    // - "citrix", "vmware", "vdi"
-    // - "roaming.v", "local.v" (Citrix 프로필)
-}
+## 백업과 이전 기능
+
+현재 설정 화면은 다음 기능을 제공합니다.
+
+- 전체 페이지 ZIP 내보내기: Markdown 페이지와 manifest를 `exports` 폴더에 생성.
+  앱 설정을 포함한 완전한 DB 백업은 아님.
+- 기존 DB 가져오기: 현재 DB를 `backups` 폴더에 먼저 백업한 뒤 페이지 병합.
+  프런트 IPC 메모리 사용 때문에 32MB 이하 파일만 허용.
+- 데이터 폴더 열기: 현재 앱이 실제 사용하는 폴더를 표시/열기.
+
+주기적 자동 백업과 자동 복원은 없습니다. 전체 DB를 직접 백업할 때는 앱을 완전히
+종료한 후 복사하거나 SQLite를 이해하는 관리 도구를 사용해야 합니다.
+
+## 공유 DB 위험
+
+네트워크 드라이브가 영구적이라는 사실만으로 안전한 것은 아닙니다. 같은
+`memoji.db`를 여러 VDI가 동시에 열면 SQLite 잠금 동작, 네트워크 지연, 동기화 충돌로
+데이터 손상 또는 변경 유실이 발생할 수 있습니다.
+
+- DB는 사용자별로 분리합니다.
+- 한 DB에는 한 번에 하나의 Memoji 인스턴스만 접근합니다.
+- 이동/복사는 모든 인스턴스를 종료한 상태에서 수행합니다.
+- 열린 DB의 실시간 양방향 파일 동기화를 사용하지 않습니다.
+
+## LiteRT-LM 현재 구조
+
+기본 런타임은 `Gemma 4 E2B · LiteRT-LM`이며 다음 루프백 엔드포인트를 사용합니다.
+
+```text
+http://127.0.0.1:9379/v1/chat/completions
+model: gemma4-e2b
 ```
 
-**동작:**
-- VDI 환경 감지 시 자동으로 Portable 모드 사용
-- 사용자 개입 없이 데이터 보호
+Memoji는 `localhost`, `127.0.0.0/8`, `::1`만 허용하고 공용/LAN 주소를 거부합니다.
+하지만 LiteRT-LM 바이너리와 모델을 앱에 내장해 자동 실행하지는 않습니다.
 
-### 3. 데이터 경로 우선순위
+이미지 준비 단계:
 
-```
-1순위: 환경 변수 MEMOJI_DATA_PATH
-       ↓ (없으면)
-2순위: portable.txt 파일 존재 여부
-       ↓ (없으면)
-3순위: data 폴더 존재 여부
-       ↓ (없으면)
-4순위: VDI 환경 감지
-       ↓ (아니면)
-5순위: %APPDATA% (기본값)
-```
-
-### 4. 설정 UI 개선
-
-**추가된 기능:**
-- 현재 데이터베이스 경로 표시
-- Portable 모드 상태 표시
-- 데이터 폴더 열기 버튼
-- Portable 모드 활성화 버튼
-- VDI 환경 경고 메시지
-
-**스크린샷 (설정 화면):**
-```
-┌─────────────────────────────────────────┐
-│ 💾 데이터 저장 위치                      │
-├─────────────────────────────────────────┤
-│ 현재 데이터베이스 경로:                  │
-│ [H:\Memoji\data\memoji.db] [📁 폴더 열기]│
-│                                          │
-│ ✅ Portable 모드 활성화됨                │
-│ 데이터가 실행 파일과 같은 폴더의         │
-│ 'data' 디렉토리에 저장됩니다.            │
-│ VDI 환경에서도 안전하게 사용할 수 있습니다.│
-└─────────────────────────────────────────┘
-```
-
----
-
-## 📊 기술적 구현 세부사항
-
-### 변경된 파일
-
-**1. src-tauri/src/lib.rs**
-```rust
-// 추가된 함수들:
-- get_data_directory() -> Result<PathBuf, String>
-  → 데이터 저장 경로 결정 로직
-
-- is_vdi_environment() -> bool
-  → VDI 환경 자동 감지
-
-- get_data_path() -> Result<String, String>
-  → 프론트엔드에 데이터 경로 제공
-
-- enable_portable_mode() -> Result<String, String>
-  → GUI에서 Portable 모드 활성화
-```
-
-**2. src-tauri/Cargo.toml**
-```toml
-[dependencies]
-dirs = "6.0"  # 시스템 디렉토리 경로 가져오기
-```
-
-**3. src/components/SettingsModal.tsx**
-```typescript
-// 추가된 상태:
-- dataPath: string
-- isPortableMode: boolean
-
-// 추가된 함수:
-- loadDataPath()
-- handleEnablePortableMode()
-- handleOpenDataFolder()
-```
-
-### 데이터 흐름
-
-```
-사용자 실행
-    ↓
-get_data_directory() 호출
-    ↓
-환경 변수 확인 → MEMOJI_DATA_PATH 있음?
-    ↓ (없음)
-portable.txt 확인 → 파일 있음?
-    ↓ (없음)
-data 폴더 확인 → 폴더 있음?
-    ↓ (없음)
-VDI 환경 감지 → VDI 패턴 발견?
-    ↓ (아님)
-%APPDATA% 사용 (기본값)
-    ↓
-데이터베이스 초기화
-    ↓
-앱 실행
-```
-
----
-
-## 🧪 테스트 결과
-
-### 테스트 시나리오 1: Portable 모드 활성화
-
-**절차:**
-1. Memoji.exe를 `H:\Memoji\`에 복사
-2. `H:\Memoji\portable.txt` 파일 생성
-3. Memoji 실행
-4. 설정에서 데이터 경로 확인
-
-**결과:**
-```
-✅ 데이터 경로: H:\Memoji\data\memoji.db
-✅ Portable 모드 활성화됨 표시
-✅ 메모 작성 및 저장 성공
-✅ 앱 재시작 후 데이터 유지
-```
-
-### 테스트 시나리오 2: VDI 환경 자동 감지
-
-**절차:**
-1. APPDATA 환경 변수를 VDI 패턴으로 설정
-   ```powershell
-   $env:APPDATA = "C:\Users\temp.citrix\AppData\Roaming"
-   ```
-2. Memoji 실행
-3. 데이터 경로 확인
-
-**결과:**
-```
-✅ VDI 환경 자동 감지
-✅ Portable 모드 자동 활성화
-✅ 데이터가 실행 파일 폴더에 저장됨
-```
-
-### 테스트 시나리오 3: GUI에서 Portable 모드 활성화
-
-**절차:**
-1. Memoji 실행 (기본 모드)
-2. 설정 → "🔒 Portable 모드 활성화" 클릭
-3. 앱 재시작
-4. 데이터 경로 확인
-
-**결과:**
-```
-✅ portable.txt 파일 자동 생성
-✅ 앱 재시작 후 Portable 모드 활성화
-✅ 기존 데이터 유지 (마이그레이션 필요 시 수동)
-```
-
----
-
-## 📦 빌드 결과
-
-### 빌드 성공
-```
-✓ Vite 빌드 완료 (10.98s)
-✓ Rust 컴파일 완료 (1m 11s)
-✓ MSI 패키지 생성 완료
-✓ NSIS 설치 파일 생성 완료
-```
-
-### 생성된 파일
-```
-src-tauri/target/release/bundle/
-├── msi/
-│   └── Memoji_1.0.0_x64_en-US.msi        (약 10-15MB)
-└── nsis/
-    └── Memoji_1.0.0_x64-setup.exe        (약 8-12MB)
-```
-
-### 실행 파일
-```
-src-tauri/target/release/
-└── app.exe                                (약 5-8MB)
-```
-
----
-
-## 📚 문서화
-
-### 생성된 문서
-
-**1. VDI_DATA_LOSS_ANALYSIS.md**
-- 문제 분석 보고서
-- 근본 원인 설명
-- 해결 방안 상세 설명
-
-**2. VDI_SETUP_GUIDE.md**
-- VDI 사용자를 위한 설정 가이드
-- Portable 모드 활성화 방법
-- 백업 스크립트
-- 문제 해결 FAQ
-
-**3. README.md (업데이트)**
-- VDI 지원 강조
-- Portable 모드 소개
-- 빠른 시작 가이드
-
-**4. BUILD_GUIDE.md (업데이트)**
-- Portable 모드 기능 추가
-
----
-
-## 🎯 사용자 가이드 요약
-
-### VDI 환경에서 Memoji 사용하기
-
-**1단계: 설치**
-```
-1. Memoji.exe를 네트워크 드라이브에 복사
-   예: H:\Memoji\Memoji.exe
-
-2. portable.txt 파일 생성
-   예: H:\Memoji\portable.txt
-```
-
-**2단계: 실행**
-```
-1. Memoji.exe 더블클릭
-2. 설정에서 Portable 모드 확인
-3. 메모 작성 시작
-```
-
-**3단계: 확인**
-```
-1. 설정 → 데이터 저장 위치
-2. "✅ Portable 모드 활성화됨" 확인
-3. 경로에 "data\memoji.db" 포함 확인
-```
-
----
-
-## 🔍 달력 표시는 남고 내용이 사라지는 이유
-
-### 원인 분석
-
-**달력 데이터 (유지됨):**
-```typescript
-// localStorage에 저장 (브라우저 캐시)
-localStorage.setItem('blocknote-pages', JSON.stringify(pages));
-
-// VDI 정리 작업에서 브라우저 캐시는 유지될 수 있음
-```
-
-**메모 내용 (삭제됨):**
-```rust
-// SQLite 데이터베이스에 저장
-// %APPDATA%\com.memoji.app\memoji.db
-
-// VDI 정리 작업으로 %APPDATA% 폴더 삭제
-```
-
-**결과:**
-```
-달력 표시 (localStorage) → ✅ 유지
-메모 내용 (SQLite)       → ❌ 삭제
-```
-
----
-
-## 🚀 향후 개선 사항
-
-### 1. 자동 백업 기능 (계획 중)
-```rust
-// 앱 종료 시 자동 백업
-fn backup_database(db_path: &Path) -> Result<(), String> {
-    let backup_dir = db_path.parent()?.join("backups");
-    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-    let backup_path = backup_dir.join(format!("memoji_{}.db", timestamp));
-    
-    std::fs::copy(db_path, &backup_path)?;
-    cleanup_old_backups(&backup_dir, 7)?; // 최근 7개만 유지
-    
-    Ok(())
-}
-```
-
-### 2. 백업 복원 UI (계획 중)
-```typescript
-// 설정 화면에 백업 복원 기능 추가
-const restoreBackup = async (backupFile: string) => {
-  await invoke('restore_backup', { backupFile });
-  toast.success('백업이 복원되었습니다. 앱을 재시작해주세요.');
-};
-```
-
-### 3. 데이터 동기화 (계획 중)
-```
-로컬 ←→ 네트워크 드라이브 자동 동기화
-- 시작 시: 네트워크 → 로컬
-- 종료 시: 로컬 → 네트워크
-```
-
----
-
-## ✅ 체크리스트
-
-### 구현 완료 항목
-- [x] Portable 모드 구현
-- [x] VDI 환경 자동 감지
-- [x] 데이터 경로 우선순위 시스템
-- [x] 설정 UI 개선
-- [x] 데이터 경로 표시
-- [x] Portable 모드 활성화 버튼
-- [x] VDI 환경 경고 메시지
-- [x] 문서화 (분석 보고서, 설정 가이드)
-- [x] README 업데이트
-- [x] 빌드 테스트
-
-### 향후 구현 예정
-- [ ] 자동 백업 기능
-- [ ] 백업 복원 UI
-- [ ] 데이터 동기화 기능
-- [ ] 데이터 마이그레이션 도구
-
----
-
-## 📞 지원
-
-**문제 발생 시:**
-1. [VDI_SETUP_GUIDE.md](VDI_SETUP_GUIDE.md) 참고
-2. [VDI_DATA_LOSS_ANALYSIS.md](VDI_DATA_LOSS_ANALYSIS.md) 참고
-3. GitHub Issues에 보고
-
-**디버그 정보 수집:**
 ```powershell
-# PowerShell에서 실행
-Write-Host "실행 파일 경로: $(Get-Location)\Memoji.exe"
-Write-Host "portable.txt 존재: $(Test-Path portable.txt)"
-Write-Host "data 폴더 존재: $(Test-Path data)"
-Write-Host "memoji.db 존재: $(Test-Path data\memoji.db)"
-Write-Host "환경 변수: $env:MEMOJI_DATA_PATH"
+uv tool install litert-lm
+litert-lm import --from-huggingface-repo=litert-community/gemma-4-E2B-it-litert-lm `
+  gemma-4-E2B-it.litertlm gemma4-e2b
 ```
 
----
+사용자 세션 시작 단계:
 
-## 🎉 결론
+```powershell
+litert-lm serve --host 127.0.0.1 --port 9379
+```
 
-**문제 해결 완료:**
-- ✅ VDI 환경에서 데이터 손실 문제 해결
-- ✅ Portable 모드로 안전한 데이터 저장
-- ✅ 사용자 친화적인 GUI 제공
-- ✅ 자동 VDI 환경 감지
-- ✅ 상세한 문서화
+앱은 `/v1/models`를 짧게 확인해 실제 서버가 응답할 때만 준비 상태로 표시합니다.
+모델 레지스트리가 이미지/사용자 환경에 배포된 뒤에는 런타임을 오프라인으로 운영할 수
+있습니다.
 
-**사용자 혜택:**
-- 🔒 VDI 환경에서도 안전한 데이터 보관
-- 🚀 간편한 Portable 모드 활성화
-- 📁 네트워크 드라이브 지원
-- 💾 데이터 손실 걱정 없음
+### VDI 반응 속도 개선 원칙
 
-**Memoji는 이제 VDI 환경에서도 완벽하게 작동합니다! 🎯**
+- 로그인 시 LiteRT-LM을 미리 시작해 첫 사용자 요청 전에 서버를 준비합니다.
+- Gemma 4 E2B, 256 토큰으로 시작하고 느린 CPU 세션은 64 토큰을 사용합니다.
+- 실제 호스트 풀에서 첫 토큰 지연과 생성 시간을 측정합니다.
+- GPU 사용 가능 여부와 드라이버/백엔드는 골든 이미지에서 별도 검증합니다.
+- vCPU 과할당, 전원 절약, 느린 네트워크 모델 저장소를 피합니다.
+- MTP/speculative decoding은 지원되는 LiteRT-LM 서버 옵션과 모델 조합에서 서버
+  측으로 활성화합니다. UI의 draft 메타데이터만으로 가속되지 않습니다.
 
+## 남은 운영 위험
+
+| 위험 | 현재 방어 | 운영자 조치 |
+|---|---|---|
+| 비영구 `%LOCALAPPDATA%` fallback | 설정에 실제 경로 표시 | `MEMOJI_DATA_PATH` 지정 및 야간 보존 시험 |
+| 자동 백업 없음 | 수동 ZIP/DB 가져오기 전 백업 | 조직 백업 일정과 복원 리허설 |
+| 공유 DB 동시 접근 | 앱 프로세스 단일 인스턴스 플러그인 | VDI 간 공유 금지, 사용자별 DB |
+| LiteRT-LM 서버 미실행 | `/v1/models` 준비 상태 확인 | 로그인 시작 작업과 상태 모니터링 |
+| 모델/레지스트리 누락 | 연결 실패 표시 | 이미지에 모델과 사용자 접근 권한 포함 |
+| CPU-only VDI 지연 | 응답 길이 선택, 내장 벤치마크 | 64/256 토큰 제한 및 실제 풀 성능 측정 |
+
+## 배포 완료 기준
+
+- [ ] 설정에 표시된 DB가 사용자 전용 영구 경로임
+- [ ] 재실행, 재로그인, 야간 초기화 후 데이터가 유지됨
+- [ ] 동일 DB를 여러 VDI가 동시에 열지 않음
+- [ ] 백업 파일이 생성되고 실제 복원이 검증됨
+- [ ] 사용자 세션에서 LiteRT-LM 모델 레지스트리가 보임
+- [ ] `127.0.0.1:9379/v1/models`가 응답하고 앱 상태가 준비됨
+- [ ] 대표 VDI 사양에서 허용 가능한 응답 시간이 확인됨
+
+위 조건을 통과한 배포에 한해 해당 조직의 VDI에서 안전하게 운영된다고 판단할 수
+있습니다.

@@ -7,7 +7,6 @@ export type EditorMode = 'wysiwyg' | 'source';
 interface UseMarkdownPageEditorOptions {
   currentPage: Page | null;
   onPageUpdate: (page: Page) => void | Promise<void>;
-  onSaveRequest?: number;
   debounceMs?: number;
 }
 
@@ -82,7 +81,6 @@ const mergeExternalContent = (baseContent: string, localContent: string, incomin
 export const useMarkdownPageEditor = ({
   currentPage,
   onPageUpdate,
-  onSaveRequest,
   debounceMs = 900,
 }: UseMarkdownPageEditorOptions) => {
   const [content, setContent] = useState('');
@@ -96,43 +94,55 @@ export const useMarkdownPageEditor = ({
   const onPageUpdateRef = useRef(onPageUpdate);
   const saveVersionRef = useRef(0);
   const latestAppliedSaveVersionRef = useRef(0);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     onPageUpdateRef.current = onPageUpdate;
   }, [onPageUpdate]);
 
-  const savePage = useCallback(async (page: Page, markdown: string) => {
+  const savePage = useCallback((page: Page, markdown: string): Promise<void> => {
     const saveVersion = ++saveVersionRef.current;
     const nextPage = pageWithMarkdownMetadata(page, markdown);
 
-    try {
-      await onPageUpdateRef.current(nextPage);
-      if (saveVersion < latestAppliedSaveVersionRef.current) return;
-      latestAppliedSaveVersionRef.current = saveVersion;
+    const queuedSave = saveQueueRef.current.then(async () => {
+      try {
+        await onPageUpdateRef.current(nextPage);
+        if (saveVersion < latestAppliedSaveVersionRef.current) return;
+        latestAppliedSaveVersionRef.current = saveVersion;
 
-      if (pageRef.current?.id === nextPage.id) {
-        pageRef.current = nextPage;
-        const hasNewerLocalContent = contentRef.current !== markdown;
-        dirtyRef.current = hasNewerLocalContent;
-        setHasUnsavedChanges(hasNewerLocalContent);
+        if (pageRef.current?.id === nextPage.id) {
+          pageRef.current = nextPage;
+          const hasNewerLocalContent = contentRef.current !== markdown;
+          dirtyRef.current = hasNewerLocalContent;
+          setHasUnsavedChanges(hasNewerLocalContent);
+        }
+      } catch (error) {
+        console.error('Failed to save page:', error);
+        if (pageRef.current?.id === page.id) {
+          dirtyRef.current = true;
+          setHasUnsavedChanges(true);
+        }
+        throw error;
       }
-    } catch (error) {
-      console.error('Failed to save page:', error);
-      if (pageRef.current?.id === page.id) {
-        dirtyRef.current = true;
-        setHasUnsavedChanges(true);
-      }
-    }
+    });
+
+    saveQueueRef.current = queuedSave.catch(() => undefined);
+    return queuedSave;
   }, []);
 
-  const flushUnsaved = useCallback(() => {
-    if (!pageRef.current || !dirtyRef.current) return Promise.resolve();
-    return savePage(pageRef.current, contentRef.current);
+  const flushUnsaved = useCallback(async () => {
+    // VDI의 느린 디스크 쓰기 중 사용자가 다시 입력할 수 있다. 한 번의 snapshot만
+    // 저장하면 종료·이동 직전에 그 새 입력이 빠지므로 dirty가 사라질 때까지 직렬화한다.
+    while (pageRef.current && dirtyRef.current) {
+      const pageId = pageRef.current.id;
+      await savePage(pageRef.current, contentRef.current);
+      if (pageRef.current?.id !== pageId) return;
+    }
   }, [savePage]);
 
   useEffect(() => {
     if (!currentPage) {
-      void flushUnsaved();
+      void flushUnsaved().catch(() => undefined);
       pageRef.current = null;
       contentRef.current = '';
       lastPageIdRef.current = null;
@@ -143,7 +153,7 @@ export const useMarkdownPageEditor = ({
     }
 
     if (currentPage.id !== lastPageIdRef.current) {
-      void flushUnsaved();
+      void flushUnsaved().catch(() => undefined);
       pageRef.current = currentPage;
       contentRef.current = currentPage.content || '';
       lastPageIdRef.current = currentPage.id;
@@ -172,7 +182,7 @@ export const useMarkdownPageEditor = ({
 
   useEffect(() => {
     return () => {
-      void flushUnsaved();
+      void flushUnsaved().catch(() => undefined);
     };
   }, [flushUnsaved]);
 
@@ -181,17 +191,12 @@ export const useMarkdownPageEditor = ({
 
     const timer = window.setTimeout(() => {
       if (pageRef.current && dirtyRef.current) {
-        void savePage(pageRef.current, contentRef.current);
+        void savePage(pageRef.current, contentRef.current).catch(() => undefined);
       }
     }, debounceMs);
 
     return () => window.clearTimeout(timer);
   }, [content, debounceMs, savePage]);
-
-  useEffect(() => {
-    if (!onSaveRequest || onSaveRequest <= 0) return;
-    void flushUnsaved();
-  }, [onSaveRequest, flushUnsaved]);
 
   useEffect(() => {
     if (!currentPage || currentPage.type === 'folder') return;

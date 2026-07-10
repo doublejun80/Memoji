@@ -3,16 +3,23 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Loader2, SendHorizontal } from 'lucide-react';
 import {
+  configFromLocalAiRuntimePreset,
+  findLocalAiRuntimePreset,
+  formatLocalAiGenerateError,
   isLocalAiReady,
   LOCAL_AI_MAX_NEW_TOKENS_DEFAULT,
+  LOCAL_AI_RUNTIME_PRESETS,
   LOCAL_AI_SETTINGS_CHANGED_EVENT,
   localAiModelLabel,
+  localAiRuntimeBadgeLabel,
   localAiStateHelp,
   localAiStateLabel,
   LocalAiGenerateResponse,
   LocalAiGenerateStreamChunk,
+  LocalAiRuntimeKind,
   LocalAiStatus,
   readLocalAiMaxNewTokens,
+  runtimeKindFromLocalAiStatus,
   writeLocalAiMaxNewTokens,
 } from '../types/localAi';
 
@@ -37,9 +44,9 @@ interface GenerateOptions {
 
 const PAGE_CONTEXT_CHAR_LIMIT = 2000;
 const TOKEN_PRESETS = [
-  { label: '짧게', value: 256 },
+  { label: '짧게', value: 64 },
   { label: '기본', value: LOCAL_AI_MAX_NEW_TOKENS_DEFAULT },
-  { label: '길게', value: 1536 },
+  { label: '길게', value: 512 },
 ];
 
 const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
@@ -51,6 +58,7 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
   const [input, setInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoadingModel, setIsLoadingModel] = useState(false);
+  const [isSavingRuntime, setIsSavingRuntime] = useState(false);
   const [status, setStatus] = useState<LocalAiStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [maxNewTokens, setMaxNewTokens] = useState(readLocalAiMaxNewTokens);
@@ -83,6 +91,7 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
   useEffect(() => {
     const syncGenerationSettings = () => {
       setMaxNewTokens(readLocalAiMaxNewTokens());
+      void refreshStatus();
     };
 
     window.addEventListener(LOCAL_AI_SETTINGS_CHANGED_EVENT, syncGenerationSettings);
@@ -92,7 +101,7 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
       window.removeEventListener(LOCAL_AI_SETTINGS_CHANGED_EVENT, syncGenerationSettings);
       window.removeEventListener('storage', syncGenerationSettings);
     };
-  }, []);
+  }, [refreshStatus]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -153,11 +162,22 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
 
     let unlistenStream: (() => void) | null = null;
     let assistantMessageId: string | null = null;
+    let streamedText = '';
+    let streamRenderFrame: number | null = null;
+
+    const renderStreamedMessage = () => {
+      streamRenderFrame = null;
+      if (!assistantMessageId) return;
+      setMessages(prev => prev.map(message =>
+        message.id === assistantMessageId
+          ? { ...message, content: streamedText }
+          : message
+      ));
+    };
 
     try {
       const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       assistantMessageId = `${Date.now() + 1}`;
-      let streamedText = '';
 
       setMessages(prev => [...prev, {
         id: assistantMessageId,
@@ -173,11 +193,9 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
         if (chunk.done) return;
 
         streamedText += chunk.tokenText;
-        setMessages(prev => prev.map(message =>
-          message.id === assistantMessageId
-            ? { ...message, content: streamedText }
-            : message
-        ));
+        if (streamRenderFrame === null) {
+          streamRenderFrame = window.requestAnimationFrame(renderStreamedMessage);
+        }
       });
 
       const generateCommand = status?.mtpConfigured
@@ -200,6 +218,10 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
 
       unlistenStream();
       unlistenStream = null;
+      if (streamRenderFrame !== null) {
+        window.cancelAnimationFrame(streamRenderFrame);
+        streamRenderFrame = null;
+      }
       setMessages(prev => prev.map(message =>
         message.id === assistantMessageId
           ? { ...message, content: response.text || streamedText }
@@ -207,10 +229,14 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
       ));
     } catch (error) {
       unlistenStream?.();
+      if (streamRenderFrame !== null) {
+        window.cancelAnimationFrame(streamRenderFrame);
+        streamRenderFrame = null;
+      }
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: `로컬 AI 오류: ${String(error)}\n\n설정에서 모델 파일, 토크나이저, CPU 가속 상태를 확인해주세요.`,
+        content: formatLocalAiGenerateError(error, status),
         timestamp: new Date()
       };
       setMessages(prev => {
@@ -221,6 +247,9 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
       });
       await refreshStatus();
     } finally {
+      if (streamRenderFrame !== null) {
+        window.cancelAnimationFrame(streamRenderFrame);
+      }
       isGeneratingRef.current = false;
       setIsGenerating(false);
     }
@@ -233,19 +262,30 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
     sendMessage(e.currentTarget.value);
   };
 
-  const handleKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !isComposingRef.current && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      sendMessage(e.currentTarget.value);
-    }
-  };
-
   const clearChat = () => {
     setMessages([]);
   };
 
   const changeMaxNewTokens = (value: number) => {
     setMaxNewTokens(writeLocalAiMaxNewTokens(value));
+  };
+
+  const changeRuntimePreset = async (runtimeKind: LocalAiRuntimeKind) => {
+    if (isGeneratingRef.current || isLoadingModelRef.current || isSavingRuntime) return;
+    setIsSavingRuntime(true);
+    setStatusError(null);
+    try {
+      const config = configFromLocalAiRuntimePreset(runtimeKind);
+      await invoke('local_ai_save_runtime_config', { config });
+      didRequestAutoLoadRef.current = false;
+      window.dispatchEvent(new CustomEvent(LOCAL_AI_SETTINGS_CHANGED_EVENT));
+      await refreshStatus();
+    } catch (error) {
+      setStatusError(`모델 선택 저장 실패: ${String(error)}`);
+      await refreshStatus();
+    } finally {
+      setIsSavingRuntime(false);
+    }
   };
 
   const insertToEditor = (text: string) => {
@@ -307,6 +347,11 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
   );
   const helperText = statusError || localAiStateHelp(status);
   const showStatusCard = !isLocalAiReady(status) || Boolean(statusError) || isLoadingModel;
+  const selectedRuntimeKind = runtimeKindFromLocalAiStatus(status);
+  const selectedRuntimePreset = findLocalAiRuntimePreset(selectedRuntimeKind);
+  const selectedRuntimeIsPublic = LOCAL_AI_RUNTIME_PRESETS.some(
+    (preset) => preset.id === selectedRuntimeKind
+  );
 
   return (
     <div className="flex flex-col h-full text-[11px]" style={{ fontSize: '11px' }}>
@@ -314,10 +359,31 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
         <div className="flex items-center justify-between gap-2 mb-2">
           <div className="flex items-center gap-1.5 min-w-0">
             <span style={{ fontSize: '10px' }} aria-hidden="true">AI</span>
-            <h3 className="text-xs font-semibold truncate">{localAiModelLabel(status)}</h3>
+            <select
+              value={selectedRuntimeKind}
+              onChange={(event) => changeRuntimePreset(event.target.value as LocalAiRuntimeKind)}
+              disabled={isGenerating || isLoadingModel || isSavingRuntime}
+              className="memoji-ai-model-select"
+              aria-label="AI 모델 선택"
+              title={localAiModelLabel(status)}
+            >
+              {!selectedRuntimeIsPublic && (
+                <option value={selectedRuntimeKind}>
+                  {selectedRuntimePreset.shortLabel} · 기존 구성
+                </option>
+              )}
+              {LOCAL_AI_RUNTIME_PRESETS.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.shortLabel}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="flex items-center gap-1.5">
+            {isSavingRuntime && (
+              <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" aria-hidden="true" />
+            )}
             {messages.length > 0 && (
               <button
                 onClick={clearChat}
@@ -351,7 +417,7 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
 
         <div className="memoji-ai-runtime-row">
           <span className="memoji-ai-runtime-badge">
-            {status?.mtpConfigured ? 'VDI 스트리밍' : '로컬'}
+            {localAiRuntimeBadgeLabel(status)}
           </span>
           <span className="memoji-ai-runtime-detail">최대 {maxNewTokens}토큰</span>
         </div>
@@ -405,7 +471,6 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            onKeyUp={handleKeyUp}
             onCompositionStart={() => {
               isComposingRef.current = true;
             }}

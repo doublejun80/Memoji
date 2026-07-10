@@ -17,33 +17,37 @@
 - ⌨️ **키보드 단축키**: 커스터마이징 가능한 단축키
 - 🎨 **테마**: 다크/라이트 모드 지원
 - 💾 **로컬 저장**: SQLite로 안전한 데이터 저장
-- 🤖 **로컬 AI 어시스턴트**: Rust Candle 기반 Gemma 4 E2B GGUF 로컬 추론과 토큰 스트리밍
-- 🔒 **Portable 모드**: VDI 환경에서도 데이터 손실 없음
+- 🤖 **로컬 AI 어시스턴트**: LiteRT-LM 루프백 서버 기반 Gemma 4 E2B 스트리밍(기본)과 선택적 GGUF 런타임
+- 💾 **VDI 저장 경로 제어**: `MEMOJI_DATA_PATH`로 영구 저장소를 명시하고 설정에서 실제 경로 확인
 
 ## 🖥️ VDI 환경 지원
 
-Memoji는 VDI (Virtual Desktop Infrastructure) 환경을 완벽하게 지원합니다.
+Memoji는 VDI에서 사용할 수 있지만, 데이터 보존은 VDI 관리 정책과 실제 저장 경로에
+달려 있습니다. 앱이 VDI를 자동 감지하거나 데이터를 자동 백업하지는 않습니다.
 
-### 문제 해결
-- ✅ 야간 정리 작업으로 인한 데이터 손실 방지
-- ✅ Portable 모드로 실행 파일과 함께 데이터 저장
-- ✅ 네트워크 드라이브 지원
-- ✅ 자동 백업 기능
+### 저장 경로 결정 순서
+
+1. `MEMOJI_DATA_PATH` 환경 변수
+2. 실행 파일 옆의 쓰기 가능한 `data` 폴더
+3. OS 로컬 데이터 폴더(Windows에서는 보통 `%LOCALAPPDATA%\Memoji\data`)
+
+비영구 VDI에서는 1번을 사용해 관리자가 보존하는 사용자 전용 경로를 명시하는 것을
+권장합니다. 실행 파일이 `Program Files`처럼 쓰기 불가능한 위치에 있으면 3번으로
+물러나므로, 설정 → 데이터에서 실제 `memoji.db` 경로를 반드시 확인하세요.
 
 ### 빠른 시작 (VDI 사용자)
 
-1. **Memoji.exe를 네트워크 드라이브에 복사**
+1. **관리자가 보존하는 사용자 전용 경로를 정합니다.**
+   ```powershell
+   setx MEMOJI_DATA_PATH "H:\Memoji\data"
    ```
-   H:\Memoji\Memoji.exe
-   ```
+2. **새 로그인 세션에서 Memoji를 실행합니다.**
+3. **설정 → 데이터에서 표시된 DB 경로와 쓰기 권한을 확인합니다.**
+4. **테스트 메모를 저장한 뒤 로그아웃/재접속 및 야간 초기화 후 보존 여부를 검증합니다.**
 
-2. **portable.txt 파일 생성**
-   ```
-   H:\Memoji\portable.txt
-   ```
-
-3. **Memoji 실행**
-   - 데이터가 `H:\Memoji\data\memoji.db`에 안전하게 저장됩니다
+`portable.txt`는 현재 구현에서 사용하지 않습니다. 하나의 `memoji.db`를 여러 VDI
+인스턴스가 동시에 열도록 구성하지 마세요. 공유가 필요하면 앱을 종료한 상태에서
+관리자가 백업/복원하거나, 설정의 ZIP 내보내기와 DB 가져오기를 사용하세요.
 
 📖 **자세한 가이드**: [VDI_SETUP_GUIDE.md](VDI_SETUP_GUIDE.md)
 
@@ -78,8 +82,8 @@ src-tauri/target/release/bundle/msi/Memoji_2.0.0_x64_en-US.msi
 
 - **OS**: Windows 10/11 (64-bit)
 - **메모리**: 최소 4GB RAM
-- **디스크**: 앱 100MB 이상, 로컬 GGUF 모델 사용 시 4GB 이상 추가 권장
-- **네트워크**: 불필요 (완전 오프라인 작동)
+- **디스크**: 앱 100MB 이상, LiteRT-LM 또는 GGUF 모델 저장 공간 별도 필요
+- **네트워크**: 실행 시 인터넷 불필요. 모델 가져오기와 이미지 준비 단계에는 다운로드 경로 필요
 
 ## 🎯 주요 단축키
 
@@ -96,16 +100,35 @@ src-tauri/target/release/bundle/msi/Memoji_2.0.0_x64_en-US.msi
 
 ## 🤖 로컬 AI 기능
 
-Memoji의 AI 도우미는 외부 추론 서비스 없이 로컬 리소스의 Gemma 4 E2B GGUF 모델만 사용하도록 설계되었습니다.
+기본 AI 런타임은 같은 VDI 안에서 실행하는 LiteRT-LM OpenAI 호환 서버입니다.
+Memoji는 공용/LAN 호스트를 거부하고 `localhost`, `127.0.0.0/8`, `::1` 루프백
+엔드포인트만 허용합니다. 서버 프로세스와 모델은 앱에 내장되어 자동 실행되는 것이
+아니므로 VDI 이미지 준비 단계에서 별도로 설치하고 모델을 가져와야 합니다.
 
 ### 모델 준비
 
-1. GGUF 모델 파일과 `tokenizer.json`을 `src-tauri/resources/models/`에 둡니다.
-2. 기본 모델 파일명은 `gemma-4-e2b-it-q4.gguf`입니다.
-3. 다른 위치를 쓰려면 `MEMOJI_GEMMA_GGUF`, `MEMOJI_GEMMA_TOKENIZER` 환경 변수를 설정합니다.
-4. 설정 → 로컬 Gemma AI에서 모델 상태와 CPU 가속 상태를 확인합니다.
+```powershell
+# 이미지 준비 단계: 인터넷 연결이 가능한 관리 환경에서 한 번 수행
+uv tool install litert-lm
+litert-lm import --from-huggingface-repo=litert-community/gemma-4-E2B-it-litert-lm `
+  gemma-4-E2B-it.litertlm gemma4-e2b
 
-대형 `.gguf` 파일은 git에 커밋하지 않습니다. 체크섬과 후보 모델 정보는 `src-tauri/resources/models/`의 manifest를 참고하세요.
+# 사용자 세션 시작 후, Memoji보다 먼저 실행
+litert-lm serve --host 127.0.0.1 --port 9379
+```
+
+Memoji의 기본 엔드포인트는
+`http://127.0.0.1:9379/v1/chat/completions`, 기본 모델 ID는 `gemma4-e2b`입니다.
+설정 → 로컬 AI에서 서버 연결 상태가 성공해야 AI 도우미가 준비됩니다. 이미지에 모델
+레지스트리를 함께 배포하면 런타임은 인터넷 없이 동작합니다.
+
+선택적 내장 Candle/llama.cpp 경로를 사용할 때만 GGUF 모델과 `tokenizer.json`을
+`src-tauri/resources/models/`에 두거나 `MEMOJI_GEMMA_GGUF`,
+`MEMOJI_GEMMA_TOKENIZER`를 설정합니다. 대형 모델 파일은 git에 커밋하지 않습니다.
+
+VDI 응답성을 위해 기본 응답 길이(256 토큰)를 먼저 사용하고, 느린 CPU 세션에서는
+64 토큰으로 낮추세요. LiteRT-LM 프로세스를 세션 시작 시 미리 띄우고 첫 요청 전에
+`GET /v1/models`가 성공하는지 확인하면 초기 연결 실패를 줄일 수 있습니다.
 
 ## 📁 프로젝트 구조
 
@@ -130,7 +153,7 @@ Memoji/
 - **Editor**: Milkdown Crepe + ProseMirror/Remark + GFM tables
 - **Desktop**: Tauri v2 (Rust)
 - **Database**: SQLite
-- **Local AI**: Hugging Face Candle + GGUF resources
+- **Local AI**: LiteRT-LM loopback server (default) + optional Candle/GGUF resources
 - **UI Library**: shadcn/ui + Radix UI
 - **Build Tool**: Vite
 

@@ -1,29 +1,43 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ChevronDown, Cpu, Database, Download, FolderOpen, Gauge, Loader2, Settings, Upload } from 'lucide-react';
+import {
+  AppWindow,
+  Bot,
+  ChevronDown,
+  Cpu,
+  Database,
+  Download,
+  FolderOpen,
+  Gauge,
+  Loader2,
+  PenLine,
+  Settings,
+  Upload,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  BuiltInPluginState,
-  getBuiltInPlugins,
-  setBuiltInPluginEnabled,
-} from '../editor/plugins/registry';
-import {
+  configFromLocalAiRuntimePreset,
+  findLocalAiRuntimePreset,
+  formatLocalAiBytes,
+  formatLocalAiSpeed,
   LOCAL_AI_MAX_NEW_TOKENS_DEFAULT,
   LOCAL_AI_MAX_NEW_TOKENS_MAX,
   LOCAL_AI_MAX_NEW_TOKENS_MIN,
   LOCAL_AI_MAX_NEW_TOKENS_STEP,
-  formatLocalAiBytes,
-  formatLocalAiSpeed,
+  LOCAL_AI_RUNTIME_PRESETS,
+  LOCAL_AI_SETTINGS_CHANGED_EVENT,
+  localAiModelLabel,
   localAiRuntimeLabel,
+  localAiStateHelp,
+  localAiStateLabel,
   LocalAiBenchmarkResult,
   LocalAiRuntimeConfig,
   LocalAiRuntimeConfigView,
+  LocalAiRuntimeKind,
   LocalAiRuntimeTestResult,
   LocalAiStatus,
-  localAiModelLabel,
-  localAiStateHelp,
-  localAiStateLabel,
   readLocalAiMaxNewTokens,
+  runtimeKindFromLocalAiConfig,
   writeLocalAiMaxNewTokens,
 } from '../types/localAi';
 import {
@@ -34,18 +48,38 @@ import {
 } from '../utils/editorPreferences';
 import { tauriStorage } from '../utils/tauriStorage';
 import { Button } from './ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Switch } from './ui/switch';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   appTitle: string;
-  onAppTitleChange: (newTitle: string) => void;
+  onAppTitleChange: (newTitle: string) => void | Promise<void>;
   onDataImported?: () => void | Promise<void>;
 }
+
+type SettingsSectionId = 'general' | 'editor' | 'local-ai' | 'data';
+
+const SETTINGS_SECTIONS = [
+  { id: 'general' as const, label: '일반', description: '앱 이름', icon: AppWindow },
+  { id: 'editor' as const, label: '편집기', description: '글자체', icon: PenLine },
+  { id: 'local-ai' as const, label: '로컬 AI', description: '런타임과 속도', icon: Bot },
+  { id: 'data' as const, label: '데이터', description: '저장과 백업', icon: Database },
+];
+
+const TOKEN_PRESETS = [
+  { label: '빠르게', value: 64 },
+  { label: '균형', value: LOCAL_AI_MAX_NEW_TOKENS_DEFAULT },
+  { label: '길게', value: 512 },
+];
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
@@ -54,7 +88,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onAppTitleChange,
   onDataImported,
 }) => {
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>('general');
   const [title, setTitle] = useState(appTitle);
+  const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [dataPath, setDataPath] = useState('');
   const [aiStatus, setAiStatus] = useState<LocalAiStatus | null>(null);
   const [isLoadingModel, setIsLoadingModel] = useState(false);
@@ -68,8 +104,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isExportingPages, setIsExportingPages] = useState(false);
   const [maxNewTokens, setMaxNewTokens] = useState(readLocalAiMaxNewTokens);
   const [editorPreferences, setEditorPreferences] = useState(readEditorPreferences);
-  const [builtInPlugins, setBuiltInPlugins] = useState<BuiltInPluginState[]>([]);
-  const [builtInPluginsOpen, setBuiltInPluginsOpen] = useState(false);
+  const [aiAdvancedOpen, setAiAdvancedOpen] = useState(false);
+  const [aiDiagnosticsOpen, setAiDiagnosticsOpen] = useState(false);
   const databaseInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -88,6 +124,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       setAiStatus(await invoke<LocalAiStatus>('local_ai_status'));
     } catch (error) {
+      setAiStatus(null);
       toast.error('AI 상태 확인 실패: ' + String(error));
     }
   }, []);
@@ -97,34 +134,51 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setRuntimeConfig(await invoke<LocalAiRuntimeConfigView>('local_ai_get_runtime_config'));
       setRuntimeTestResult(null);
     } catch (error) {
+      setRuntimeConfig(null);
       toast.error('AI 서버 설정 확인 실패: ' + String(error));
     }
   }, []);
 
   useEffect(() => {
     if (!isOpen) return;
+    setActiveSection('general');
+    setTitle(appTitle);
     setMaxNewTokens(readLocalAiMaxNewTokens());
     setEditorPreferences(readEditorPreferences());
-    setBuiltInPlugins(getBuiltInPlugins());
-    setBuiltInPluginsOpen(false);
+    setAiStatus(null);
+    setRuntimeConfig(null);
+    setAiAdvancedOpen(false);
+    setAiDiagnosticsOpen(false);
     setAiBenchmark(null);
-    loadDataPath();
-    loadAiStatus();
-    loadRuntimeConfig();
-  }, [isOpen, loadAiStatus, loadDataPath, loadRuntimeConfig]);
+    void Promise.all([loadDataPath(), loadAiStatus(), loadRuntimeConfig()]);
+  }, [appTitle, isOpen, loadAiStatus, loadDataPath, loadRuntimeConfig]);
 
-  const saveTitle = () => {
+  const saveTitle = async () => {
     const nextTitle = title.trim();
     if (!nextTitle) {
-      toast.error('앱 제목을 입력하세요.');
+      toast.error('앱 이름을 입력하세요.');
       return;
     }
-    onAppTitleChange(nextTitle);
-    toast.success('설정 저장됨');
+
+    setIsSavingTitle(true);
+    try {
+      await onAppTitleChange(nextTitle);
+      setTitle(nextTitle);
+      toast.success('앱 이름을 저장했습니다.');
+    } catch (error) {
+      toast.error('앱 이름 저장 실패: ' + String(error).slice(0, 180));
+    } finally {
+      setIsSavingTitle(false);
+    }
+  };
+
+  const closeSettings = () => {
+    setTitle(appTitle);
     onClose();
   };
 
   const loadLocalAi = async () => {
+    if (isLoadingModel || isBenchmarkingAi) return;
     setIsLoadingModel(true);
     try {
       const status = await invoke<LocalAiStatus>('local_ai_load');
@@ -139,6 +193,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const runLocalAiBenchmark = async () => {
+    if (isBenchmarkingAi || isLoadingModel) return;
     setIsBenchmarkingAi(true);
     try {
       const result = await invoke<LocalAiBenchmarkResult>('local_ai_benchmark');
@@ -156,15 +211,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const changeRuntimeConfig = (patch: Partial<LocalAiRuntimeConfig>) => {
     setRuntimeConfig((current) => ({
-      serverEnabled: false,
-      endpoint: 'http://127.0.0.1:8080/v1/chat/completions',
-      model: 'google/gemma-4-E2B-it',
+      serverEnabled: true,
+      endpoint: 'http://127.0.0.1:9379/v1/chat/completions',
+      model: 'gemma4-e2b',
+      runtimeKind: 'litert_lm',
       envConfigured: false,
       envTakesPrecedence: false,
       ...current,
       ...patch,
     }));
     setRuntimeTestResult(null);
+  };
+
+  const changeRuntimePreset = (runtimeKind: LocalAiRuntimeKind) => {
+    changeRuntimeConfig(configFromLocalAiRuntimePreset(runtimeKind));
   };
 
   const saveRuntimeConfig = async () => {
@@ -177,13 +237,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           endpoint: runtimeConfig.endpoint,
           model: runtimeConfig.model,
           draftModel: runtimeConfig.draftModel || undefined,
+          runtimeKind: runtimeKindFromLocalAiConfig(runtimeConfig),
         },
       });
       setRuntimeConfig(saved);
       await loadAiStatus();
-      toast.success(saved.serverEnabled ? '고속 로컬 서버 설정 저장됨' : '내장 모델 모드로 저장됨');
+      window.dispatchEvent(new CustomEvent(LOCAL_AI_SETTINGS_CHANGED_EVENT));
+      toast.success('로컬 AI 런타임 설정을 적용했습니다.');
     } catch (error) {
-      toast.error('AI 서버 설정 저장 실패: ' + String(error).slice(0, 180));
+      toast.error('AI 런타임 설정 저장 실패: ' + String(error).slice(0, 180));
     } finally {
       setIsSavingRuntimeConfig(false);
     }
@@ -199,10 +261,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           endpoint: runtimeConfig.endpoint,
           model: runtimeConfig.model,
           draftModel: runtimeConfig.draftModel || undefined,
+          runtimeKind: runtimeKindFromLocalAiConfig(runtimeConfig),
         },
       });
       setRuntimeTestResult(result);
       toast.success(result.message);
+      await loadAiStatus();
     } catch (error) {
       const message = String(error).slice(0, 180);
       setRuntimeTestResult({
@@ -211,7 +275,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         generatedTokens: 0,
         tokensPerSecond: 0,
       });
-      toast.error('AI 서버 연결 실패: ' + message);
+      toast.error('AI 서버 생성 테스트 실패: ' + message);
     } finally {
       setIsTestingRuntimeConfig(false);
     }
@@ -223,10 +287,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const changeFontFamily = (fontFamily: EditorFontFamily) => {
     setEditorPreferences(writeEditorPreferences({ fontFamily }));
-  };
-
-  const togglePlugin = (pluginId: BuiltInPluginState['id'], enabled: boolean) => {
-    setBuiltInPlugins(setBuiltInPluginEnabled(pluginId, enabled));
   };
 
   const openDataFolder = async () => {
@@ -245,16 +305,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const summary = await tauriStorage.importDatabaseFile(file);
       await onDataImported?.();
       const addedCount = summary.imported + summary.duplicated;
-      toast.success(
-        `DB 가져오기 완료: ${addedCount}개 추가, ${summary.skipped}개 중복 건너뜀`
-      );
+      toast.success(`DB 가져오기 완료: ${addedCount}개 추가, ${summary.skipped}개 중복 건너뜀`);
     } catch (error) {
       toast.error('DB 가져오기 실패: ' + String(error));
     } finally {
       setIsImportingDatabase(false);
-      if (databaseInputRef.current) {
-        databaseInputRef.current.value = '';
-      }
+      if (databaseInputRef.current) databaseInputRef.current.value = '';
     }
   };
 
@@ -272,373 +328,524 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const cpuFeature = (name: string) => aiStatus?.cpuFeatures?.[name] ? '감지됨' : '없음';
-  const buildFeature = (name: string) => aiStatus?.compiledFeatures?.[name] ? '활성' : '비활성';
-  const canLoadModel = !aiStatus?.mtpConfigured && !!aiStatus?.modelExists && !!aiStatus?.tokenizerExists && !isLoadingModel;
-  const canBenchmarkAi = !aiStatus?.mtpConfigured && !!aiStatus?.modelExists && !!aiStatus?.tokenizerExists && !isBenchmarkingAi;
+  const cpuFeature = (name: string) => {
+    if (!aiStatus) return '확인 중';
+    return aiStatus.cpuFeatures?.[name] ? '감지됨' : '없음';
+  };
+  const buildFeature = (name: string) => {
+    if (!aiStatus) return '확인 중';
+    return aiStatus.compiledFeatures?.[name] ? '활성' : '비활성';
+  };
+  const canLoadModel = !aiStatus?.mtpConfigured
+    && !!aiStatus?.modelExists
+    && !!aiStatus?.tokenizerExists
+    && !isLoadingModel
+    && !isBenchmarkingAi;
+  const canBenchmarkAi = !aiStatus?.mtpConfigured
+    && !!aiStatus?.modelExists
+    && !!aiStatus?.tokenizerExists
+    && !isBenchmarkingAi
+    && !isLoadingModel;
   const runtimeConfigLockedByEnv = runtimeConfig?.envTakesPrecedence === true;
+  const selectedRuntimeKind = runtimeKindFromLocalAiConfig(runtimeConfig);
+  const selectedRuntimePreset = findLocalAiRuntimePreset(selectedRuntimeKind);
+  const selectedRuntimeIsPublic = LOCAL_AI_RUNTIME_PRESETS.some(
+    (preset) => preset.id === selectedRuntimeKind
+  );
+  const serverConfigured = aiStatus?.mtpConfigured === true;
+  const serverReachable = aiStatus?.mtpReachable === true;
+  const serverChecking = serverConfigured && aiStatus?.mtpReachable == null;
+  const isDesktopData = Boolean(dataPath && dataPath !== '브라우저 모드');
+
+  const aiStateLabel = !aiStatus
+    ? '상태 확인 중'
+    : serverConfigured
+      ? serverChecking
+        ? '서버 확인 중'
+        : serverReachable
+          ? '서버 연결됨'
+          : '서버 시작 필요'
+      : localAiStateLabel(aiStatus.state);
+  const aiStateTone = !aiStatus || serverChecking
+    ? 'checking'
+    : serverConfigured && serverReachable
+      ? 'ready'
+      : aiStatus.state === 'loaded'
+        ? 'ready'
+        : 'attention';
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent
-        className="custom-scrollbar max-w-3xl max-h-[80vh] overflow-y-auto text-sm"
-        aria-describedby={undefined}
-      >
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Settings className="h-5 w-5" />
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) closeSettings();
+      }}
+    >
+      <DialogContent className="memoji-settings-dialog" aria-describedby="memoji-settings-description">
+        <DialogHeader className="memoji-settings-header">
+          <DialogTitle className="memoji-settings-title">
+            <Settings className="h-5 w-5" aria-hidden="true" />
             설정
           </DialogTitle>
+          <DialogDescription id="memoji-settings-description" className="sr-only">
+            Memoji 앱, 편집기, 로컬 AI, 데이터 저장 설정을 관리합니다.
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="memoji-settings-content">
-          <section className="memoji-settings-section">
-            <div className="memoji-settings-section-header">
-              <h3 className="text-base font-semibold">일반</h3>
-              <p className="text-xs leading-5 text-muted-foreground">
-                로컬 저장, 즉시 렌더링 편집, 로컬 Gemma AI를 사용하는 오프라인 노트 앱입니다.
-              </p>
-            </div>
-            <div className="memoji-settings-field max-w-xl">
-              <Label htmlFor="app-title">앱 제목</Label>
-              <Input id="app-title" value={title} onChange={(event) => setTitle(event.target.value)} />
-            </div>
-          </section>
-
-          <section className="memoji-settings-section">
-            <h3 className="text-base font-semibold">편집기</h3>
-            <div className="max-w-xl">
-              <div className="memoji-settings-field">
-                <Label htmlFor="editor-font-family">글자체</Label>
-                <select
-                  id="editor-font-family"
-                  value={editorPreferences.fontFamily}
-                  onChange={(event) => changeFontFamily(event.target.value as EditorFontFamily)}
-                  className="h-9 w-full rounded-md border border-input bg-background px-3"
+        <div className="memoji-settings-layout">
+          <nav className="memoji-settings-nav" aria-label="설정 분류">
+            {SETTINGS_SECTIONS.map((section) => {
+              const Icon = section.icon;
+              const isActive = activeSection === section.id;
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  className="memoji-settings-nav-item"
+                  data-active={isActive}
+                  aria-current={isActive ? 'page' : undefined}
+                  onClick={() => setActiveSection(section.id)}
                 >
-                  {Object.entries(EDITOR_FONT_FAMILY_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
+                  <Icon className="h-4 w-4" aria-hidden="true" />
+                  <span>
+                    <strong>{section.label}</strong>
+                    <small>{section.description}</small>
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
 
-            <div className="memoji-settings-collapsible">
-              <button
-                type="button"
-                className="memoji-settings-collapsible-trigger"
-                onClick={() => setBuiltInPluginsOpen((open) => !open)}
-                aria-expanded={builtInPluginsOpen}
-              >
-                <span>내장 기능</span>
-                <ChevronDown className="h-4 w-4" aria-hidden="true" />
-              </button>
-              {builtInPluginsOpen && (
-                <div className="memoji-settings-plugin-list">
-                  {builtInPlugins.map((plugin) => (
-                    <div key={plugin.id} className="memoji-settings-plugin-card">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-medium">{plugin.name}</p>
-                          <p className="text-xs leading-5 text-muted-foreground">{plugin.description}</p>
-                        </div>
-                        <Switch
-                          checked={plugin.enabled}
-                          onCheckedChange={(checked) => togglePlugin(plugin.id, checked)}
-                          aria-label={`${plugin.name} 켜기/끄기`}
+          <main className="memoji-settings-main">
+            {activeSection === 'general' && (
+              <section className="memoji-settings-section" aria-labelledby="settings-general-title">
+                <div className="memoji-settings-section-header">
+                  <div>
+                    <h3 id="settings-general-title">일반</h3>
+                    <p>작업 공간에 표시할 이름을 정합니다.</p>
+                  </div>
+                </div>
+
+                <div className="memoji-settings-card">
+                  <div className="memoji-settings-field">
+                    <Label htmlFor="app-title">앱 이름</Label>
+                    <p className="memoji-settings-help">상단 제목 표시줄에 보이는 이름입니다.</p>
+                    <div className="memoji-settings-inline-field">
+                      <Input
+                        id="app-title"
+                        value={title}
+                        onChange={(event) => setTitle(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                            void saveTitle();
+                          }
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        onClick={() => void saveTitle()}
+                        disabled={isSavingTitle || !title.trim() || title.trim() === appTitle}
+                      >
+                        {isSavingTitle ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+                        저장
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="memoji-settings-note">
+                  <strong>로컬 우선</strong>
+                  <p>메모와 설정은 이 기기 안에 저장되며, 공개 AI API로 전송되지 않습니다.</p>
+                </div>
+              </section>
+            )}
+
+            {activeSection === 'editor' && (
+              <section className="memoji-settings-section" aria-labelledby="settings-editor-title">
+                <div className="memoji-settings-section-header">
+                  <div>
+                    <h3 id="settings-editor-title">편집기</h3>
+                    <p>긴 글을 읽고 쓰기 편한 글자체를 선택합니다.</p>
+                  </div>
+                  <span className="memoji-settings-autosave-badge">즉시 적용</span>
+                </div>
+
+                <div className="memoji-settings-card">
+                  <div className="memoji-settings-field">
+                    <Label htmlFor="editor-font-family">본문 글자체</Label>
+                    <select
+                      id="editor-font-family"
+                      value={editorPreferences.fontFamily}
+                      onChange={(event) => changeFontFamily(event.target.value as EditorFontFamily)}
+                      className="memoji-settings-select"
+                    >
+                      {Object.entries(EDITOR_FONT_FAMILY_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                    <p className="memoji-settings-help">
+                      시스템 기본은 Windows와 macOS의 한국어 글꼴을 자동으로 사용합니다.
+                    </p>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {activeSection === 'local-ai' && (
+              <section className="memoji-settings-section" aria-labelledby="settings-ai-title">
+                <div className="memoji-settings-section-header">
+                  <div>
+                    <h3 id="settings-ai-title">로컬 AI</h3>
+                    <p>VDI 내부에서 실행되는 Gemma의 연결 상태와 답변 속도를 관리합니다.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="memoji-settings-refresh"
+                    onClick={() => void loadAiStatus()}
+                  >
+                    상태 새로고침
+                  </button>
+                </div>
+
+                <div className="memoji-settings-card memoji-settings-status-card">
+                  <div className="memoji-settings-status-heading">
+                    <div>
+                      <span className="memoji-settings-eyebrow">현재 상태</span>
+                      <h4>{localAiModelLabel(aiStatus)}</h4>
+                    </div>
+                    <span className="memoji-settings-status-badge" data-tone={aiStateTone}>
+                      {aiStateLabel}
+                    </span>
+                  </div>
+                  <p className="memoji-settings-status-copy">{localAiStateHelp(aiStatus)}</p>
+                  {serverConfigured && !serverReachable && !serverChecking && (
+                    <div className="memoji-settings-warning" role="status">
+                      <strong>{findLocalAiRuntimePreset(aiStatus?.mtpRuntimeKind).modeLabel} 서버가 응답하지 않습니다.</strong>
+                      <p>
+                        <code>{aiStatus?.mtpEndpoint ?? runtimeConfig?.endpoint}</code>에서 실행 중인 서버와 모델을 확인하세요.
+                        Memoji는 추론 서버나 모델을 자동 설치하지 않습니다.
+                      </p>
+                    </div>
+                  )}
+                  {!serverConfigured && (
+                    <Button type="button" onClick={() => void loadLocalAi()} disabled={!canLoadModel} size="sm">
+                      {isLoadingModel ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+                      내장 모델 로드
+                    </Button>
+                  )}
+                </div>
+
+                <div className="memoji-settings-card">
+                  <div className="memoji-settings-card-heading">
+                    <div>
+                      <span className="memoji-settings-eyebrow">권장 런타임</span>
+                      <h4>{selectedRuntimePreset.label}</h4>
+                      <p>{selectedRuntimePreset.description}</p>
+                    </div>
+                    <span className="memoji-settings-recommended">VDI 권장</span>
+                  </div>
+
+                  <div className="memoji-settings-field">
+                    <Label htmlFor="local-ai-runtime-kind">추론 엔진</Label>
+                    <select
+                      id="local-ai-runtime-kind"
+                      value={selectedRuntimeKind}
+                      disabled={runtimeConfigLockedByEnv || !runtimeConfig}
+                      onChange={(event) => changeRuntimePreset(event.target.value as LocalAiRuntimeKind)}
+                      className="memoji-settings-select"
+                    >
+                      {!selectedRuntimeIsPublic && (
+                        <option value={selectedRuntimeKind}>
+                          {selectedRuntimePreset.label} · 기존 구성
+                        </option>
+                      )}
+                      {LOCAL_AI_RUNTIME_PRESETS.map((preset) => (
+                        <option key={preset.id} value={preset.id}>{preset.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {runtimeConfigLockedByEnv && (
+                    <p className="memoji-settings-admin-note">
+                      관리자 환경 변수가 우선 적용 중이라 앱에서 변경할 수 없습니다.
+                    </p>
+                  )}
+
+                  <div className="memoji-settings-actions">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      type="button"
+                      onClick={() => void testRuntimeConfig()}
+                      disabled={runtimeConfigLockedByEnv || !runtimeConfig || isTestingRuntimeConfig}
+                    >
+                      {isTestingRuntimeConfig ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+                      실제 생성 테스트
+                    </Button>
+                    <Button
+                      size="sm"
+                      type="button"
+                      onClick={() => void saveRuntimeConfig()}
+                      disabled={runtimeConfigLockedByEnv || !runtimeConfig || isSavingRuntimeConfig}
+                    >
+                      {isSavingRuntimeConfig ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+                      런타임 적용
+                    </Button>
+                  </div>
+                  {runtimeTestResult && (
+                    <p
+                      className="memoji-settings-test-result"
+                      data-ok={runtimeTestResult.ok}
+                      aria-live="polite"
+                    >
+                      {runtimeTestResult.message}
+                    </p>
+                  )}
+                </div>
+
+                <div className="memoji-settings-card">
+                  <div className="memoji-settings-card-heading memoji-settings-card-heading-row">
+                    <div>
+                      <span className="memoji-settings-eyebrow">답변 길이</span>
+                      <h4>최대 {maxNewTokens} 토큰</h4>
+                      <p>짧게 설정할수록 VDI에서 전체 답변이 더 빨리 끝납니다.</p>
+                    </div>
+                  </div>
+                  <div className="memoji-settings-token-presets" aria-label="답변 길이 프리셋">
+                    {TOKEN_PRESETS.map((preset) => (
+                      <button
+                        key={preset.value}
+                        type="button"
+                        data-active={maxNewTokens === preset.value}
+                        onClick={() => changeMaxNewTokens(preset.value)}
+                      >
+                        <strong>{preset.label}</strong>
+                        <small>{preset.value}</small>
+                      </button>
+                    ))}
+                  </div>
+                  <Label htmlFor="local-ai-max-tokens" className="sr-only">최대 답변 토큰</Label>
+                  <input
+                    id="local-ai-max-tokens"
+                    type="range"
+                    min={LOCAL_AI_MAX_NEW_TOKENS_MIN}
+                    max={LOCAL_AI_MAX_NEW_TOKENS_MAX}
+                    step={LOCAL_AI_MAX_NEW_TOKENS_STEP}
+                    value={maxNewTokens}
+                    onChange={(event) => changeMaxNewTokens(Number(event.target.value))}
+                    className="memoji-settings-range"
+                    aria-valuetext={`${maxNewTokens} 토큰`}
+                  />
+                  <div className="memoji-settings-range-labels" aria-hidden="true">
+                    <span>{LOCAL_AI_MAX_NEW_TOKENS_MIN}</span>
+                    <span>{LOCAL_AI_MAX_NEW_TOKENS_MAX}</span>
+                  </div>
+                </div>
+
+                <div className="memoji-settings-collapsible">
+                  <button
+                    type="button"
+                    className="memoji-settings-collapsible-trigger"
+                    onClick={() => setAiAdvancedOpen((open) => !open)}
+                    aria-expanded={aiAdvancedOpen}
+                  >
+                    <span>
+                      <strong>고급 서버 설정</strong>
+                      <small>Endpoint와 모델 별칭</small>
+                    </span>
+                    <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                  {aiAdvancedOpen && (
+                    <div className="memoji-settings-collapsible-panel">
+                      <div className="memoji-settings-field">
+                        <Label htmlFor="local-ai-server-endpoint">Endpoint</Label>
+                        <Input
+                          id="local-ai-server-endpoint"
+                          value={runtimeConfig?.endpoint ?? ''}
+                          disabled={runtimeConfigLockedByEnv || !runtimeConfig}
+                          onChange={(event) => changeRuntimeConfig({ endpoint: event.target.value })}
+                          placeholder="http://127.0.0.1:9379/v1/chat/completions"
+                          className="font-mono text-xs"
                         />
+                        <p className="memoji-settings-help">
+                          보안상 localhost, 127.0.0.1, ::1만 허용합니다. 공식 LiteRT-LM 기본 포트는 9379입니다.
+                        </p>
+                      </div>
+                      <div className="memoji-settings-field-grid">
+                        <div className="memoji-settings-field">
+                          <Label htmlFor="local-ai-server-model">모델 별칭</Label>
+                          <Input
+                            id="local-ai-server-model"
+                            value={runtimeConfig?.model ?? ''}
+                            disabled={runtimeConfigLockedByEnv || !runtimeConfig}
+                            onChange={(event) => changeRuntimeConfig({ model: event.target.value })}
+                            placeholder="gemma4-e2b"
+                          />
+                        </div>
+                        <div className="memoji-settings-field">
+                          <Label htmlFor="local-ai-server-draft">Draft / MTP 메모</Label>
+                          <Input
+                            id="local-ai-server-draft"
+                            value={runtimeConfig?.draftModel ?? ''}
+                            disabled={runtimeConfigLockedByEnv || !runtimeConfig}
+                            onChange={(event) => changeRuntimeConfig({ draftModel: event.target.value })}
+                            placeholder="서버 시작 옵션에서 설정"
+                          />
+                        </div>
                       </div>
                     </div>
-                  ))}
+                  )}
                 </div>
-              )}
-            </div>
-          </section>
 
-          <section className="memoji-settings-section">
-            <div className="memoji-settings-card">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="text-base font-semibold">로컬 AI</h3>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{localAiStateHelp(aiStatus)}</p>
-                </div>
-                {!aiStatus?.mtpConfigured && (
-                  <Button onClick={loadLocalAi} disabled={!canLoadModel} size="sm" className="min-w-24">
-                    {isLoadingModel ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
-                    모델 로드
-                  </Button>
-                )}
-              </div>
-              <div className="mt-4 grid gap-3 text-xs sm:grid-cols-3">
-                <div className="rounded-md bg-muted/50 p-3">
-                  <p className="font-medium">상태</p>
-                  <p className="mt-1 text-muted-foreground">{localAiStateLabel(aiStatus?.state)}</p>
-                </div>
-                <div className="rounded-md bg-muted/50 p-3">
-                  <p className="font-medium">모델</p>
-                  <p className="mt-1 break-words text-muted-foreground">{localAiModelLabel(aiStatus)}</p>
-                </div>
-                <div className="rounded-md bg-muted/50 p-3">
-                  <p className="font-medium">Context</p>
-                  <p className="mt-1 text-muted-foreground">{aiStatus?.contextSize ?? 2048}</p>
-                </div>
-              </div>
-            </div>
+                <div className="memoji-settings-collapsible">
+                  <button
+                    type="button"
+                    className="memoji-settings-collapsible-trigger"
+                    onClick={() => setAiDiagnosticsOpen((open) => !open)}
+                    aria-expanded={aiDiagnosticsOpen}
+                  >
+                    <span>
+                      <strong>진단 정보</strong>
+                      <small>CPU 기능과 VDI 벤치마크</small>
+                    </span>
+                    <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                  {aiDiagnosticsOpen && (
+                    <div className="memoji-settings-collapsible-panel memoji-settings-diagnostics">
+                      <div>
+                        <h4><Cpu className="h-4 w-4" aria-hidden="true" /> CPU / AVX-512</h4>
+                        <dl className="memoji-settings-diagnostic-grid">
+                          <div><dt>Runtime</dt><dd>{localAiRuntimeLabel(aiStatus)}</dd></div>
+                          <div><dt>Model file</dt><dd>{formatLocalAiBytes(aiStatus?.modelFileSizeBytes)}</dd></div>
+                          <div><dt>Runtime AVX-512F</dt><dd>{cpuFeature('avx512f')}</dd></div>
+                          <div><dt>Build AVX-512F</dt><dd>{buildFeature('avx512f')}</dd></div>
+                          <div><dt>Runtime AVX-512BW</dt><dd>{cpuFeature('avx512bw')}</dd></div>
+                          <div><dt>Build AVX-512BW</dt><dd>{buildFeature('avx512bw')}</dd></div>
+                          <div><dt>Runtime AVX-512VL</dt><dd>{cpuFeature('avx512vl')}</dd></div>
+                          <div><dt>Build AVX-512VL</dt><dd>{buildFeature('avx512vl')}</dd></div>
+                        </dl>
+                      </div>
 
-            <div className="memoji-settings-card">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="text-base font-semibold">고속 로컬 서버</h3>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    llama.cpp, vLLM, Ollama/LocalAI 같은 VDI 내부 OpenAI 호환 서버를 127.0.0.1로 붙여 긴 답변을 빠르게 스트리밍합니다.
+                      <div className="memoji-settings-benchmark">
+                        <div className="memoji-settings-card-heading">
+                          <div>
+                            <h4><Gauge className="h-4 w-4" aria-hidden="true" /> VDI 성능 진단</h4>
+                            <p>내장 GGUF 모델의 16토큰 생성 속도를 측정합니다.</p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            type="button"
+                            onClick={() => void runLocalAiBenchmark()}
+                            disabled={!canBenchmarkAi}
+                          >
+                            {isBenchmarkingAi ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+                            진단 실행
+                          </Button>
+                        </div>
+                        {serverConfigured ? (
+                          <p className="memoji-settings-help">
+                            서버 런타임을 쓰는 동안에는 내장 모델 벤치마크가 비활성화됩니다.
+                          </p>
+                        ) : (
+                          <dl className="memoji-settings-metric-grid">
+                            <div><dt>Load</dt><dd>{aiBenchmark?.cachedModel ? 'cached' : aiBenchmark?.loadMs != null ? `${aiBenchmark.loadMs} ms` : '—'}</dd></div>
+                            <div><dt>Generate</dt><dd>{aiBenchmark ? `${aiBenchmark.generateMs} ms` : '—'}</dd></div>
+                            <div><dt>Speed</dt><dd>{formatLocalAiSpeed(aiBenchmark?.tokensPerSecond)}</dd></div>
+                            <div><dt>판정</dt><dd>{aiBenchmark?.speedLabel ?? '—'}</dd></div>
+                          </dl>
+                        )}
+                        {aiBenchmark?.recommendation && <p className="memoji-settings-help">{aiBenchmark.recommendation}</p>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {activeSection === 'data' && (
+              <section className="memoji-settings-section" aria-labelledby="settings-data-title">
+                <div className="memoji-settings-section-header">
+                  <div>
+                    <h3 id="settings-data-title">데이터</h3>
+                    <p>현재 저장 위치를 확인하고 Markdown 백업을 만듭니다.</p>
+                  </div>
+                </div>
+
+                <div className="memoji-settings-card">
+                  <div className="memoji-settings-card-heading">
+                    <div>
+                      <span className="memoji-settings-eyebrow">현재 데이터베이스</span>
+                      <h4>저장 위치</h4>
+                    </div>
+                  </div>
+                  <Label htmlFor="memoji-data-path" className="sr-only">데이터 저장 위치</Label>
+                  <div className="memoji-settings-inline-field">
+                    <Input id="memoji-data-path" value={dataPath || '확인 중'} readOnly className="font-mono text-xs" />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      type="button"
+                      onClick={() => void openDataFolder()}
+                      disabled={!isDesktopData}
+                    >
+                      <FolderOpen className="mr-1 h-4 w-4" aria-hidden="true" />
+                      폴더 열기
+                    </Button>
+                  </div>
+                  <p className="memoji-settings-help">
+                    비영구 VDI에서는 관리자가 지정한 영구 드라이브 경로인지 반드시 확인하세요.
                   </p>
                 </div>
-                <Switch
-                  checked={runtimeConfig?.serverEnabled ?? false}
-                  disabled={runtimeConfigLockedByEnv}
-                  onCheckedChange={(checked) => changeRuntimeConfig({ serverEnabled: checked })}
-                  aria-label="고속 로컬 서버 사용"
-                />
-              </div>
-              {runtimeConfigLockedByEnv && (
-                <p className="mt-3 text-xs text-muted-foreground">
-                  현재 VDI 환경 변수 설정이 우선 적용 중입니다. 관리자 배포 설정을 사용합니다.
-                </p>
-              )}
-              <div className="mt-4 grid gap-3">
-                <div className="memoji-settings-field">
-                  <Label htmlFor="local-ai-server-endpoint">Endpoint</Label>
-                  <Input
-                    id="local-ai-server-endpoint"
-                    value={runtimeConfig?.endpoint ?? ''}
-                    disabled={runtimeConfigLockedByEnv}
-                    onChange={(event) => changeRuntimeConfig({ endpoint: event.target.value })}
-                    placeholder="http://127.0.0.1:8080/v1/chat/completions"
-                    className="font-mono text-xs"
+
+                <div className="memoji-settings-card">
+                  <div className="memoji-settings-card-heading">
+                    <div>
+                      <span className="memoji-settings-eyebrow">백업과 이전</span>
+                      <h4>가져오기 · 내보내기</h4>
+                      <p>가져오기는 현재 DB를 먼저 백업한 뒤 병합합니다.</p>
+                    </div>
+                  </div>
+                  <input
+                    ref={databaseInputRef}
+                    type="file"
+                    accept=".db,application/x-sqlite3,application/vnd.sqlite3,application/octet-stream"
+                    className="memoji-settings-file-input"
+                    onChange={(event) => void importDatabase(event.target.files?.[0])}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    보안상 localhost, 127.0.0.1, ::1만 허용합니다. 클라우드/API URL은 저장되지 않습니다.
-                  </p>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="memoji-settings-field">
-                    <Label htmlFor="local-ai-server-model">Model</Label>
-                    <Input
-                      id="local-ai-server-model"
-                      value={runtimeConfig?.model ?? ''}
-                      disabled={runtimeConfigLockedByEnv}
-                      onChange={(event) => changeRuntimeConfig({ model: event.target.value })}
-                      placeholder="google/gemma-4-E2B-it"
-                    />
-                  </div>
-                  <div className="memoji-settings-field">
-                    <Label htmlFor="local-ai-server-draft">Draft / MTP label</Label>
-                    <Input
-                      id="local-ai-server-draft"
-                      value={runtimeConfig?.draftModel ?? ''}
-                      disabled={runtimeConfigLockedByEnv}
-                      onChange={(event) => changeRuntimeConfig({ draftModel: event.target.value })}
-                      placeholder="server option"
-                    />
+                  <div className="memoji-settings-data-actions">
+                    <Button
+                      variant="outline"
+                      type="button"
+                      onClick={() => databaseInputRef.current?.click()}
+                      disabled={!isDesktopData || isImportingDatabase || isExportingPages}
+                    >
+                      {isImportingDatabase
+                        ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                        : <Upload className="mr-1 h-4 w-4" aria-hidden="true" />}
+                      기존 DB 가져오기
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => void exportAllPages()}
+                      disabled={!isDesktopData || isExportingPages || isImportingDatabase}
+                    >
+                      {isExportingPages
+                        ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                        : <Download className="mr-1 h-4 w-4" aria-hidden="true" />}
+                      전체 페이지 ZIP 내보내기
+                    </Button>
                   </div>
                 </div>
-              </div>
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={testRuntimeConfig}
-                  disabled={runtimeConfigLockedByEnv || !runtimeConfig?.serverEnabled || isTestingRuntimeConfig}
-                >
-                  {isTestingRuntimeConfig ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
-                  연결 테스트
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={saveRuntimeConfig}
-                  disabled={runtimeConfigLockedByEnv || isSavingRuntimeConfig}
-                >
-                  {isSavingRuntimeConfig ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
-                  서버 설정 저장
-                </Button>
-                {runtimeTestResult && (
-                  <span className={runtimeTestResult.ok ? 'text-xs text-emerald-500' : 'text-xs text-destructive'}>
-                    {runtimeTestResult.message}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="memoji-settings-card">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-base font-semibold">답변 토큰</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">고속 로컬 서버에서는 긴 답변을 그대로 스트리밍합니다.</p>
-                </div>
-                <strong>{maxNewTokens}</strong>
-              </div>
-              <input
-                type="range"
-                min={LOCAL_AI_MAX_NEW_TOKENS_MIN}
-                max={LOCAL_AI_MAX_NEW_TOKENS_MAX}
-                step={LOCAL_AI_MAX_NEW_TOKENS_STEP}
-                value={maxNewTokens}
-                onChange={(event) => changeMaxNewTokens(Number(event.target.value))}
-                className="mt-4 w-full accent-primary"
-              />
-              <div className="mt-3 flex flex-wrap items-center gap-3">
-                <span className="text-xs text-muted-foreground">{LOCAL_AI_MAX_NEW_TOKENS_MIN}</span>
-                <Input
-                  type="number"
-                  min={LOCAL_AI_MAX_NEW_TOKENS_MIN}
-                  max={LOCAL_AI_MAX_NEW_TOKENS_MAX}
-                  step={LOCAL_AI_MAX_NEW_TOKENS_STEP}
-                  value={maxNewTokens}
-                  onChange={(event) => changeMaxNewTokens(Number(event.target.value))}
-                  className="h-9 w-28"
-                />
-                <span className="text-xs text-muted-foreground">{LOCAL_AI_MAX_NEW_TOKENS_MAX}</span>
-                <Button variant="outline" size="sm" onClick={() => changeMaxNewTokens(LOCAL_AI_MAX_NEW_TOKENS_DEFAULT)}>
-                  기본값
-                </Button>
-              </div>
-            </div>
-
-            <div className="memoji-settings-card">
-              <h3 className="flex items-center gap-2 text-base font-semibold">
-                <Cpu className="h-4 w-4" />
-                CPU / AVX-512
-              </h3>
-              <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-                <span>Runtime: {localAiRuntimeLabel(aiStatus)}</span>
-                <span>Model file: {formatLocalAiBytes(aiStatus?.modelFileSizeBytes)}</span>
-                <span>Runtime AVX-512F: {cpuFeature('avx512f')}</span>
-                <span>Build AVX-512F: {buildFeature('avx512f')}</span>
-                <span>Runtime AVX-512BW: {cpuFeature('avx512bw')}</span>
-                <span>Build AVX-512BW: {buildFeature('avx512bw')}</span>
-                <span>Runtime AVX-512VL: {cpuFeature('avx512vl')}</span>
-                <span>Build AVX-512VL: {buildFeature('avx512vl')}</span>
-              </div>
-            </div>
-
-            <div className="memoji-settings-card">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="flex items-center gap-2 text-base font-semibold">
-                    <Gauge className="h-4 w-4" />
-                    VDI 성능 진단
-                  </h3>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    이 VDI에서 내장 Gemma 모델을 직접 로드하고 16토큰을 생성해 실제 속도를 측정합니다.
-                  </p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={runLocalAiBenchmark}
-                  disabled={!canBenchmarkAi}
-                  className="min-w-24"
-                >
-                  {isBenchmarkingAi ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
-                  진단 실행
-                </Button>
-              </div>
-              {aiStatus?.mtpConfigured ? (
-                <p className="mt-3 text-xs text-muted-foreground">
-                  현재는 VDI 스트리밍 모드입니다. 내장 모델 진단은 MTP 설정을 끈 상태에서 실행하세요.
-                </p>
-              ) : (
-                <div className="mt-4 grid gap-3 text-xs sm:grid-cols-4">
-                  <div className="rounded-md bg-muted/50 p-3">
-                    <p className="font-medium">Load</p>
-                    <p className="mt-1 text-muted-foreground">
-                      {aiBenchmark?.cachedModel ? 'cached' : aiBenchmark?.loadMs != null ? `${aiBenchmark.loadMs} ms` : '-'}
-                    </p>
-                  </div>
-                  <div className="rounded-md bg-muted/50 p-3">
-                    <p className="font-medium">Generate</p>
-                    <p className="mt-1 text-muted-foreground">
-                      {aiBenchmark ? `${aiBenchmark.generateMs} ms` : '-'}
-                    </p>
-                  </div>
-                  <div className="rounded-md bg-muted/50 p-3">
-                    <p className="font-medium">Speed</p>
-                    <p className="mt-1 text-muted-foreground">
-                      {formatLocalAiSpeed(aiBenchmark?.tokensPerSecond)}
-                    </p>
-                  </div>
-                  <div className="rounded-md bg-muted/50 p-3">
-                    <p className="font-medium">판정</p>
-                    <p className="mt-1 text-muted-foreground">{aiBenchmark?.speedLabel ?? '-'}</p>
-                  </div>
-                </div>
-              )}
-              {aiBenchmark?.recommendation && (
-                <p className="mt-3 text-xs leading-5 text-muted-foreground">
-                  {aiBenchmark.recommendation}
-                </p>
-              )}
-            </div>
-          </section>
-
-          <section className="memoji-settings-section max-w-2xl">
-            <h3 className="flex items-center gap-2 text-base font-semibold">
-              <Database className="h-4 w-4" />
-              데이터 저장 위치
-            </h3>
-            <div className="flex gap-2">
-              <Input value={dataPath} readOnly className="font-mono text-xs" />
-              <Button variant="outline" size="sm" onClick={openDataFolder}>
-                <FolderOpen className="mr-1 h-4 w-4" />
-                열기
-              </Button>
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <input
-                ref={databaseInputRef}
-                type="file"
-                accept=".db,application/x-sqlite3,application/vnd.sqlite3,application/octet-stream"
-                className="hidden"
-                onChange={(event) => importDatabase(event.target.files?.[0])}
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => databaseInputRef.current?.click()}
-                disabled={isImportingDatabase}
-              >
-                {isImportingDatabase ? (
-                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload className="mr-1 h-4 w-4" />
-                )}
-                기존 memoji.db 가져오기
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={exportAllPages}
-                disabled={isExportingPages}
-              >
-                {isExportingPages ? (
-                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="mr-1 h-4 w-4" />
-                )}
-                전체 페이지 ZIP 내보내기
-              </Button>
-              <span className="text-xs text-muted-foreground">
-                가져오기는 현재 DB를 백업한 뒤 병합하고, 내보내기는 페이지별 Markdown 파일과 manifest.json을 ZIP으로 저장합니다.
-              </span>
-            </div>
-          </section>
-
+              </section>
+            )}
+          </main>
         </div>
 
-        <div className="flex justify-end gap-2 border-t pt-4">
-          <Button variant="outline" onClick={onClose}>취소</Button>
-          <Button onClick={saveTitle}>저장</Button>
-        </div>
+        <footer className="memoji-settings-footer">
+          <p>각 항목은 즉시 적용되거나 해당 섹션의 적용 버튼으로 저장됩니다.</p>
+          <Button variant="outline" type="button" onClick={closeSettings}>닫기</Button>
+        </footer>
       </DialogContent>
     </Dialog>
   );
