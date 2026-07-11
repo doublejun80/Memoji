@@ -79,7 +79,7 @@ const SETTINGS_SECTIONS = [
 const TOKEN_PRESETS = [
   { label: '빠르게', value: 64 },
   { label: '균형', value: LOCAL_AI_MAX_NEW_TOKENS_DEFAULT },
-  { label: '길게', value: 512 },
+  { label: '최대로', value: LOCAL_AI_MAX_NEW_TOKENS_MAX },
 ];
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
