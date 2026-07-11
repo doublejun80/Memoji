@@ -116,6 +116,19 @@ export interface LocalAiRuntimeTestResult {
   tokensPerSecond: number;
 }
 
+export interface LocalAiManagedRuntimeStatus {
+  available: boolean;
+  bundled: boolean;
+  modelAvailable: boolean;
+  processRunning: boolean;
+  endpointReachable: boolean;
+  source?: string | null;
+  registryPath?: string | null;
+  modelPath?: string | null;
+  logPath: string;
+  lastError?: string | null;
+}
+
 export const LOCAL_AI_MAX_NEW_TOKENS_MIN = 32;
 export const LOCAL_AI_MAX_NEW_TOKENS_MAX = 2048;
 export const LOCAL_AI_MAX_NEW_TOKENS_DEFAULT = 256;
@@ -144,7 +157,7 @@ export const LOCAL_AI_RUNTIME_PRESETS: LocalAiRuntimePreset[] = [
     label: 'Gemma 4 E2B · LiteRT-LM',
     shortLabel: 'Gemma 4 LiteRT-LM',
     modeLabel: 'LiteRT-LM',
-    description: '기본 런타임. VDI CPU-only 운영용 LiteRT-LM 로컬 서버',
+    description: 'VDI 배포본에 포함된 Gemma 4와 LiteRT-LM을 자동으로 실행',
     serverEnabled: true,
     endpoint: 'http://127.0.0.1:9379/v1/chat/completions',
     model: 'gemma4-e2b',
@@ -237,7 +250,7 @@ export const formatLocalAiGenerateError = (
       rawMessage.includes('operation timed out');
 
     if (serverConnectionFailed) {
-      return `${runtimePreset.modeLabel} 서버가 켜져 있지 않습니다.\n\n${endpoint} 에서 OpenAI 호환 서버를 먼저 실행하거나, 설정에서 사용 가능한 런타임을 선택하세요.`;
+      return `${runtimePreset.modeLabel} 서버가 응답하지 않습니다.\n\n${endpoint} 연결을 자동으로 복구하는 중입니다. 계속 실패하면 설정에서 내장 Gemma 서버를 시작하세요.`;
     }
 
     return `${runtimePreset.modeLabel} 서버 오류: ${rawMessage}\n\n설정에서 endpoint와 서버 실행 상태를 확인하세요.`;
@@ -326,7 +339,7 @@ export const localAiStateHelp = (status?: LocalAiStatus | null): string => {
     if (status.mtpReachable === false) {
       return status.mtpProbeError
         ? `${preset.modeLabel} 서버 연결 실패: ${status.mtpProbeError}`
-        : `${preset.modeLabel} 서버를 시작한 뒤 상태를 새로고침하세요.`;
+        : `${preset.modeLabel} 내장 서버를 자동으로 시작하는 중입니다.`;
     }
     if (status.mtpReachable == null) {
       return `${preset.modeLabel} 로컬 서버 연결 상태를 확인하고 있습니다.`;

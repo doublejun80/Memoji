@@ -32,27 +32,29 @@ Memoji를 실행한 뒤 설정 → 데이터에서 다음을 확인합니다.
 
 ## 로컬 AI 사용
 
-기본 AI는 같은 VDI 세션의 LiteRT-LM 서버에 연결합니다. 앱이 서버를 자동 설치하거나
-시작하지 않으므로, 관리자가 이미지 준비 단계에서 모델을 가져와야 합니다.
+VDI 배포본은 LiteRT-LM 런타임과 Gemma 4 E2B 모델을 `ai` 폴더에 포함합니다. 앱이
+`Memoji.exe` 옆의 폴더를 감지해 로컬 서버를 자동으로 시작하므로 사용자별 설치나
+다운로드는 필요하지 않습니다.
 
-```powershell
-# 이미지 준비 단계에서 한 번 수행
-uv tool install litert-lm
-litert-lm import --from-huggingface-repo=litert-community/gemma-4-E2B-it-litert-lm `
-  gemma-4-E2B-it.litertlm gemma4-e2b
-
-# 각 사용자 세션에서 Memoji보다 먼저 실행
-litert-lm serve --host 127.0.0.1 --port 9379
+```text
+Memoji VDI 폴더/
+├── Memoji.exe
+├── ai/runtime/...
+├── ai/registry/models/gemma4-e2b/model.litertlm
+└── data/
 ```
+
+폴더 전체를 쓰기 가능한 로컬 디스크에 복사하세요. 첫 실행에 모델 최적화 캐시가
+`ai/registry` 아래 생성될 수 있으므로 약 1GB의 추가 여유 공간을 확보합니다.
 
 기본 엔드포인트는 `http://127.0.0.1:9379/v1/chat/completions`, 모델 ID는
 `gemma4-e2b`입니다. 설정 → 로컬 AI의 연결 상태가 성공해야 사용할 수 있습니다.
-가져온 모델과 레지스트리가 사용자 세션에 함께 배포되어 있다면 실행 중 인터넷은
+설정 → 로컬 AI에서 오프라인 번들 감지와 연결 성공을 확인합니다. 실행 중 인터넷은
 필요하지 않습니다.
 
 ### 느린 VDI에서
 
-1. 로그인할 때 LiteRT-LM을 미리 시작합니다.
+1. Memoji를 로그인 후 자동 실행하면 LiteRT-LM도 함께 시작됩니다.
 2. 먼저 256 토큰으로 사용하고, 긴 대화가 느리면 64 토큰을 선택합니다.
 3. 불필요하게 긴 페이지 전체를 프롬프트로 보내지 않습니다.
 4. 실제 VDI에서 첫 응답 지연과 생성 시간을 측정합니다.

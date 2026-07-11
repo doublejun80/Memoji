@@ -191,13 +191,13 @@ npm install -g @tauri-apps/cli
 - ⌨️ 커스터마이징 가능한 단축키
 - 🎨 다크/라이트 모드
 - 💾 로컬 SQLite 데이터베이스
-- 🤖 로컬 Gemma AI 어시스턴트 (Candle GGUF 경로, 토큰 스트리밍 UX)
+- 🤖 Gemma 4 E2B + LiteRT-LM 오프라인 VDI 번들, 자동 서버 시작, 토큰 스트리밍 UX
 - 🔒 Portable 모드 (VDI 환경 지원)
 
 **시스템 요구사항:**
 - Windows 10/11 (64-bit)
-- 최소 4GB RAM
-- 100MB 디스크 공간
+- 앱만 최소 4GB RAM, Gemma 사용 시 8GB 이상 권장
+- VDI AI 번들 약 3GB + 최초 최적화 캐시 여유 공간 1GB 이상
 
 ---
 

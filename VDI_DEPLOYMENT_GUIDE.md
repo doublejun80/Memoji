@@ -6,17 +6,20 @@
 
 ## 1. 앱 배포
 
-프로덕션 패키지는 다음 명령으로 만듭니다.
+Gemma까지 포함한 VDI 오프라인 폴더는 Windows 이미지 준비 PC에서 만듭니다.
 
 ```powershell
 npm ci
-npm run tauri build
+.\scripts\build-windows-vdi.ps1
 ```
 
-VDI에는 생성된 MSI/NSIS 패키지를 관리 도구로 배포하는 방법을 권장합니다. 실행 파일을
-직접 복사하는 방식은 대상 이미지에서 WebView2, 번들 리소스, 실행 권한까지 함께 검증한
-경우에만 사용하세요. `Memoji.exe` 한 파일만 복사하면 모든 환경에서 동작한다는 보장은
-없습니다.
+`release\memoji-vdi` 전체를 골든 이미지의 쓰기 가능한 로컬 경로에 복사합니다. 모델이
+2GB를 넘으므로 일반 MSI/NSIS 안에 넣지 않고 portable 폴더로 배포합니다. `Memoji.exe`
+한 파일만 복사하면 AI 런타임과 Gemma가 누락됩니다. WebView2와 실행 정책도 대상
+이미지에서 확인하세요.
+
+Gemma 4는 Apache 2.0 라이선스 모델입니다. 배포 폴더의 `ai\NOTICE.txt`를 모델과 함께
+유지하고 조직의 오픈소스 고지 절차에도 반영하세요.
 
 ## 2. 영구 저장소 지정
 
@@ -52,9 +55,10 @@ setx MEMOJI_DATA_PATH "H:\Memoji\data"
 ## 3. LiteRT-LM 준비
 
 기본 로컬 AI는 앱과 같은 VDI 안에서 별도 프로세스로 실행되는 LiteRT-LM 서버입니다.
-Memoji가 LiteRT-LM을 설치하거나 서버를 자동 시작하지는 않습니다.
+오프라인 배포본에는 플랫폼별 Python/LiteRT 런타임과 Gemma 모델이 모두 포함되며,
+Memoji가 실행 시 서버를 자동으로 시작하고 종료 시 함께 정리합니다.
 
-인터넷 연결이 가능한 이미지 준비 환경에서 모델을 LiteRT-LM 레지스트리에 가져옵니다.
+빌드 PC에서만 모델을 LiteRT-LM 레지스트리에 한 번 가져옵니다.
 
 ```powershell
 uv tool install litert-lm
@@ -62,14 +66,9 @@ litert-lm import --from-huggingface-repo=litert-community/gemma-4-E2B-it-litert-
   gemma-4-E2B-it.litertlm gemma4-e2b
 ```
 
-모델 레지스트리는 실제 서버를 실행할 사용자/환경에서도 보이도록 프로비저닝해야 합니다.
-모델 가져오기가 끝난 이미지는 실행 중 인터넷이 필요하지 않습니다.
-
-사용자 세션에서 Memoji보다 먼저 서버를 실행합니다.
-
-```powershell
-litert-lm serve --host 127.0.0.1 --port 9379
-```
+그다음 `.\scripts\build-windows-vdi.ps1`을 실행하면 등록된 모델이 배포 폴더의
+`ai\registry\models\gemma4-e2b\model.litertlm`으로 복사됩니다. 대상 VDI에서는 uv,
+Python, Hugging Face 연결이 필요하지 않습니다.
 
 기본 연결 값은 다음과 같습니다.
 
@@ -79,16 +78,17 @@ Model: gemma4-e2b
 ```
 
 Memoji는 보안상 `localhost`, `127.0.0.0/8`, `::1`만 허용합니다. 설정 → 로컬 AI에서
-`GET /v1/models` 연결 확인이 성공해야 준비 상태가 됩니다. 서버가 꺼져 있거나 모델이
-레지스트리에 없으면 엔드포인트가 저장되어 있어도 AI는 준비 상태가 아닙니다.
+오프라인 번들 감지와 `GET /v1/models` 성공을 확인합니다. 서버가 비정상 종료되면 다음
+상태 확인 시 자동 재시작하며, 설정의 `내장 Gemma 서버 시작` 버튼으로도 복구할 수 있습니다.
 
 ### VDI 응답성 권장값
 
-- 세션 로그인 시 LiteRT-LM을 미리 실행하고 Memoji 시작 전 `/v1/models`가 응답하도록 합니다.
+- 세션 로그인 시 Memoji를 미리 실행해 LiteRT-LM 준비 시간을 사용자 작업 전에 소진합니다.
 - 먼저 Gemma 4 E2B와 256 토큰 기본값을 사용하고, CPU가 느린 풀에서는 64 토큰으로 낮춥니다.
 - 가능한 경우 VDI가 제공하는 GPU 가속을 사용하되, 실제 호스트 풀에서 TTFT와 생성 속도를 측정합니다.
 - CPU-only 풀에서는 vCPU 과할당과 전원 절약 정책을 줄이고 추론 프로세스에 안정적인 CPU를 확보합니다.
-- 모델 레지스트리를 느린 네트워크 홈에서 매 요청 읽지 않도록 로컬/프로필 캐시에 사전 배치합니다.
+- `memoji-vdi` 폴더는 느린 네트워크 홈이 아닌 VDI 로컬 디스크에 배치합니다.
+- 최초 CPU 캐시 생성을 위해 `ai\registry`에 쓰기 권한과 약 1GB의 여유 공간을 둡니다.
 - speculative decoding/MTP는 LiteRT-LM 서버가 지원하는 모델·백엔드에서 서버 측으로 켭니다.
   설정의 draft 문자열만 입력해도 MTP가 활성화되는 것은 아닙니다.
 

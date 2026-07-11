@@ -20,6 +20,7 @@ src-tauri/resources/models/tokenizer.json
 
 # Local release artifacts
 release/
+src-tauri/resources/litert-lm/
 
 # Logs and local env
 logs/

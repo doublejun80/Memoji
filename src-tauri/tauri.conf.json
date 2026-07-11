@@ -45,7 +45,7 @@
     ],
     "category": "Productivity",
     "shortDescription": "로컬 AI Markdown 노트 앱",
-    "longDescription": "Memoji 2.0은 Milkdown 즉시 렌더링 Markdown 편집, 로컬 SQLite 저장, Candle 기반 Gemma GGUF 로컬 AI를 제공하는 오프라인 우선 노트 앱입니다.",
+    "longDescription": "Memoji 2.0은 Milkdown 즉시 렌더링 Markdown 편집, 로컬 SQLite 저장, VDI용 LiteRT-LM 및 Gemma 4 로컬 AI를 제공하는 오프라인 우선 노트 앱입니다.",
     "resources": [
       "resources/models/*"
     ]

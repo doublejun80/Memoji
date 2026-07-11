@@ -31,6 +31,7 @@ import {
   localAiStateHelp,
   localAiStateLabel,
   LocalAiBenchmarkResult,
+  LocalAiManagedRuntimeStatus,
   LocalAiRuntimeConfig,
   LocalAiRuntimeConfigView,
   LocalAiRuntimeKind,
@@ -99,6 +100,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isTestingRuntimeConfig, setIsTestingRuntimeConfig] = useState(false);
   const [runtimeConfig, setRuntimeConfig] = useState<LocalAiRuntimeConfigView | null>(null);
   const [runtimeTestResult, setRuntimeTestResult] = useState<LocalAiRuntimeTestResult | null>(null);
+  const [managedRuntime, setManagedRuntime] = useState<LocalAiManagedRuntimeStatus | null>(null);
+  const [isStartingManagedRuntime, setIsStartingManagedRuntime] = useState(false);
   const [aiBenchmark, setAiBenchmark] = useState<LocalAiBenchmarkResult | null>(null);
   const [isImportingDatabase, setIsImportingDatabase] = useState(false);
   const [isExportingPages, setIsExportingPages] = useState(false);
@@ -139,6 +142,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   }, []);
 
+  const loadManagedRuntime = useCallback(async () => {
+    try {
+      setManagedRuntime(
+        await invoke<LocalAiManagedRuntimeStatus>('local_ai_managed_runtime_status')
+      );
+    } catch {
+      setManagedRuntime(null);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isOpen) return;
     setActiveSection('general');
@@ -150,8 +163,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setAiAdvancedOpen(false);
     setAiDiagnosticsOpen(false);
     setAiBenchmark(null);
-    void Promise.all([loadDataPath(), loadAiStatus(), loadRuntimeConfig()]);
-  }, [appTitle, isOpen, loadAiStatus, loadDataPath, loadRuntimeConfig]);
+    setManagedRuntime(null);
+    void Promise.all([loadDataPath(), loadAiStatus(), loadRuntimeConfig(), loadManagedRuntime()]);
+  }, [appTitle, isOpen, loadAiStatus, loadDataPath, loadManagedRuntime, loadRuntimeConfig]);
 
   const saveTitle = async () => {
     const nextTitle = title.trim();
@@ -278,6 +292,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       toast.error('AI 서버 생성 테스트 실패: ' + message);
     } finally {
       setIsTestingRuntimeConfig(false);
+    }
+  };
+
+  const startManagedRuntime = async () => {
+    if (isStartingManagedRuntime) return;
+    setIsStartingManagedRuntime(true);
+    try {
+      const status = await invoke<LocalAiManagedRuntimeStatus>('local_ai_start_managed_runtime');
+      setManagedRuntime(status);
+      await loadAiStatus();
+      if (status.endpointReachable) {
+        toast.success('VDI 내장 Gemma 서버를 시작했습니다.');
+      } else {
+        toast.info('Gemma 서버를 시작하는 중입니다. 잠시 후 다시 확인해주세요.');
+      }
+    } catch (error) {
+      toast.error('내장 Gemma 서버 시작 실패: ' + String(error).slice(0, 180));
+      await loadManagedRuntime();
+    } finally {
+      setIsStartingManagedRuntime(false);
     }
   };
 
@@ -501,7 +535,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     className="memoji-settings-refresh"
-                    onClick={() => void loadAiStatus()}
+                    onClick={() => void Promise.all([loadAiStatus(), loadManagedRuntime()])}
                   >
                     상태 새로고침
                   </button>
@@ -518,13 +552,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </span>
                   </div>
                   <p className="memoji-settings-status-copy">{localAiStateHelp(aiStatus)}</p>
+                  {managedRuntime?.bundled && (
+                    <div className="memoji-settings-note" role="status">
+                      <strong>VDI 오프라인 AI 번들 감지됨</strong>
+                      <p>
+                        Gemma 4 E2B 모델과 LiteRT-LM 실행 환경이 앱 폴더에 포함되어 있습니다.
+                        인터넷 연결이나 별도 모델 설치 없이 자동으로 시작합니다.
+                      </p>
+                    </div>
+                  )}
                   {serverConfigured && !serverReachable && !serverChecking && (
                     <div className="memoji-settings-warning" role="status">
                       <strong>{findLocalAiRuntimePreset(aiStatus?.mtpRuntimeKind).modeLabel} 서버가 응답하지 않습니다.</strong>
                       <p>
                         <code>{aiStatus?.mtpEndpoint ?? runtimeConfig?.endpoint}</code>에서 실행 중인 서버와 모델을 확인하세요.
-                        Memoji는 추론 서버나 모델을 자동 설치하지 않습니다.
+                        {managedRuntime?.available
+                          ? ' 앱에 포함된 서버를 다시 시작할 수 있습니다.'
+                          : ' VDI 배포 폴더에 ai 런타임과 Gemma 모델이 함께 있는지 확인하세요.'}
                       </p>
+                      {managedRuntime?.available && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void startManagedRuntime()}
+                          disabled={isStartingManagedRuntime}
+                        >
+                          {isStartingManagedRuntime ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+                          내장 Gemma 서버 시작
+                        </Button>
+                      )}
                     </div>
                   )}
                   {!serverConfigured && (

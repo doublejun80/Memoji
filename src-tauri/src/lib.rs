@@ -3,9 +3,9 @@ mod local_ai;
 
 use database::{build_page_export_entries, Database, ImportDatabaseSummary, Page};
 use local_ai::{
-    LocalAiBenchmarkResult, LocalAiConfig, LocalAiGenerateRequest, LocalAiGenerateResponse,
-    LocalAiGenerateStreamChunk, LocalAiRuntimeKind, LocalAiState, LocalAiStatus, MtpConfig,
-    DEFAULT_MTP_MODEL,
+    LiteRtManagedStatus, LiteRtManager, LocalAiBenchmarkResult, LocalAiConfig,
+    LocalAiGenerateRequest, LocalAiGenerateResponse, LocalAiGenerateStreamChunk,
+    LocalAiRuntimeKind, LocalAiState, LocalAiStatus, MtpConfig, DEFAULT_MTP_MODEL,
 };
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,7 @@ use zip::write::SimpleFileOptions;
 struct AppState {
     db: Mutex<Database>,
     local_ai: LocalAiState,
+    litert_manager: LiteRtManager,
     /// 시작할 때 결정한 경로를 모든 명령이 공유해야 일시적인 권한/네트워크
     /// 변화로 열린 DB와 가져오기·내보내기 경로가 갈라지지 않는다.
     data_dir: PathBuf,
@@ -216,6 +217,12 @@ fn resolve_mtp_config(state: &State<AppState>) -> Result<Option<MtpConfig>, Stri
     let db = state.db.lock().map_err(|error| error.to_string())?;
     let config = read_runtime_config_from_db(&db)?;
     config.to_mtp_config()
+}
+
+fn should_manage_litert(config: &MtpConfig) -> bool {
+    config.runtime_kind == LocalAiRuntimeKind::LitertLm
+        && config.endpoint == DEFAULT_LITERT_LM_ENDPOINT
+        && config.model == DEFAULT_LITERT_LM_MODEL
 }
 
 #[cfg(test)]
@@ -556,6 +563,11 @@ async fn local_ai_status(state: State<'_, AppState>) -> Result<LocalAiStatus, St
     let mut status = state.local_ai.status_with_mtp_config(mtp_config.clone());
 
     if let Some(config) = mtp_config {
+        if should_manage_litert(&config) {
+            if let Err(error) = state.litert_manager.ensure_started() {
+                log::warn!("Managed LiteRT-LM start skipped: {error}");
+            }
+        }
         match local_ai::probe_mtp_endpoint(&config).await {
             Ok(()) => status.mtp_reachable = Some(true),
             Err(error) => {
@@ -565,6 +577,32 @@ async fn local_ai_status(state: State<'_, AppState>) -> Result<LocalAiStatus, St
         }
     }
 
+    Ok(status)
+}
+
+#[tauri::command]
+fn local_ai_managed_runtime_status(state: State<AppState>) -> LiteRtManagedStatus {
+    state.litert_manager.status()
+}
+
+#[tauri::command]
+async fn local_ai_start_managed_runtime(
+    state: State<'_, AppState>,
+) -> Result<LiteRtManagedStatus, String> {
+    state.litert_manager.ensure_started()?;
+
+    for _ in 0..16 {
+        let status = state.litert_manager.status();
+        if status.endpoint_reachable {
+            return Ok(status);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+
+    let status = state.litert_manager.status();
+    if let Some(error) = status.last_error.clone() {
+        return Err(error);
+    }
     Ok(status)
 }
 
@@ -620,10 +658,14 @@ async fn local_ai_benchmark(state: State<'_, AppState>) -> Result<LocalAiBenchma
 #[tauri::command]
 async fn local_ai_test_runtime_config(
     config: LocalAiRuntimeConfig,
+    state: State<'_, AppState>,
 ) -> Result<LocalAiRuntimeTestResult, String> {
     let mtp_config = config
         .to_mtp_config()?
         .ok_or_else(|| "고속 로컬 서버를 먼저 켜세요.".to_string())?;
+    if should_manage_litert(&mtp_config) {
+        state.litert_manager.ensure_started()?;
+    }
     let started = std::time::Instant::now();
     let response = local_ai::generate_mtp_stream(
         mtp_config,
@@ -776,7 +818,7 @@ pub fn run() {
         }
     }));
 
-    builder
+    let app = builder
         .setup(|app| {
             // 릴리스 빌드에서도 로그 활성화 (에러 디버깅을 위해)
             // 로그 파일은 실행 파일과 같은 폴더의 logs 디렉토리에 저장됨
@@ -843,9 +885,37 @@ pub fn run() {
             });
             log::info!("Local AI resource directory: {:?}", resource_dir);
 
+            let litert_manager = LiteRtManager::discover(&resource_dir, &data_dir);
+            let litert_status = litert_manager.status();
+            let should_auto_start_litert = MtpConfig::from_env_result()
+                .ok()
+                .flatten()
+                .or_else(|| {
+                    read_runtime_config_from_db(&db)
+                        .ok()
+                        .and_then(|config| config.to_mtp_config().ok().flatten())
+                })
+                .is_some_and(|config| should_manage_litert(&config));
+            if litert_status.available {
+                log::info!(
+                    "LiteRT-LM runtime discovered: source={:?}, bundled={}, model={:?}",
+                    litert_status.source,
+                    litert_status.bundled,
+                    litert_status.model_path
+                );
+                if should_auto_start_litert {
+                    if let Err(error) = litert_manager.ensure_started() {
+                        log::warn!("LiteRT-LM auto start failed: {error}");
+                    }
+                }
+            } else {
+                log::warn!("LiteRT-LM runtime/model bundle was not found");
+            }
+
             app.manage(AppState {
                 db: Mutex::new(db),
                 local_ai: LocalAiState::new(LocalAiConfig::from_resource_dir(resource_dir)),
+                litert_manager,
                 data_dir,
             });
 
@@ -865,6 +935,8 @@ pub fn run() {
             import_memoji_database,
             export_pages_zip,
             local_ai_status,
+            local_ai_managed_runtime_status,
+            local_ai_start_managed_runtime,
             local_ai_load,
             local_ai_get_runtime_config,
             local_ai_save_runtime_config,
@@ -874,6 +946,12 @@ pub fn run() {
             local_ai_generate_stream,
             local_ai_generate_mtp_stream,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            app_handle.state::<AppState>().litert_manager.stop();
+        }
+    });
 }

@@ -69,6 +69,7 @@
             "check": "npm run type-check && npm run test:unit && npm run build",
             "tauri": "tauri",
             "tauri:dev": "tauri dev",
-            "tauri:build": "tauri build"
+            "tauri:build": "tauri build",
+            "ai:bundle:vdi": "node scripts/prepare-vdi-ai-bundle.mjs"
       }
 }

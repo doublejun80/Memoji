@@ -108,5 +108,5 @@ assert.equal(
       avx512Build: false,
     }
   ),
-  'LiteRT-LM 서버가 켜져 있지 않습니다.\n\nhttp://127.0.0.1:9379/v1/chat/completions 에서 OpenAI 호환 서버를 먼저 실행하거나, 설정에서 사용 가능한 런타임을 선택하세요.'
+  'LiteRT-LM 서버가 응답하지 않습니다.\n\nhttp://127.0.0.1:9379/v1/chat/completions 연결을 자동으로 복구하는 중입니다. 계속 실패하면 설정에서 내장 Gemma 서버를 시작하세요.'
 );

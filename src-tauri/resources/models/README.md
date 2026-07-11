@@ -24,9 +24,10 @@ the default context at 2048 or 4096 for VDI CPU memory safety.
 
 ## Default LiteRT-LM runtime
 
-LiteRT-LM runs as a separate process in the same user/VDI session. Memoji does
-not install it, import its model, or start the server automatically. During
-image preparation, import the model into the LiteRT-LM registry:
+LiteRT-LM runs as a managed child process in the same user/VDI session. The VDI
+build copies the platform runtime and imported model into the portable release
+folder, and Memoji starts the server automatically. During image preparation,
+import the model into the build user's LiteRT-LM registry:
 
 ```powershell
 uv tool install litert-lm
@@ -34,13 +35,14 @@ litert-lm import --from-huggingface-repo=litert-community/gemma-4-E2B-it-litert-
   gemma-4-E2B-it.litertlm gemma4-e2b
 ```
 
-Provision that registry so it is visible to the user account that will run the
-server. Once the model has been imported into the image, runtime inference can
-remain offline. Start the server before Memoji:
+Build the offline folder after the import:
 
 ```powershell
-litert-lm serve --host 127.0.0.1 --port 9379
+.\scripts\build-windows-vdi.ps1
 ```
+
+Copy the complete `release\memoji-vdi` folder to the VDI. Do not copy the EXE
+alone. Runtime inference remains offline and the app manages the server.
 
 The application defaults are:
 

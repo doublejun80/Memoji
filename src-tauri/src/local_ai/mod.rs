@@ -1,9 +1,11 @@
 mod gemma4;
+mod litert_manager;
 mod mtp_client;
 mod sampler;
 mod tokenizer;
 
 use gemma4::Gemma4Runtime;
+pub use litert_manager::{LiteRtManagedStatus, LiteRtManager};
 pub use mtp_client::{
     generate_mtp_stream, probe_mtp_endpoint, LocalAiRuntimeKind, MtpConfig, DEFAULT_MTP_MODEL,
 };

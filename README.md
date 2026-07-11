@@ -81,9 +81,9 @@ src-tauri/target/release/bundle/msi/Memoji_2.0.0_x64_en-US.msi
 ## 📊 시스템 요구사항
 
 - **OS**: Windows 10/11 (64-bit)
-- **메모리**: 최소 4GB RAM
-- **디스크**: 앱 100MB 이상, LiteRT-LM 또는 GGUF 모델 저장 공간 별도 필요
-- **네트워크**: 실행 시 인터넷 불필요. 모델 가져오기와 이미지 준비 단계에는 다운로드 경로 필요
+- **메모리**: 앱만 4GB 이상, Gemma 사용 시 8GB 이상 권장
+- **디스크**: VDI 오프라인 번들 약 3GB + 첫 실행 최적화 캐시 여유 공간 1GB 이상
+- **네트워크**: VDI 오프라인 번들은 실행 시 인터넷 불필요
 
 ## 🎯 주요 단축키
 
@@ -102,33 +102,33 @@ src-tauri/target/release/bundle/msi/Memoji_2.0.0_x64_en-US.msi
 
 기본 AI 런타임은 같은 VDI 안에서 실행하는 LiteRT-LM OpenAI 호환 서버입니다.
 Memoji는 공용/LAN 호스트를 거부하고 `localhost`, `127.0.0.0/8`, `::1` 루프백
-엔드포인트만 허용합니다. 서버 프로세스와 모델은 앱에 내장되어 자동 실행되는 것이
-아니므로 VDI 이미지 준비 단계에서 별도로 설치하고 모델을 가져와야 합니다.
+엔드포인트만 허용합니다. VDI 오프라인 배포본은 LiteRT-LM 실행 환경과 Gemma 4 E2B
+모델을 `ai` 폴더에 함께 담고, 앱 시작 시 서버를 자동으로 실행합니다.
 
 ### 모델 준비
 
-```powershell
-# 이미지 준비 단계: 인터넷 연결이 가능한 관리 환경에서 한 번 수행
-uv tool install litert-lm
-litert-lm import --from-huggingface-repo=litert-community/gemma-4-E2B-it-litert-lm `
-  gemma-4-E2B-it.litertlm gemma4-e2b
+이미지 준비 PC의 LiteRT 레지스트리에 `gemma4-e2b`가 준비된 상태에서 실행합니다.
 
-# 사용자 세션 시작 후, Memoji보다 먼저 실행
-litert-lm serve --host 127.0.0.1 --port 9379
+```powershell
+.\scripts\build-windows-vdi.ps1
 ```
+
+생성된 `release\memoji-vdi` 폴더 전체를 VDI의 쓰기 가능한 로컬 디스크에 복사합니다.
+`Memoji.exe`만 따로 복사하면 AI가 동작하지 않습니다. 빌드 PC에서만 인터넷과 `uv`가
+필요하며, 완성된 폴더는 오프라인에서 실행됩니다.
 
 Memoji의 기본 엔드포인트는
 `http://127.0.0.1:9379/v1/chat/completions`, 기본 모델 ID는 `gemma4-e2b`입니다.
-설정 → 로컬 AI에서 서버 연결 상태가 성공해야 AI 도우미가 준비됩니다. 이미지에 모델
-레지스트리를 함께 배포하면 런타임은 인터넷 없이 동작합니다.
+설정 → 로컬 AI에서 `VDI 오프라인 AI 번들 감지됨`과 서버 연결 성공을 확인할 수 있습니다.
+서버가 종료되면 앱이 다시 시작하며, 설정에서도 수동 재시작할 수 있습니다.
 
 선택적 내장 Candle/llama.cpp 경로를 사용할 때만 GGUF 모델과 `tokenizer.json`을
 `src-tauri/resources/models/`에 두거나 `MEMOJI_GEMMA_GGUF`,
 `MEMOJI_GEMMA_TOKENIZER`를 설정합니다. 대형 모델 파일은 git에 커밋하지 않습니다.
 
 VDI 응답성을 위해 기본 응답 길이(256 토큰)를 먼저 사용하고, 느린 CPU 세션에서는
-64 토큰으로 낮추세요. LiteRT-LM 프로세스를 세션 시작 시 미리 띄우고 첫 요청 전에
-`GET /v1/models`가 성공하는지 확인하면 초기 연결 실패를 줄일 수 있습니다.
+64 토큰으로 낮추세요. 첫 실행에서는 LiteRT-LM이 CPU 최적화 캐시를 만들 수 있으므로
+첫 답변만 이후 답변보다 오래 걸릴 수 있습니다.
 
 ## 📁 프로젝트 구조
 

@@ -2646,6 +2646,10 @@ input[type="checkbox"]:checked:after {
 }
 
 .memoji-settings-warning {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
   border: 1px solid color-mix(in srgb, #b45309 30%, var(--border));
   border-radius: 10px;
   background: color-mix(in srgb, #b45309 8%, var(--background));
@@ -2658,7 +2662,7 @@ input[type="checkbox"]:checked:after {
 }
 
 .memoji-settings-warning p {
-  margin-top: 4px;
+  margin-top: 0;
   color: var(--muted-foreground);
   font-size: 11px;
   line-height: 1.5;
