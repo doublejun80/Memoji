@@ -370,12 +370,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (!aiStatus) return '확인 중';
     return aiStatus.compiledFeatures?.[name] ? '활성' : '비활성';
   };
-  const canLoadModel = !aiStatus?.mtpConfigured
+  const canLoadModel = !aiStatus?.runtimeCapabilities?.openAiCompatible
+    && !aiStatus?.mtpConfigured
     && !!aiStatus?.modelExists
     && !!aiStatus?.tokenizerExists
     && !isLoadingModel
     && !isBenchmarkingAi;
-  const canBenchmarkAi = !aiStatus?.mtpConfigured
+  const canBenchmarkAi = !aiStatus?.runtimeCapabilities?.openAiCompatible
+    && !aiStatus?.mtpConfigured
     && !!aiStatus?.modelExists
     && !!aiStatus?.tokenizerExists
     && !isBenchmarkingAi
@@ -386,7 +388,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const selectedRuntimeIsPublic = LOCAL_AI_RUNTIME_PRESETS.some(
     (preset) => preset.id === selectedRuntimeKind
   );
-  const serverConfigured = aiStatus?.mtpConfigured === true;
+  const serverConfigured = aiStatus?.runtimeCapabilities?.openAiCompatible === true
+    || aiStatus?.mtpConfigured === true;
   const serverReachable = aiStatus?.mtpReachable === true;
   const serverChecking = serverConfigured && aiStatus?.mtpReachable == null;
   const isDesktopData = Boolean(dataPath && dataPath !== '브라우저 모드');
@@ -558,6 +561,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <p>
                         Gemma 4 E2B 모델과 LiteRT-LM 실행 환경이 앱 폴더에 포함되어 있습니다.
                         인터넷 연결이나 별도 모델 설치 없이 자동으로 시작합니다.
+                        {managedRuntime.authEnforced
+                          ? ' 이 세션은 임의 포트와 인증 토큰으로 보호됩니다.'
+                          : managedRuntime.sessionIsolated
+                            ? ' 인증 미지원 런타임이라 임의의 loopback 포트와 자식 PID 확인으로 격리합니다.'
+                            : ''}
                       </p>
                     </div>
                   )}
@@ -740,13 +748,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           />
                         </div>
                         <div className="memoji-settings-field">
-                          <Label htmlFor="local-ai-server-draft">Draft / MTP 메모</Label>
+                          <Label htmlFor="local-ai-server-draft">보조 모델 별칭</Label>
                           <Input
                             id="local-ai-server-draft"
                             value={runtimeConfig?.draftModel ?? ''}
                             disabled={runtimeConfigLockedByEnv || !runtimeConfig}
                             onChange={(event) => changeRuntimeConfig({ draftModel: event.target.value })}
-                            placeholder="서버 시작 옵션에서 설정"
+                            placeholder="검증된 경우에만 MTP 활성"
                           />
                         </div>
                       </div>
@@ -773,6 +781,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <h4><Cpu className="h-4 w-4" aria-hidden="true" /> CPU / AVX-512</h4>
                         <dl className="memoji-settings-diagnostic-grid">
                           <div><dt>Runtime</dt><dd>{localAiRuntimeLabel(aiStatus)}</dd></div>
+                          <div><dt>Runtime version</dt><dd>{aiStatus?.runtimeMetrics?.runtimeVersion ?? '—'}</dd></div>
+                          <div><dt>TTFT</dt><dd>{aiStatus?.runtimeMetrics?.ttftMs != null ? `${aiStatus.runtimeMetrics.ttftMs} ms` : '—'}</dd></div>
+                          <div><dt>Decode</dt><dd>{aiStatus?.runtimeMetrics?.decodeMs != null ? `${aiStatus.runtimeMetrics.decodeMs} ms` : '—'}</dd></div>
+                          <div><dt>MTP</dt><dd>{aiStatus?.runtimeCapabilities?.mtpVerified ? '검증됨' : '비활성'}</dd></div>
+                          <div><dt>Session auth</dt><dd>{aiStatus?.runtimeCapabilities?.authEnforced ? '강제' : '미강제'}</dd></div>
                           <div><dt>Model file</dt><dd>{formatLocalAiBytes(aiStatus?.modelFileSizeBytes)}</dd></div>
                           <div><dt>Runtime AVX-512F</dt><dd>{cpuFeature('avx512f')}</dd></div>
                           <div><dt>Build AVX-512F</dt><dd>{buildFeature('avx512f')}</dd></div>

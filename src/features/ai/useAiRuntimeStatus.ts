@@ -84,6 +84,7 @@ export function useAiRuntimeStatus(api: AiApi, isGenerating: boolean) {
   useEffect(() => {
     if (didAutoLoadRef.current) return;
     if (
+      status?.runtimeCapabilities?.openAiCompatible ||
       status?.mtpConfigured ||
       status?.state !== 'not_loaded' ||
       !status.modelExists ||
@@ -104,4 +105,3 @@ export function useAiRuntimeStatus(api: AiApi, isGenerating: boolean) {
     changeRuntime,
   };
 }
-

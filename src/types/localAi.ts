@@ -32,6 +32,42 @@ export interface LocalAiGenerationStats {
   tokensPerSecond: number;
   maxNewTokens: number;
   mode: string;
+  ttftMs?: number | null;
+  prefillMs?: number | null;
+  decodeMs?: number | null;
+  peakRssBytes?: number | null;
+}
+
+export type LocalAiRuntimeFamily = 'candle' | 'open_ai_compatible_loopback' | 'lite_rt';
+
+export interface LocalAiRuntimeCapabilities {
+  family: LocalAiRuntimeFamily;
+  localOnly: boolean;
+  inProcess: boolean;
+  streaming: boolean;
+  openAiCompatible: boolean;
+  managedProcess: boolean;
+  targetModelVerified: boolean;
+  assistantModelVerified: boolean;
+  mtpVerified: boolean;
+  authEnforced: boolean;
+}
+
+export interface LocalAiRuntimeMetrics {
+  runtimeVersion?: string | null;
+  loadMs?: number | null;
+  ttftMs?: number | null;
+  prefillTokens?: number | null;
+  prefillMs?: number | null;
+  decodeTokens?: number | null;
+  decodeMs?: number | null;
+  peakRssBytes?: number | null;
+  mtp?: {
+    targetModel: string;
+    assistantModel: string;
+    acceptedDraftTokens?: number | null;
+    proposedDraftTokens?: number | null;
+  } | null;
 }
 
 export interface LocalAiStatus {
@@ -59,6 +95,8 @@ export interface LocalAiStatus {
   tokenizerFileSizeBytes?: number | null;
   lastLoadMs?: number | null;
   lastGeneration?: LocalAiGenerationStats | null;
+  runtimeCapabilities?: LocalAiRuntimeCapabilities;
+  runtimeMetrics?: LocalAiRuntimeMetrics;
 }
 
 export interface LocalAiGenerateRequest {
@@ -127,6 +165,12 @@ export interface LocalAiManagedRuntimeStatus {
   modelPath?: string | null;
   logPath: string;
   lastError?: string | null;
+  endpoint?: string | null;
+  port?: number | null;
+  processId?: number | null;
+  sessionIsolated?: boolean;
+  authConfigured?: boolean;
+  authEnforced?: boolean;
 }
 
 export const LOCAL_AI_MAX_NEW_TOKENS_MIN = 32;
@@ -156,7 +200,7 @@ export const LOCAL_AI_RUNTIME_PRESETS: LocalAiRuntimePreset[] = [
     id: 'litert_lm',
     label: 'Gemma 4 E2B · LiteRT-LM',
     shortLabel: 'Gemma 4 LiteRT-LM',
-    modeLabel: 'LiteRT-LM',
+    modeLabel: '고속 로컬 서버',
     description: 'VDI 배포본에 포함된 Gemma 4와 LiteRT-LM을 자동으로 실행',
     serverEnabled: true,
     endpoint: 'http://127.0.0.1:9379/v1/chat/completions',
@@ -218,7 +262,7 @@ export const runtimeKindFromLocalAiStatus = (
   status?: LocalAiStatus | null
 ): LocalAiRuntimeKind => {
   if (!status) return DEFAULT_LOCAL_AI_RUNTIME_KIND;
-  if (!status?.mtpConfigured) return 'builtin_candle';
+  if (!status?.runtimeCapabilities?.openAiCompatible && !status?.mtpConfigured) return 'builtin_candle';
   return findLocalAiRuntimePreset(status.mtpRuntimeKind ?? null).id;
 };
 
@@ -232,7 +276,9 @@ export const runtimeKindFromLocalAiConfig = (
 };
 
 export const localAiRuntimeBadgeLabel = (status?: LocalAiStatus | null): string => {
-  return findLocalAiRuntimePreset(runtimeKindFromLocalAiStatus(status)).modeLabel;
+  if (status?.runtimeCapabilities?.mtpVerified) return 'MTP 활성';
+  if (status?.runtimeCapabilities?.openAiCompatible || status?.mtpConfigured) return '고속 로컬 서버';
+  return '내장 로컬';
 };
 
 export const formatLocalAiGenerateError = (
@@ -240,7 +286,7 @@ export const formatLocalAiGenerateError = (
   status?: LocalAiStatus | null
 ): string => {
   const rawMessage = String(error);
-  if (status?.mtpConfigured) {
+  if (status?.runtimeCapabilities?.openAiCompatible || status?.mtpConfigured) {
     const runtimePreset = findLocalAiRuntimePreset(status.mtpRuntimeKind ?? null);
     const endpoint = status.mtpEndpoint || runtimePreset.endpoint;
     const serverConnectionFailed =
@@ -250,10 +296,10 @@ export const formatLocalAiGenerateError = (
       rawMessage.includes('operation timed out');
 
     if (serverConnectionFailed) {
-      return `${runtimePreset.modeLabel} 서버가 응답하지 않습니다.\n\n${endpoint} 연결을 자동으로 복구하는 중입니다. 계속 실패하면 설정에서 내장 Gemma 서버를 시작하세요.`;
+      return `고속 로컬 서버가 응답하지 않습니다.\n\n${endpoint} 연결을 자동으로 복구하는 중입니다. 계속 실패하면 설정에서 내장 Gemma 서버를 시작하세요.`;
     }
 
-    return `${runtimePreset.modeLabel} 서버 오류: ${rawMessage}\n\n설정에서 endpoint와 서버 실행 상태를 확인하세요.`;
+    return `고속 로컬 서버 오류: ${rawMessage}\n\n설정에서 endpoint와 서버 실행 상태를 확인하세요.`;
   }
 
   return `로컬 AI 오류: ${rawMessage}\n\n설정에서 모델 파일, 토크나이저, CPU 가속 상태를 확인해주세요.`;
@@ -344,9 +390,13 @@ export const localAiStateHelp = (status?: LocalAiStatus | null): string => {
     if (status.mtpReachable == null) {
       return `${preset.modeLabel} 로컬 서버 연결 상태를 확인하고 있습니다.`;
     }
-    return status.mtpDraftModel
-      ? `VDI 내부 로컬 추론 서버로 스트리밍합니다. Draft 설정: ${status.mtpDraftModel}`
-      : `${preset.modeLabel} 로컬 추론 서버로 스트리밍합니다. Drafter는 서버 실행 옵션에서 설정됩니다.`;
+    if (status.runtimeCapabilities?.mtpVerified) {
+      return `MTP 활성: 대상 모델과 보조 모델(${status.mtpDraftModel})이 모두 검증되었습니다.`;
+    }
+    if (status.mtpDraftModel) {
+      return `고속 로컬 서버로 스트리밍합니다. 보조 모델 ${status.mtpDraftModel}은 아직 검증되지 않아 MTP로 표시하지 않습니다.`;
+    }
+    return `${preset.modeLabel}로 로컬 스트리밍합니다.`;
   }
 
   switch (status.state) {
@@ -388,6 +438,6 @@ export const localAiModelLabel = (status?: LocalAiStatus | null): string => {
 };
 
 export const isLocalAiReady = (status?: LocalAiStatus | null): boolean => {
-  if (status?.mtpConfigured) return status.mtpReachable === true;
+  if (status?.runtimeCapabilities?.openAiCompatible || status?.mtpConfigured) return status.mtpReachable === true;
   return status?.state === 'loaded';
 };

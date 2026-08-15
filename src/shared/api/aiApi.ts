@@ -23,8 +23,8 @@ export const tauriAiApi: AiApi = {
   getStatus: () => invoke<LocalAiStatus>('local_ai_status'),
   loadModel: () => invoke<LocalAiStatus>('local_ai_load'),
   saveRuntimeConfig: (config) => invoke('local_ai_save_runtime_config', { config }),
-  generate: ({ requestId, request, useMtp }) => invoke<LocalAiGenerateResponse>(
-    useMtp ? 'local_ai_generate_mtp_stream' : 'local_ai_generate_stream',
+  generate: ({ requestId, request, useServer }) => invoke<LocalAiGenerateResponse>(
+    useServer ? 'local_ai_generate_mtp_stream' : 'local_ai_generate_stream',
     { requestId, request },
   ),
   cancel: (requestId) => invoke<void>('local_ai_cancel', { requestId }),
@@ -33,4 +33,3 @@ export const tauriAiApi: AiApi = {
     (event) => listener(event.payload),
   ),
 };
-

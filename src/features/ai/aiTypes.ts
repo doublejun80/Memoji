@@ -19,7 +19,7 @@ export interface AiGenerateOptions {
 export interface AiGenerationRequest {
   requestId: string;
   request: LocalAiGenerateRequest;
-  useMtp: boolean;
+  useServer: boolean;
 }
 
 export interface AiGenerationCallbacks {

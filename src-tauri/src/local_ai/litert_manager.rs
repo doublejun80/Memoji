@@ -1,8 +1,9 @@
+use rand::{rngs::OsRng, RngCore};
 use serde::Serialize;
 use std::{
     env,
     fs::{File, OpenOptions},
-    net::{SocketAddr, TcpStream},
+    net::{SocketAddr, TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
@@ -30,6 +31,9 @@ struct LiteRtManagerInner {
 struct LiteRtProcessState {
     child: Option<Child>,
     last_error: Option<String>,
+    port: Option<u16>,
+    auth_token: String,
+    auth_enforced: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +70,12 @@ pub struct LiteRtManagedStatus {
     pub model_path: Option<String>,
     pub log_path: String,
     pub last_error: Option<String>,
+    pub endpoint: Option<String>,
+    pub port: Option<u16>,
+    pub process_id: Option<u32>,
+    pub session_isolated: bool,
+    pub auth_configured: bool,
+    pub auth_enforced: bool,
 }
 
 impl LiteRtManager {
@@ -79,6 +89,9 @@ impl LiteRtManager {
                 process: Mutex::new(LiteRtProcessState {
                     child: None,
                     last_error: None,
+                    port: None,
+                    auth_token: session_token(),
+                    auth_enforced: false,
                 }),
                 log_path,
             }),
@@ -86,10 +99,6 @@ impl LiteRtManager {
     }
 
     pub fn ensure_started(&self) -> Result<bool, String> {
-        if endpoint_reachable() {
-            return Ok(false);
-        }
-
         let layout =
             self.inner.layout.as_ref().ok_or_else(|| {
                 "VDI용 LiteRT 런타임 또는 Gemma 모델을 찾지 못했습니다.".to_string()
@@ -115,6 +124,9 @@ impl LiteRtManager {
             }
         }
 
+        let port = choose_session_port()?;
+        let auth_enforced = runtime_supports_auth();
+
         let (stdout, stderr) = open_log_files(&self.inner.log_path)?;
         let mut command = layout.command();
         command
@@ -122,11 +134,15 @@ impl LiteRtManager {
             .arg("--host")
             .arg(DEFAULT_HOST)
             .arg("--port")
-            .arg(DEFAULT_PORT.to_string())
+            .arg(port.to_string())
             .env("LITERT_LM_DIR", &layout.registry_dir)
+            .env("MEMOJI_RUNTIME_AUTH_TOKEN", &state.auth_token)
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr));
+        if auth_enforced {
+            command.arg("--api-key").arg(&state.auth_token);
+        }
 
         #[cfg(target_os = "windows")]
         {
@@ -144,6 +160,8 @@ impl LiteRtManager {
                 );
                 state.child = Some(child);
                 state.last_error = None;
+                state.port = Some(port);
+                state.auth_enforced = auth_enforced;
                 Ok(true)
             }
             Err(error) => {
@@ -157,12 +175,19 @@ impl LiteRtManager {
     pub fn status(&self) -> LiteRtManagedStatus {
         let mut process_running = false;
         let last_error;
+        let mut port = None;
+        let mut process_id = None;
+        let mut auth_configured = false;
+        let mut auth_enforced = false;
 
         match self.inner.process.lock() {
             Ok(mut state) => {
                 if let Some(child) = state.child.as_mut() {
                     match child.try_wait() {
-                        Ok(None) => process_running = true,
+                        Ok(None) => {
+                            process_running = true;
+                            process_id = Some(child.id());
+                        }
                         Ok(Some(status)) => {
                             state.last_error =
                                 Some(format!("LiteRT-LM 서버가 종료되었습니다: {status}"));
@@ -176,6 +201,9 @@ impl LiteRtManager {
                     }
                 }
                 last_error = state.last_error.clone();
+                port = state.port;
+                auth_configured = !state.auth_token.is_empty();
+                auth_enforced = state.auth_enforced;
             }
             Err(error) => last_error = Some(error.to_string()),
         }
@@ -186,13 +214,30 @@ impl LiteRtManager {
             bundled: layout.is_some_and(|layout| layout.bundled),
             model_available: layout.is_some_and(|layout| layout.model_path.is_file()),
             process_running,
-            endpoint_reachable: endpoint_reachable(),
+            endpoint_reachable: port.is_some_and(endpoint_reachable_on),
             source: layout.map(|layout| layout.source.clone()),
             registry_path: layout.map(|layout| layout.registry_dir.to_string_lossy().to_string()),
             model_path: layout.map(|layout| layout.model_path.to_string_lossy().to_string()),
             log_path: self.inner.log_path.to_string_lossy().to_string(),
             last_error,
+            endpoint: port.map(completion_endpoint),
+            port,
+            process_id,
+            session_isolated: port.is_some_and(|value| value != DEFAULT_PORT),
+            auth_configured,
+            auth_enforced,
         }
+    }
+
+    pub fn apply_session_config(&self, mut config: super::MtpConfig) -> super::MtpConfig {
+        let Ok(state) = self.inner.process.lock() else {
+            return config;
+        };
+        if let Some(port) = state.port {
+            config.endpoint = completion_endpoint(port);
+        }
+        config.api_key = state.auth_enforced.then(|| state.auth_token.clone());
+        config
     }
 
     pub fn stop(&self) {
@@ -376,9 +421,37 @@ fn model_path(registry_dir: &Path) -> PathBuf {
     registry_dir.join("models").join(MODEL_ID).join(MODEL_FILE)
 }
 
-fn endpoint_reachable() -> bool {
-    let address = SocketAddr::from(([127, 0, 0, 1], DEFAULT_PORT));
+fn endpoint_reachable_on(port: u16) -> bool {
+    let address = SocketAddr::from(([127, 0, 0, 1], port));
     TcpStream::connect_timeout(&address, Duration::from_millis(120)).is_ok()
+}
+
+fn choose_session_port() -> Result<u16, String> {
+    if TcpListener::bind((DEFAULT_HOST, DEFAULT_PORT)).is_ok() {
+        return Ok(DEFAULT_PORT);
+    }
+    let listener = TcpListener::bind((DEFAULT_HOST, 0))
+        .map_err(|error| format!("로컬 AI 세션 포트를 확보하지 못했습니다: {error}"))?;
+    listener
+        .local_addr()
+        .map(|address| address.port())
+        .map_err(|error| format!("로컬 AI 세션 포트를 확인하지 못했습니다: {error}"))
+}
+
+fn completion_endpoint(port: u16) -> String {
+    format!("http://{DEFAULT_HOST}:{port}/v1/chat/completions")
+}
+
+fn session_token() -> String {
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn runtime_supports_auth() -> bool {
+    env::var("MEMOJI_LITERT_AUTH_SUPPORTED")
+        .ok()
+        .is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
 }
 
 fn open_log_files(path: &Path) -> Result<(File, File), String> {
@@ -417,6 +490,15 @@ mod tests {
     fn endpoint_probe_is_loopback_only() {
         let address = SocketAddr::from(([127, 0, 0, 1], DEFAULT_PORT));
         assert!(address.ip().is_loopback());
+        assert!(completion_endpoint(DEFAULT_PORT).starts_with("http://127.0.0.1:"));
+    }
+
+    #[test]
+    fn session_tokens_are_random_and_not_logged_in_status() {
+        let first = session_token();
+        let second = session_token();
+        assert_eq!(first.len(), 64);
+        assert_ne!(first, second);
     }
 
     #[test]

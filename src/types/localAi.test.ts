@@ -38,7 +38,7 @@ assert.deepEqual(configFromLocalAiRuntimePreset('litert_lm'), {
   draftModel: undefined,
 });
 
-assert.equal(findLocalAiRuntimePreset('litert_lm').modeLabel, 'LiteRT-LM');
+assert.equal(findLocalAiRuntimePreset('litert_lm').modeLabel, '고속 로컬 서버');
 assert.equal(findLocalAiRuntimePreset('missing' as never).id, 'litert_lm');
 assert.equal(runtimeKindFromLocalAiConfig(null), 'litert_lm');
 assert.equal(
@@ -77,6 +77,11 @@ assert.equal(
     mtpConfigured: true,
     mtpModel: 'gemma-4-E2B-it-litert-lm',
     mtpRuntimeKind: 'litert_lm',
+    runtimeCapabilities: {
+      family: 'lite_rt', localOnly: true, inProcess: false, streaming: true,
+      openAiCompatible: true, managedProcess: true, targetModelVerified: true,
+      assistantModelVerified: false, mtpVerified: false, authEnforced: false,
+    },
     modelExists: true,
     tokenizerExists: true,
     contextSize: 2048,
@@ -85,7 +90,20 @@ assert.equal(
     avx512RuntimeReady: false,
     avx512Build: false,
   }),
-  'LiteRT-LM'
+  '고속 로컬 서버'
+);
+
+assert.equal(
+  localAiRuntimeBadgeLabel({
+    state: 'loaded', modelPath: '', tokenizerPath: '', modelExists: true, tokenizerExists: true,
+    contextSize: 2048, cpuFeatures: {}, compiledFeatures: {}, avx512RuntimeReady: false, avx512Build: false,
+    runtimeCapabilities: {
+      family: 'lite_rt', localOnly: true, inProcess: false, streaming: true,
+      openAiCompatible: true, managedProcess: true, targetModelVerified: true,
+      assistantModelVerified: true, mtpVerified: true, authEnforced: true,
+    },
+  }),
+  'MTP 활성'
 );
 
 assert.equal(
@@ -108,5 +126,5 @@ assert.equal(
       avx512Build: false,
     }
   ),
-  'LiteRT-LM 서버가 응답하지 않습니다.\n\nhttp://127.0.0.1:9379/v1/chat/completions 연결을 자동으로 복구하는 중입니다. 계속 실패하면 설정에서 내장 Gemma 서버를 시작하세요.'
+  '고속 로컬 서버가 응답하지 않습니다.\n\nhttp://127.0.0.1:9379/v1/chat/completions 연결을 자동으로 복구하는 중입니다. 계속 실패하면 설정에서 내장 Gemma 서버를 시작하세요.'
 );

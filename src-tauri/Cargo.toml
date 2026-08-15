@@ -35,6 +35,8 @@ candle-transformers = "0.10.2"
 tokenizers = { version = "0.22.0", default-features = false, features = ["onig"] }
 zip = { version = "7.2.0", default-features = false }
 sha2 = "0.10"
+async-trait = "0.1"
+rand = "0.8"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2.0"

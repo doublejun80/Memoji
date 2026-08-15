@@ -1,14 +1,17 @@
+pub mod ai;
 mod calendar;
 mod commands;
 mod database;
 mod db;
 mod domain;
 mod indexing;
-mod local_ai;
+pub mod local_ai;
 mod search;
 mod services;
 mod tasks;
 
+use ai::metrics::{MtpMetrics, RuntimeMetrics};
+use ai::runtime::capabilities::RuntimeCapabilities;
 use commands::calendar::{
     delete_calendar_event, export_calendar_ics, import_calendar_ics, list_calendar_items,
     save_calendar_event,
@@ -40,6 +43,7 @@ struct AppState {
     local_ai: LocalAiState,
     active_ai_requests: ActiveRequestRegistry,
     litert_manager: LiteRtManager,
+    ai_runtime_metrics: Mutex<RuntimeMetrics>,
     /// 시작할 때 결정한 경로를 모든 명령이 공유해야 일시적인 권한/네트워크
     /// 변화로 열린 DB와 가져오기·내보내기 경로가 갈라지지 않는다.
     data_dir: PathBuf,
@@ -580,17 +584,44 @@ fn export_pages_zip(state: State<AppState>) -> Result<PagesZipExportResult, Stri
 
 #[tauri::command]
 async fn local_ai_status(state: State<'_, AppState>) -> Result<LocalAiStatus, String> {
-    let mtp_config = resolve_mtp_config(&state)?;
-    let mut status = state.local_ai.status_with_mtp_config(mtp_config.clone());
-
-    if let Some(config) = mtp_config {
-        if should_manage_litert(&config) {
+    let mut mtp_config = resolve_mtp_config(&state)?;
+    if let Some(config) = mtp_config.as_mut() {
+        if should_manage_litert(config) {
             if let Err(error) = state.litert_manager.ensure_started() {
                 log::warn!("Managed LiteRT-LM start skipped: {error}");
+            } else {
+                *config = state.litert_manager.apply_session_config(config.clone());
             }
         }
-        match local_ai::probe_mtp_endpoint(&config).await {
-            Ok(()) => status.mtp_reachable = Some(true),
+    }
+    let mut status = state.local_ai.status_with_mtp_config(mtp_config.clone());
+    if mtp_config.is_some() {
+        if let Ok(metrics) = state.ai_runtime_metrics.lock() {
+            status.runtime_metrics = metrics.clone();
+        }
+    }
+
+    if let Some(config) = mtp_config {
+        if status.runtime_metrics.runtime_version.is_none() {
+            status.runtime_metrics.runtime_version = Some(match config.runtime_kind {
+                LocalAiRuntimeKind::LitertLm => "litert-lm".to_string(),
+                LocalAiRuntimeKind::LlamaCpp => "openai-compatible-v1".to_string(),
+                LocalAiRuntimeKind::BuiltinCandle => "candle".to_string(),
+            });
+        }
+        match local_ai::probe_openai_compatible_endpoint(&config).await {
+            Ok(probe) => {
+                status.mtp_reachable = Some(true);
+                status.runtime_capabilities =
+                    RuntimeCapabilities::for_loopback(&config, &probe.models);
+                if should_manage_litert(&config) {
+                    status.runtime_capabilities.auth_enforced =
+                        state.litert_manager.status().auth_enforced;
+                }
+                if probe.runtime_version.is_some() {
+                    status.runtime_metrics.runtime_version = probe.runtime_version;
+                }
+            }
             Err(error) => {
                 status.mtp_reachable = Some(false);
                 status.mtp_probe_error = Some(error.to_string().chars().take(240).collect());
@@ -684,9 +715,12 @@ async fn local_ai_test_runtime_config(
     let mtp_config = config
         .to_mtp_config()?
         .ok_or_else(|| "고속 로컬 서버를 먼저 켜세요.".to_string())?;
-    if should_manage_litert(&mtp_config) {
+    let mtp_config = if should_manage_litert(&mtp_config) {
         state.litert_manager.ensure_started()?;
-    }
+        state.litert_manager.apply_session_config(mtp_config)
+    } else {
+        mtp_config
+    };
     let started = std::time::Instant::now();
     let response = local_ai::generate_mtp_stream(
         mtp_config,
@@ -807,17 +841,35 @@ async fn local_ai_generate_mtp_stream(
 
     let result = async {
         cancellation_checkpoint(&cancellation).map_err(|error| error.to_string())?;
-        let config = resolve_mtp_config(&state)?
+        let mut config = resolve_mtp_config(&state)?
             .ok_or_else(|| "고속 로컬 서버가 설정되어 있지 않습니다.".to_string())?;
+        if should_manage_litert(&config) {
+            state.litert_manager.ensure_started()?;
+            config = state.litert_manager.apply_session_config(config);
+        }
         cancellation_checkpoint(&cancellation).map_err(|error| error.to_string())?;
 
+        let probe = local_ai::probe_openai_compatible_endpoint(&config)
+            .await
+            .ok();
+        let capabilities = RuntimeCapabilities::for_loopback(
+            &config,
+            &probe
+                .as_ref()
+                .map(|value| value.models.clone())
+                .unwrap_or_default(),
+        );
+        let started = std::time::Instant::now();
+        let mut ttft_ms = None;
+
         let response = local_ai::generate_mtp_stream(
-            config,
+            config.clone(),
             request_id.clone(),
             request,
             cancellation.clone(),
             |chunk| {
                 cancellation_checkpoint(&stream_cancellation)?;
+                ttft_ms.get_or_insert(started.elapsed().as_millis());
                 stream_window
                     .emit("local-ai-generate-chunk", chunk)
                     .map_err(|error| local_ai::LocalAiError::GenerateFailed(error.to_string()))?;
@@ -826,6 +878,30 @@ async fn local_ai_generate_mtp_stream(
         )
         .await
         .map_err(|error| error.to_string())?;
+
+        let elapsed_ms = started.elapsed().as_millis();
+        if let Ok(mut metrics) = state.ai_runtime_metrics.lock() {
+            *metrics = RuntimeMetrics {
+                runtime_version: probe.and_then(|value| value.runtime_version).or_else(|| {
+                    Some(match config.runtime_kind {
+                        LocalAiRuntimeKind::LitertLm => "litert-lm".to_string(),
+                        LocalAiRuntimeKind::LlamaCpp => "openai-compatible-v1".to_string(),
+                        LocalAiRuntimeKind::BuiltinCandle => "candle".to_string(),
+                    })
+                }),
+                ttft_ms,
+                prefill_tokens: Some(response.prompt_tokens),
+                decode_tokens: Some(response.generated_tokens),
+                decode_ms: Some(elapsed_ms.saturating_sub(ttft_ms.unwrap_or(0))),
+                mtp: capabilities.mtp_verified.then(|| MtpMetrics {
+                    target_model: config.model.clone(),
+                    assistant_model: config.draft_model.clone().unwrap_or_default(),
+                    accepted_draft_tokens: None,
+                    proposed_draft_tokens: None,
+                }),
+                ..RuntimeMetrics::default()
+            };
+        }
 
         cancellation_checkpoint(&cancellation).map_err(|error| error.to_string())?;
         window
@@ -975,6 +1051,7 @@ pub fn run() {
                 local_ai: LocalAiState::new(LocalAiConfig::from_resource_dir(resource_dir)),
                 active_ai_requests: ActiveRequestRegistry::default(),
                 litert_manager,
+                ai_runtime_metrics: Mutex::new(RuntimeMetrics::default()),
                 data_dir,
             });
 

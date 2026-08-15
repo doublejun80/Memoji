@@ -4,10 +4,13 @@ mod mtp_client;
 mod sampler;
 mod tokenizer;
 
+use crate::ai::metrics::RuntimeMetrics;
+use crate::ai::runtime::capabilities::RuntimeCapabilities;
 use gemma4::Gemma4Runtime;
 pub use litert_manager::{LiteRtManagedStatus, LiteRtManager};
 pub use mtp_client::{
-    generate_mtp_stream, probe_mtp_endpoint, LocalAiRuntimeKind, MtpConfig, DEFAULT_MTP_MODEL,
+    endpoint_is_vdi_local, generate_mtp_stream, probe_mtp_endpoint,
+    probe_openai_compatible_endpoint, LocalAiRuntimeKind, MtpConfig, DEFAULT_MTP_MODEL,
 };
 use sampler::SamplingConfig;
 use serde::{Deserialize, Serialize};
@@ -121,6 +124,8 @@ pub struct LocalAiStatus {
     pub tokenizer_file_size_bytes: Option<u64>,
     pub last_load_ms: Option<u128>,
     pub last_generation: Option<LocalAiGenerationStats>,
+    pub runtime_capabilities: RuntimeCapabilities,
+    pub runtime_metrics: RuntimeMetrics,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -173,6 +178,10 @@ pub struct LocalAiGenerationStats {
     pub tokens_per_second: f64,
     pub max_new_tokens: usize,
     pub mode: String,
+    pub ttft_ms: Option<u128>,
+    pub prefill_ms: Option<u128>,
+    pub decode_ms: Option<u128>,
+    pub peak_rss_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -431,6 +440,7 @@ impl LocalAiState {
             max_new_tokens,
             started.elapsed().as_millis(),
             "local",
+            Some(started.elapsed().as_millis()),
         ));
 
         Ok(response)
@@ -439,7 +449,7 @@ impl LocalAiState {
     pub fn generate_with_callback<F>(
         &self,
         request: LocalAiGenerateRequest,
-        on_token: F,
+        mut on_token: F,
     ) -> Result<LocalAiGenerateResponse, LocalAiError>
     where
         F: FnMut(String, usize) -> Result<(), LocalAiError>,
@@ -454,12 +464,17 @@ impl LocalAiState {
 
         let max_new_tokens = sampling.max_new_tokens;
         let started = Instant::now();
-        let response = runtime.generate_with_callback(request, sampling, on_token)?;
+        let mut ttft_ms = None;
+        let response = runtime.generate_with_callback(request, sampling, |text, generated| {
+            ttft_ms.get_or_insert(started.elapsed().as_millis());
+            on_token(text, generated)
+        })?;
         inner.last_generation = Some(generation_stats(
             &response,
             max_new_tokens,
             started.elapsed().as_millis(),
             "local_stream",
+            ttft_ms,
         ));
 
         Ok(response)
@@ -542,6 +557,47 @@ impl LocalAiState {
         };
         let cpu_features = runtime_cpu_features();
         let compiled_features = compiled_cpu_features();
+        let runtime_capabilities = mtp_config
+            .as_ref()
+            .map(RuntimeCapabilities::configured_loopback)
+            .unwrap_or_else(RuntimeCapabilities::candle);
+        let runtime_metrics = RuntimeMetrics {
+            runtime_version: Some(match runtime_capabilities.family {
+                crate::ai::runtime::capabilities::RuntimeFamily::Candle => {
+                    format!("candle-{}", env!("CARGO_PKG_VERSION"))
+                }
+                crate::ai::runtime::capabilities::RuntimeFamily::LiteRt => "litert-lm".to_string(),
+                crate::ai::runtime::capabilities::RuntimeFamily::OpenAiCompatibleLoopback => {
+                    "openai-compatible-v1".to_string()
+                }
+            }),
+            load_ms: inner.last_load_ms,
+            ttft_ms: inner
+                .last_generation
+                .as_ref()
+                .and_then(|stats| stats.ttft_ms),
+            prefill_tokens: inner
+                .last_generation
+                .as_ref()
+                .map(|stats| stats.prompt_tokens),
+            prefill_ms: inner
+                .last_generation
+                .as_ref()
+                .and_then(|stats| stats.prefill_ms),
+            decode_tokens: inner
+                .last_generation
+                .as_ref()
+                .map(|stats| stats.generated_tokens),
+            decode_ms: inner
+                .last_generation
+                .as_ref()
+                .and_then(|stats| stats.decode_ms),
+            peak_rss_bytes: inner
+                .last_generation
+                .as_ref()
+                .and_then(|stats| stats.peak_rss_bytes),
+            mtp: None,
+        };
         LocalAiStatus {
             state,
             model_path: self.config.model_path.to_string_lossy().into_owned(),
@@ -569,6 +625,8 @@ impl LocalAiState {
             tokenizer_file_size_bytes: file_size(&self.config.tokenizer_path),
             last_load_ms: inner.last_load_ms,
             last_generation: inner.last_generation.clone(),
+            runtime_capabilities,
+            runtime_metrics,
         }
     }
 }
@@ -653,6 +711,7 @@ fn generation_stats(
     max_new_tokens: usize,
     elapsed_ms: u128,
     mode: &str,
+    ttft_ms: Option<u128>,
 ) -> LocalAiGenerationStats {
     LocalAiGenerationStats {
         elapsed_ms,
@@ -661,6 +720,10 @@ fn generation_stats(
         tokens_per_second: tokens_per_second(response.generated_tokens, elapsed_ms),
         max_new_tokens,
         mode: mode.to_string(),
+        ttft_ms,
+        prefill_ms: None,
+        decode_ms: Some(elapsed_ms.saturating_sub(ttft_ms.unwrap_or(0))),
+        peak_rss_bytes: None,
     }
 }
 
@@ -688,7 +751,7 @@ fn speed_recommendation(tokens_per_second: f64) -> &'static str {
     if tokens_per_second >= 3.0 {
         "내장 로컬 모델로 짧은 답변은 사용 가능합니다. 답변 토큰을 64-96으로 유지하세요."
     } else {
-        "VDI CPU에서 내장 모델이 느립니다. 답변 토큰을 64 이하로 쓰거나, VDI 내부 localhost MTP/추론 서버 구성을 검토하세요."
+        "VDI CPU에서 내장 모델이 느립니다. 답변 토큰을 64 이하로 쓰거나, VDI 내부 고속 로컬 서버 구성을 검토하세요."
     }
 }
 
@@ -741,9 +804,9 @@ mod tests {
     }
 
     #[test]
-    fn speed_recommendation_marks_slow_vdi_for_mtp_review() {
+    fn speed_recommendation_marks_slow_vdi_for_server_review() {
         assert_eq!(speed_label(0.5), "매우 느림");
-        assert!(speed_recommendation(0.5).contains("MTP"));
+        assert!(speed_recommendation(0.5).contains("고속 로컬 서버"));
         assert_eq!(speed_label(3.0), "보통");
     }
 

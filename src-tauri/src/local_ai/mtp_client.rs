@@ -128,6 +128,12 @@ pub fn endpoint_is_vdi_local(endpoint: &str) -> bool {
         .unwrap_or(false)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenAiCompatibleProbe {
+    pub models: Vec<String>,
+    pub runtime_version: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct ChatCompletionRequest {
     model: String,
@@ -207,7 +213,9 @@ fn decode_sse_line(bytes: &[u8]) -> Result<String, LocalAiError> {
     std::str::from_utf8(bytes)
         .map(str::to_owned)
         .map_err(|error| {
-            LocalAiError::GenerateFailed(format!("MTP stream returned invalid UTF-8: {error}"))
+            LocalAiError::GenerateFailed(format!(
+                "Local server stream returned invalid UTF-8: {error}"
+            ))
         })
 }
 
@@ -224,13 +232,13 @@ fn shared_mtp_client() -> Result<&'static reqwest::Client, LocalAiError> {
         })
         .as_ref()
         .map_err(|error| {
-            LocalAiError::GenerateFailed(format!("failed to build MTP HTTP client: {error}"))
+            LocalAiError::GenerateFailed(format!("failed to build loopback HTTP client: {error}"))
         })
 }
 
 fn models_endpoint(endpoint: &str) -> Result<reqwest::Url, LocalAiError> {
     let mut url = reqwest::Url::parse(endpoint).map_err(|error| {
-        LocalAiError::GenerateFailed(format!("invalid MTP endpoint URL: {error}"))
+        LocalAiError::GenerateFailed(format!("invalid loopback endpoint URL: {error}"))
     })?;
     url.set_path("/v1/models");
     url.set_query(None);
@@ -238,7 +246,9 @@ fn models_endpoint(endpoint: &str) -> Result<reqwest::Url, LocalAiError> {
     Ok(url)
 }
 
-pub async fn probe_mtp_endpoint(config: &MtpConfig) -> Result<(), LocalAiError> {
+pub async fn probe_openai_compatible_endpoint(
+    config: &MtpConfig,
+) -> Result<OpenAiCompatibleProbe, LocalAiError> {
     let client = shared_mtp_client()?;
     let mut builder = client
         .get(models_endpoint(&config.endpoint)?)
@@ -248,16 +258,15 @@ pub async fn probe_mtp_endpoint(config: &MtpConfig) -> Result<(), LocalAiError> 
         builder = builder.header(AUTHORIZATION, format!("Bearer {api_key}"));
     }
 
-    let response = builder
-        .send()
-        .await
-        .map_err(|error| LocalAiError::GenerateFailed(format!("MTP probe failed: {error}")))?;
+    let response = builder.send().await.map_err(|error| {
+        LocalAiError::GenerateFailed(format!("Local server probe failed: {error}"))
+    })?;
 
     if !response.status().is_success() {
         let status = response.status();
         let body = sanitize_error_body(&response.text().await.unwrap_or_default());
         return Err(LocalAiError::GenerateFailed(format!(
-            "MTP probe returned {status}: {body}"
+            "Local server probe returned {status}: {body}"
         )));
     }
 
@@ -272,16 +281,23 @@ pub async fn probe_mtp_endpoint(config: &MtpConfig) -> Result<(), LocalAiError> 
     }
 
     let models: ModelsResponse = response.json().await.map_err(|error| {
-        LocalAiError::GenerateFailed(format!("MTP models response is invalid: {error}"))
+        LocalAiError::GenerateFailed(format!("Local server models response is invalid: {error}"))
     })?;
     if !models.data.iter().any(|model| model.id == config.model) {
         return Err(LocalAiError::GenerateFailed(format!(
-            "MTP server is reachable, but configured model '{}' is not registered",
+            "Local server is reachable, but configured model '{}' is not registered",
             config.model
         )));
     }
 
-    Ok(())
+    Ok(OpenAiCompatibleProbe {
+        models: models.data.into_iter().map(|model| model.id).collect(),
+        runtime_version: None,
+    })
+}
+
+pub async fn probe_mtp_endpoint(config: &MtpConfig) -> Result<(), LocalAiError> {
+    probe_openai_compatible_endpoint(config).await.map(|_| ())
 }
 
 pub async fn generate_mtp_stream<F>(
@@ -328,7 +344,7 @@ where
         let status = response.status();
         let body = sanitize_error_body(&response.text().await.unwrap_or_default());
         return Err(LocalAiError::GenerateFailed(format!(
-            "MTP endpoint returned {status}: {body}"
+            "Local server endpoint returned {status}: {body}"
         )));
     }
 
@@ -389,7 +405,7 @@ where
         if reached_eof {
             if !received_done && !received_finish_reason {
                 return Err(LocalAiError::GenerateFailed(
-                    "MTP stream ended before a completion marker was received".to_string(),
+                    "Local server stream ended before a completion marker was received".to_string(),
                 ));
             }
             break;

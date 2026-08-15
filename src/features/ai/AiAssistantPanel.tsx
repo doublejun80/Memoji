@@ -180,7 +180,9 @@ export function AiAssistantPanel({
     conversation.setInput('');
     void stream.generate({
       requestId,
-      useMtp: Boolean(runtime.status?.mtpConfigured),
+      useServer: Boolean(
+        runtime.status?.runtimeCapabilities?.openAiCompatible || runtime.status?.mtpConfigured,
+      ),
       request: {
         prompt,
         pageContext: options.includePageContext
@@ -274,7 +276,9 @@ export function AiAssistantPanel({
   const selectedRuntimeKind = runtimeKindFromLocalAiStatus(status);
   const selectedRuntimePreset = findLocalAiRuntimePreset(selectedRuntimeKind);
   const selectedRuntimeIsPublic = LOCAL_AI_RUNTIME_PRESETS.some(({ id }) => id === selectedRuntimeKind);
-  const showLoadButton = !status?.mtpConfigured && ['not_loaded', 'error', 'unsupported'].includes(status?.state || '');
+  const showLoadButton = !status?.runtimeCapabilities?.openAiCompatible
+    && !status?.mtpConfigured
+    && ['not_loaded', 'error', 'unsupported'].includes(status?.state || '');
   const showStatusCard = !isLocalAiReady(status) || Boolean(runtime.statusError) || runtime.isLoadingModel;
 
   return (
