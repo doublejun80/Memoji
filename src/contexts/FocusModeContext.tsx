@@ -37,11 +37,6 @@ export const FocusModeProvider: React.FC<FocusModeProviderProps> = ({ children }
       if (e.key === 'Escape' && isFocusMode) {
         exitFocusMode();
       }
-      // F11 키로 집중 모드 토글
-      if (e.key === 'F11') {
-        e.preventDefault();
-        toggleFocusMode();
-      }
     };
 
     document.addEventListener('keydown', handleKeyDown);

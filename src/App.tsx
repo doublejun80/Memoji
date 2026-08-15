@@ -1,7 +1,6 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { MarkdownEditor, MarkdownEditorHandle } from './components/MarkdownEditor';
-import { TopBar } from './components/TopBar';
 import { SearchModal } from './components/SearchModal';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { SettingsModal } from './components/SettingsModal';
@@ -19,6 +18,11 @@ import { toast } from 'sonner';
 import { useWorkspaceController } from './app/useWorkspaceController';
 import { AppShell } from './app/AppShell';
 import { WorkspaceLayout } from './workspace/WorkspaceLayout';
+import { TopCommandBar } from './workspace/TopCommandBar';
+import { useTheme } from './contexts/ThemeContext';
+import { createCommandRegistry } from './commands/commandRegistry';
+import type { CommandContext } from './commands/types';
+import { bindCommandKeyboard } from './app/keyboardBindings';
 
 interface CreatePageOptions {
   title: string;
@@ -41,6 +45,8 @@ const readKeyboardShortcuts = (): any[] => {
   }
 };
 
+const APP_COMMANDS = createCommandRegistry();
+
 // 내부 App 컴포넌트 (FocusMode 컨텍스트 사용)
 function AppContent() {
   const [pages, setPages] = useState<Page[]>([]);
@@ -52,15 +58,27 @@ function AppContent() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [appTitle, setAppTitle] = useState<string>('Memoji');
   const [startupError, setStartupError] = useState<string | null>(null);
-  const { isFocusMode } = useFocusMode();
+  const { isFocusMode, toggleFocusMode } = useFocusMode();
+  const { setTheme, actualTheme } = useTheme();
   const {
     state: workspaceUi,
     togglePanel,
     setPanelOpen,
     setPanelWidth,
+    setLeftView,
+    setWorkspaceView,
+    setContextTab,
   } = useWorkspaceController();
   const pagesRef = useRef<Page[]>([]);
   const editorRef = useRef<MarkdownEditorHandle>(null);
+  const commandContextRef = useRef<CommandContext | null>(null);
+
+  useEffect(() => bindCommandKeyboard(APP_COMMANDS, () => {
+    if (!commandContextRef.current) {
+      throw new Error('Command context is not ready');
+    }
+    return commandContextRef.current;
+  }), []);
 
   useEffect(() => {
     if (!getEnvironment().isTauri) return;
@@ -134,61 +152,6 @@ function AppContent() {
         localStorage.setItem('keyboardShortcuts', JSON.stringify(updatedShortcuts));
       }
     }
-  }, []);
-
-  // 키보드 단축키 핸들러
-  useEffect(() => {
-    // localStorage에서 단축키 설정 불러오기
-    const getShortcutKey = (id: string, defaultKey: string): string => {
-      const shortcut = readKeyboardShortcuts().find((s: any) => s.id === id);
-      return shortcut?.currentKey || defaultKey;
-    };
-
-    // 단축키 문자열을 파싱하는 함수
-    const matchesShortcut = (e: KeyboardEvent, shortcutKey: string): boolean => {
-      const parts = shortcutKey.split('+').map(p => p.trim());
-      const hasCtrl = parts.includes('Ctrl');
-      const hasAlt = parts.includes('Alt');
-      const hasShift = parts.includes('Shift');
-      const key = parts.find(p => !['Ctrl', 'Alt', 'Shift', 'Cmd'].includes(p));
-
-      return (
-        e.ctrlKey === hasCtrl &&
-        e.altKey === hasAlt &&
-        e.shiftKey === hasShift &&
-        e.key.toLowerCase() === key?.toLowerCase()
-      );
-    };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // 검색 단축키
-      const searchKey = getShortcutKey('search', 'Ctrl+K');
-      if (matchesShortcut(e, searchKey)) {
-        e.preventDefault();
-        setIsSearchOpen(true);
-        return;
-      }
-
-      // 저장 단축키
-      const saveKey = getShortcutKey('save', 'Ctrl+S');
-      if (matchesShortcut(e, saveKey)) {
-        e.preventDefault();
-        void handleSave()
-          .then(() => toast.success('저장되었습니다.'))
-          .catch((error) => toast.error('저장하지 못했습니다: ' + String(error)));
-        return;
-      }
-
-      // 단축키 설정 열기 (고정)
-      if (e.ctrlKey && e.shiftKey && e.key === 'K') {
-        e.preventDefault();
-        setIsShortcutsOpen(true);
-        return;
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   const selectedDateKey = formatDateKey(selectedDate);
@@ -679,24 +642,76 @@ function AppContent() {
     }
   };
 
+  const openSettingsAfterSave = async () => {
+    try {
+      await handleSave();
+      setIsSettingsOpen(true);
+    } catch (error) {
+      toast.error('설정을 열기 전에 저장하지 못했습니다: ' + String(error));
+    }
+  };
+
+  commandContextRef.current = {
+    hasCurrentPage: Boolean(currentPage),
+    canUseAi: true,
+    createDailyPage: () => handleDailyPageCreate('새 페이지'),
+    quickCapture: () => {
+      const time = new Intl.DateTimeFormat('ko-KR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(new Date());
+      return handleDailyPageCreate(`빠른 메모 ${time}`);
+    },
+    setLeftView,
+    setWorkspaceView,
+    openAi: () => {
+      setContextTab('ai');
+      setPanelOpen('right', true);
+    },
+    summarizeCurrentPage: () => {
+      setContextTab('ai');
+      setPanelOpen('right', true);
+      window.dispatchEvent(new CustomEvent('memoji:ai-action', {
+        detail: { action: 'summarize-current' },
+      }));
+    },
+    saveDocument: async () => {
+      await handleSave();
+      toast.success('저장되었습니다.');
+    },
+    exportDocument: async () => {
+      await handleExport();
+      toast.success('파일이 다운로드되었습니다.');
+    },
+    openSettings: openSettingsAfterSave,
+    toggleFocus: toggleFocusMode,
+    togglePanel,
+    openCommandPalette: () => setIsSearchOpen(true),
+  };
+
   return (
     <AppShell
       focusMode={isFocusMode}
       topBar={!isFocusMode ? (
-        <TopBar
+        <TopCommandBar
+          workspaceName={appTitle}
+          leftOpen={workspaceUi.leftOpen}
+          rightOpen={workspaceUi.rightOpen}
+          saveState="saved"
+          runtimeState="로컬 AI"
+          onToggleLeft={() => togglePanel('left')}
+          onToggleRight={() => togglePanel('right')}
+          onOpenPalette={() => setIsSearchOpen(true)}
           onSave={handleSave}
-          onShortcutsOpen={() => setIsShortcutsOpen(true)}
-          onSettingsOpen={() => {
-            void handleSave()
-              .then(() => setIsSettingsOpen(true))
-              .catch((error) => toast.error('설정을 열기 전에 저장하지 못했습니다: ' + String(error)));
+          onExport={async () => {
+            await handleExport();
+            toast.success('파일이 다운로드되었습니다.');
           }}
-          onRightPanelToggle={() => togglePanel('right')}
-          isRightPanelOpen={workspaceUi.rightOpen}
-          onLeftPanelToggle={() => togglePanel('left')}
-          isLeftPanelOpen={workspaceUi.leftOpen}
-          appTitle={appTitle}
-          onExport={handleExport}
+          onOpenSettings={() => void openSettingsAfterSave()}
+          onOpenShortcuts={() => setIsShortcutsOpen(true)}
+          onToggleFocus={toggleFocusMode}
+          onToggleTheme={() => setTheme(actualTheme === 'dark' ? 'light' : 'dark')}
         />
       ) : undefined}
       notice={startupError ? (
