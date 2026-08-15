@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "verifiedAt": "2026-08-15T16:50:00Z",
+  "sourceRepository": "https://github.com/google-ai-edge/LiteRT-LM",
+  "defaultVersion": "0.13.1",
+  "candidateVersion": "0.16.0",
+  "decision": {
+    "status": "retain-baseline",
+    "reason": "0.16.0 has not completed the required Windows VDI model, EDR, restart, memory and performance matrix. It remains an explicitly pinned candidate."
+  },
+  "versions": {
+    "0.13.1": {
+      "role": "ga-default",
+      "release": {
+        "tag": "v0.13.1",
+        "publishedAt": "2026-06-03T20:52:11Z",
+        "url": "https://github.com/google-ai-edge/LiteRT-LM/releases/tag/v0.13.1"
+      },
+      "packages": {
+        "cli": {
+          "filename": "litert_lm-0.13.1-py3-none-any.whl",
+          "bytes": 60408,
+          "sha256": "2390a09693f3d728ecfad56119b326a9f9e302d2901392ff75b025040ca365b9",
+          "url": "https://files.pythonhosted.org/packages/21/44/cdf075a78547d6dc2b5a34776ab5bd65a6643283b97f7f8f62ca110eea2a/litert_lm-0.13.1-py3-none-any.whl"
+        },
+        "builder": {
+          "filename": "litert_lm_builder-0.13.0-py3-none-any.whl",
+          "bytes": 29421,
+          "sha256": "b3a46968a2bf49cd29059a30a76c0738ae0b90c39c7c1480db5060733321d757",
+          "url": "https://files.pythonhosted.org/packages/24/5c/6396a8994ebdf42a8cceb069f6e0014c578b67cd4d2b70ebba33e533d8f5/litert_lm_builder-0.13.0-py3-none-any.whl"
+        },
+        "api": {
+          "darwin-arm64": {
+            "filename": "litert_lm_api-0.13.1-py3-none-macosx_12_0_arm64.whl",
+            "bytes": 20352139,
+            "sha256": "4a1bb68dbf5a60af9ac5fe03331968a7b4e91779e721cb531e6b41e71f2a2d77",
+            "url": "https://files.pythonhosted.org/packages/58/ae/5d1e2862d14ad1b08bdbc3392574dde37b98a06f4efb5181d946766ec81c/litert_lm_api-0.13.1-py3-none-macosx_12_0_arm64.whl"
+          },
+          "win32-x64": {
+            "filename": "litert_lm_api-0.13.1-py3-none-win_amd64.whl",
+            "bytes": 26203707,
+            "sha256": "e2d6b03a9e38e17bebea9a74cc8a68553a05a5fee13a5b353be42209962ac9be",
+            "url": "https://files.pythonhosted.org/packages/8e/0f/8edfe4800c95e230928529e5c6f305646ce3b7f497bad745a54a8127a52e/litert_lm_api-0.13.1-py3-none-win_amd64.whl"
+          },
+          "linux-x64": {
+            "filename": "litert_lm_api-0.13.1-py3-none-manylinux_2_27_x86_64.whl",
+            "bytes": 44865394,
+            "sha256": "b981d55e057be9664f30670d5c1faa6e738ad516a2617dbdac10dc6b5b409cca",
+            "url": "https://files.pythonhosted.org/packages/36/27/bb0c2e084d59938bc12f960db50e7e8e056337ed286f31468aaa39bc9d9a/litert_lm_api-0.13.1-py3-none-manylinux_2_27_x86_64.whl"
+          },
+          "linux-arm64": {
+            "filename": "litert_lm_api-0.13.1-py3-none-manylinux_2_27_aarch64.whl",
+            "bytes": 42542393,
+            "sha256": "4092c4f7ad75fb23d83bc5b00a9aa6896a19d75f148515efeef0d079ba22ef74",
+            "url": "https://files.pythonhosted.org/packages/12/a7/c23db30dc19ad07a188eeeab48fd8d676554e8647dac6e9dbf62be0f82f1/litert_lm_api-0.13.1-py3-none-manylinux_2_27_aarch64.whl"
+          }
+        }
+      },
+      "cliContract": {
+        "commands": ["benchmark", "convert", "delete", "import", "list", "rename", "run", "serve"],
+        "serveOptions": ["--host", "--port", "--verbose"],
+        "defaultPort": 9379,
+        "authOption": null
+      }
+    },
+    "0.16.0": {
+      "role": "upgrade-candidate",
+      "release": {
+        "tag": "v0.16.0",
+        "publishedAt": "2026-08-11T18:25:33Z",
+        "url": "https://github.com/google-ai-edge/LiteRT-LM/releases/tag/v0.16.0"
+      },
+      "packages": {
+        "cli": {
+          "filename": "litert_lm-0.16.0-py3-none-any.whl",
+          "bytes": 79203,
+          "sha256": "ae9a14fcbb5c8f3e53652b89624bf4473df0f858257fa70a31425ded14d90d8b",
+          "url": "https://files.pythonhosted.org/packages/e3/33/8d631aaa3b539eb3d381d988339268a52521f3aad58416868aa764afa17c/litert_lm-0.16.0-py3-none-any.whl"
+        },
+        "builder": {
+          "filename": "litert_lm_builder-0.16.0-py3-none-any.whl",
+          "bytes": 36397,
+          "sha256": "57a47bec3775b4d2a57dc5973b72e930d2d8d2bc44cbfcafacf10210002f31c4",
+          "url": "https://files.pythonhosted.org/packages/47/89/106dc88446afc3ab45362a26b5ede21ea3ed8cda7ef604b7b9a5c2c13ff6/litert_lm_builder-0.16.0-py3-none-any.whl"
+        },
+        "api": {
+          "darwin-arm64": {
+            "filename": "litert_lm_api-0.16.0-py3-none-macosx_12_0_arm64.whl",
+            "bytes": 22049482,
+            "sha256": "6e7672708bd9e7b5133ef73e469b070da9c3ed6a544b314367fb6e56055f3fea",
+            "url": "https://files.pythonhosted.org/packages/84/34/61446ca8538ff6529cefb8615f3c71b46d3bde9b500f200ebbcdff7e6021/litert_lm_api-0.16.0-py3-none-macosx_12_0_arm64.whl"
+          },
+          "win32-x64": {
+            "filename": "litert_lm_api-0.16.0-py3-none-win_amd64.whl",
+            "bytes": 26147679,
+            "sha256": "c2f6a961a2f680b907f63ba6be46d46ee8e491f9345c4acd18dbbf8fe7ba8a33",
+            "url": "https://files.pythonhosted.org/packages/fc/76/8adac38aa8a0cbd433ef9fd6c0079531a58efe9a36ebd0f44825ba44b935/litert_lm_api-0.16.0-py3-none-win_amd64.whl"
+          },
+          "linux-x64": {
+            "filename": "litert_lm_api-0.16.0-py3-none-manylinux_2_27_x86_64.whl",
+            "bytes": 46835531,
+            "sha256": "a5d58ff8e1c14057d6a8c1f0333372bc685361e6311ea87bfa49fc131cb00a95",
+            "url": "https://files.pythonhosted.org/packages/1e/80/494be9edb8b851ae4a7b2065c0133426beb3608fa39f9454a0f823db8c76/litert_lm_api-0.16.0-py3-none-manylinux_2_27_x86_64.whl"
+          },
+          "linux-arm64": {
+            "filename": "litert_lm_api-0.16.0-py3-none-manylinux_2_27_aarch64.whl",
+            "bytes": 46085754,
+            "sha256": "5eb8c9faa5727730239591f8c912261ec7705512d5f30ec674586bc0005f2b00",
+            "url": "https://files.pythonhosted.org/packages/3a/07/fa43be00a7907dd0f9f2cfbcc9b1305198c1be6e5ef33b2604a622437915/litert_lm_api-0.16.0-py3-none-manylinux_2_27_aarch64.whl"
+          }
+        }
+      },
+      "githubAssets": [
+        {
+          "filename": "CLiteRTLM.xcframework.zip",
+          "bytes": 87659348,
+          "sha256": "4e0f683da07566ee79c143d2d58d387f77052b0e6a41562c969e5d2728fc9f4b",
+          "url": "https://github.com/google-ai-edge/LiteRT-LM/releases/download/v0.16.0/CLiteRTLM.xcframework.zip"
+        },
+        {
+          "filename": "CLiteRTLM_mac.xcframework.zip",
+          "bytes": 46379992,
+          "sha256": "3ae6c876abd74614b1869bfc40cb4d0b892981363564740268b1f8ac5cf895a4",
+          "url": "https://github.com/google-ai-edge/LiteRT-LM/releases/download/v0.16.0/CLiteRTLM_mac.xcframework.zip"
+        },
+        {
+          "filename": "litert_lm_c_api-0.1.0.zip",
+          "bytes": 161599098,
+          "sha256": "f0f3ae7b5730af783d1f018f7ad9a8de20c25fedf01af4e35fc11d4382246f7d",
+          "url": "https://github.com/google-ai-edge/LiteRT-LM/releases/download/v0.16.0/litert_lm_c_api-0.1.0.zip"
+        },
+        {
+          "filename": "litert_lm_main.macos_arm64",
+          "bytes": 16034224,
+          "sha256": "0c1293d253c5e4e24e6f61b819f5049573b0842bf972e32e3282db1383f65320",
+          "url": "https://github.com/google-ai-edge/LiteRT-LM/releases/download/v0.16.0/litert_lm_main.macos_arm64"
+        }
+      ],
+      "cliContract": {
+        "commands": ["benchmark", "convert", "delete", "import", "list", "pack", "rename", "run", "serve", "unpack"],
+        "serveOptions": ["--host", "--port", "--cors-origin", "--verbose"],
+        "defaultPort": 9379,
+        "authOption": null
+      }
+    }
+  }
+}

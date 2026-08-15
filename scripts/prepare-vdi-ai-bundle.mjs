@@ -16,17 +16,42 @@ import { createReadStream } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const DEFAULT_LITERT_VERSION = '0.13.1';
 const MODEL_ID = 'gemma4-e2b';
 const MODEL_FILE = 'model.litertlm';
+const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
+const COMPATIBILITY_MANIFEST = resolve(
+  SCRIPT_DIRECTORY,
+  '../src-tauri/resources/local_ai/runtime-compatibility.json'
+);
 
 const args = parseArgs(process.argv.slice(2));
+if (args.help) {
+  process.stdout.write(`Usage: node scripts/prepare-vdi-ai-bundle.mjs [options]\n\n` +
+    `  --model <path>           Source model.litertlm\n` +
+    `  --output <directory>     Bundle output directory\n` +
+    `  --litert-version <ver>   Pinned version from runtime-compatibility.json\n`);
+  process.exit(0);
+}
 const outputDirectory = resolve(args.output ?? 'release/memoji-vdi/ai');
+const compatibility = JSON.parse(await readFile(COMPATIBILITY_MANIFEST, 'utf8'));
 const modelSource = resolve(
   args.model ?? join(homedir(), '.litert-lm', 'models', MODEL_ID, MODEL_FILE)
 );
-const liteRtVersion = args['litert-version'] ?? DEFAULT_LITERT_VERSION;
+const liteRtVersion = args['litert-version'] ?? compatibility.defaultVersion;
+const pinnedRelease = compatibility.versions?.[liteRtVersion];
+if (!pinnedRelease) {
+  throw new Error(
+    `검증되지 않은 LiteRT-LM 버전입니다: ${liteRtVersion}. ` +
+    `허용 버전: ${Object.keys(compatibility.versions ?? {}).join(', ')}`
+  );
+}
+const platformKey = `${process.platform}-${process.arch}`;
+const apiPackage = pinnedRelease.packages?.api?.[platformKey];
+if (!apiPackage) {
+  throw new Error(`고정된 LiteRT-LM API 자산이 없는 플랫폼입니다: ${platformKey}`);
+}
 
 await requireFile(modelSource, 'Gemma LiteRT-LM 모델');
 const modelStats = await stat(modelSource);
@@ -37,17 +62,33 @@ if (modelStats.size < 1_000_000_000) {
 const runtimeDirectory = join(outputDirectory, 'runtime');
 const pythonDirectory = join(runtimeDirectory, 'python');
 const sitePackagesDirectory = join(runtimeDirectory, 'site-packages');
+const runtimePackagesDirectory = join(runtimeDirectory, 'packages');
 const registryDirectory = join(outputDirectory, 'registry');
 const bundledModelPath = join(registryDirectory, 'models', MODEL_ID, MODEL_FILE);
 
 await mkdir(outputDirectory, { recursive: true });
-await preparePythonRuntime(pythonDirectory, sitePackagesDirectory, liteRtVersion);
+const runtimePackages = [
+  pinnedRelease.packages.cli,
+  pinnedRelease.packages.builder,
+  apiPackage,
+];
+await preparePythonRuntime(
+  pythonDirectory,
+  sitePackagesDirectory,
+  runtimePackagesDirectory,
+  runtimePackages
+);
 await mkdir(dirname(bundledModelPath), { recursive: true });
 await copyLargeFile(modelSource, bundledModelPath);
 
 const modelSha256 = await sha256(bundledModelPath);
 const pythonExecutable = bundledPythonExecutable(pythonDirectory);
-verifyBundledRuntime(pythonExecutable, pythonDirectory, sitePackagesDirectory);
+verifyBundledRuntime(
+  pythonExecutable,
+  pythonDirectory,
+  sitePackagesDirectory,
+  liteRtVersion
+);
 
 const manifest = {
   formatVersion: 1,
@@ -66,8 +107,19 @@ const manifest = {
     python: relativeToBundle(outputDirectory, pythonExecutable),
     pythonPath: 'runtime/site-packages',
     command: 'python -m litert_lm_cli.main serve --host 127.0.0.1 --port 9379',
+    compatibilityManifest: 'runtime-compatibility.json',
+    packages: runtimePackages.map(({ filename, bytes, sha256 }) => ({
+      filename: `runtime/packages/${filename}`,
+      bytes,
+      sha256,
+    })),
   },
 };
+
+await copyFile(
+  COMPATIBILITY_MANIFEST,
+  join(outputDirectory, 'runtime-compatibility.json')
+);
 
 await writeFile(
   join(outputDirectory, 'bundle-manifest.json'),
@@ -99,7 +151,12 @@ process.stdout.write(
     `  runtime: LiteRT-LM ${liteRtVersion}\n`
 );
 
-async function preparePythonRuntime(pythonTarget, sitePackagesTarget, version) {
+async function preparePythonRuntime(
+  pythonTarget,
+  sitePackagesTarget,
+  packageTarget,
+  packages
+) {
   run('uv', ['python', 'install', '3.12']);
   const pythonExecutable = run('uv', [
     'python',
@@ -119,6 +176,7 @@ async function preparePythonRuntime(pythonTarget, sitePackagesTarget, version) {
 
   await rm(pythonTarget, { recursive: true, force: true });
   await rm(sitePackagesTarget, { recursive: true, force: true });
+  await rm(packageTarget, { recursive: true, force: true });
   await mkdir(dirname(pythonTarget), { recursive: true });
   await cp(pythonRoot, pythonTarget, {
     recursive: true,
@@ -127,6 +185,14 @@ async function preparePythonRuntime(pythonTarget, sitePackagesTarget, version) {
     filter: (source) => basename(source) !== '.DS_Store',
   });
   await mkdir(sitePackagesTarget, { recursive: true });
+  await mkdir(packageTarget, { recursive: true });
+
+  const packagePaths = [];
+  for (const artifact of packages) {
+    const packagePath = join(packageTarget, artifact.filename);
+    await downloadPinnedArtifact(artifact, packagePath);
+    packagePaths.push(packagePath);
+  }
 
   run('uv', [
     'pip',
@@ -138,14 +204,18 @@ async function preparePythonRuntime(pythonTarget, sitePackagesTarget, version) {
     '--link-mode',
     'copy',
     '--compile-bytecode',
-    `litert-lm==${version}`,
+    ...packagePaths,
   ]);
 }
 
-function verifyBundledRuntime(pythonExecutable, pythonHome, pythonPath) {
+function verifyBundledRuntime(pythonExecutable, pythonHome, pythonPath, version) {
   const result = spawnSync(
     pythonExecutable,
-    ['-c', 'import litert_lm, litert_lm_cli; print("ok")'],
+    [
+      '-c',
+      `import importlib.metadata, litert_lm, litert_lm_cli; ` +
+      `assert importlib.metadata.version("litert-lm") == "${version}"; print("ok")`,
+    ],
     {
       encoding: 'utf8',
       env: {
@@ -159,6 +229,33 @@ function verifyBundledRuntime(pythonExecutable, pythonHome, pythonPath) {
   if (result.status !== 0 || result.stdout.trim() !== 'ok') {
     throw new Error(
       `복사된 LiteRT 런타임 검증 실패\n${result.stdout ?? ''}\n${result.stderr ?? ''}`
+    );
+  }
+}
+
+async function downloadPinnedArtifact(artifact, destination) {
+  const existing = await stat(destination).catch(() => null);
+  if (existing?.size === artifact.bytes) {
+    const existingHash = await sha256(destination);
+    if (existingHash === artifact.sha256) return;
+  }
+
+  const response = await fetch(artifact.url, { redirect: 'follow' });
+  if (!response.ok) {
+    throw new Error(`고정 자산 다운로드 실패 (${response.status}): ${artifact.url}`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength !== artifact.bytes) {
+    throw new Error(
+      `${artifact.filename} 크기 불일치: expected ${artifact.bytes}, found ${bytes.byteLength}`
+    );
+  }
+  await writeFile(destination, bytes);
+  const digest = await sha256(destination);
+  if (digest !== artifact.sha256) {
+    await rm(destination, { force: true });
+    throw new Error(
+      `${artifact.filename} SHA256 불일치: expected ${artifact.sha256}, found ${digest}`
     );
   }
 }
