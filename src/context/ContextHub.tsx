@@ -69,7 +69,7 @@ export function ContextHub({
           onInsertText={onInsertText}
           onApplyProposal={onApplyProposal}
           currentPageId={currentPage?.id}
-          currentPageRevision={0}
+          currentPageRevision={currentPage?.revision ?? 0}
           currentPageContent={currentPage?.content}
         />
       </Tabs.Content>

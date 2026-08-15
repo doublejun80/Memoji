@@ -114,6 +114,14 @@ impl Database {
         Ok(())
     }
 
+    pub(crate) fn connection(&self) -> &Connection {
+        &self.conn
+    }
+
+    pub(crate) fn connection_mut(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
+
     fn ensure_column(&self, table: &str, column: &str, column_type: &str) -> Result<bool> {
         let mut stmt = self
             .conn

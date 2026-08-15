@@ -187,7 +187,7 @@ function AppContent() {
   const getDatesWithPages = () => {
     const datesSet = new Set<string>();
     pages.forEach(page => {
-      if (page.content.trim().length > 0) {
+      if (page.type === 'page') {
         const dateKey = getPageDateKey(page);
         if (dateKey) {
           datesSet.add(dateKey);
@@ -224,7 +224,7 @@ function AppContent() {
 
   const handleApplyAiProposal = async (proposal: AiProposal): Promise<boolean> => {
     if (!currentPage || proposal.pageId !== currentPage.id) return false;
-    const result = applyProposalToDocument(currentPage.content, 0, proposal);
+    const result = applyProposalToDocument(currentPage.content, currentPage.revision ?? 0, proposal);
     if (!result.ok) return false;
     await handlePageUpdate(pageWithMarkdownMetadata(currentPage, result.content));
     return true;
@@ -277,6 +277,30 @@ function AppContent() {
 
     initializeApp();
   }, []);
+
+  useEffect(() => {
+    if (!currentPage || currentPage.type === 'folder' || currentPage.bodyLoaded !== false) return;
+    let disposed = false;
+    const pageSnapshot = currentPage;
+    void tauriStorage.getPageBody(currentPage.id).then((body) => {
+      if (disposed) return;
+      const hydratedPage = normalizePage({
+        ...pageSnapshot,
+        content: body.bodyMarkdown,
+        revision: body.revision,
+        bodyLoaded: true,
+      });
+      const updatedPages = pagesRef.current.map((page) => (
+        page.id === hydratedPage.id ? hydratedPage : page
+      ));
+      pagesRef.current = updatedPages;
+      setPages(updatedPages);
+      setCurrentPage((selected) => selected?.id === hydratedPage.id ? hydratedPage : selected);
+    }).catch((error) => {
+      if (!disposed) toast.error('페이지 본문을 불러오지 못했습니다: ' + String(error));
+    });
+    return () => { disposed = true; };
+  }, [currentPage]);
 
 
 
@@ -449,16 +473,17 @@ function AppContent() {
 
   const handlePageUpdate = async (updatedPage: Page) => {
     const normalizedPage = normalizePage(updatedPage);
-    await tauriStorage.savePage(normalizedPage);
+    const revision = await tauriStorage.savePage(normalizedPage);
+    const savedPage = { ...normalizedPage, revision, bodyLoaded: true };
 
     const updatedPages = pagesRef.current.map(page =>
-      page.id === normalizedPage.id ? normalizedPage : page
+      page.id === savedPage.id ? savedPage : page
     );
     pagesRef.current = updatedPages;
     setPages(updatedPages);
 
     setCurrentPage(previousPage => (
-      previousPage?.id === normalizedPage.id ? normalizedPage : previousPage
+      previousPage?.id === savedPage.id ? savedPage : previousPage
     ));
 
   };

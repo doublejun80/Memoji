@@ -65,7 +65,7 @@ export const DocumentWorkspace = forwardRef<DocumentWorkspaceHandle, DocumentWor
     const text = target.value.slice(start, end);
     setSelection({
       pageId: currentPage.id,
-      baseRevision: 0,
+      baseRevision: currentPage.revision ?? 0,
       text,
       start,
       end,

@@ -1,5 +1,6 @@
 import { Page } from '../types';
 import { normalizePage } from './pageModel';
+import { tauriPageApi, type PageBodyDto, type PageSummaryDto } from '../shared/api/pageApi';
 
 export interface DatabaseImportSummary {
   imported: number;
@@ -36,6 +37,8 @@ class TauriStorage {
   private isTauriAvailable = false;
   private initPromise: Promise<void> | null = null;
   private tauriInitializationError: unknown = null;
+  private revisionCache = new Map<string, number>();
+  private bodyCache = new Map<string, PageBodyDto>();
 
   async init() {
     if (this.isInitialized) return;
@@ -92,29 +95,25 @@ class TauriStorage {
 
     if (this.isInitialized && this.isTauriAvailable && invoke) {
       try {
-        const tauriPages = await invoke('get_pages') as any[];
+        let summaries: PageSummaryDto[];
+        try {
+          summaries = await tauriPageApi.listSummaries();
+        } catch (error) {
+          if (!this.isUnknownCommand(error)) throw error;
+          const legacyPages = await invoke('get_pages') as any[];
+          return this.migratePages(legacyPages.map((page) => ({
+            ...page,
+            content: page.content,
+            bodyLoaded: true,
+            revision: 0,
+          })));
+        }
 
-        // Convert snake_case from Tauri to camelCase
-        const pages = tauriPages.map(p => {
-          return normalizePage({
-            id: p.id,
-            title: p.title,
-            icon: p.icon,
-            parentId: p.parent_id,
-            projectParentId: p.project_parent_id ?? p.parent_id,
-            projectIndex: p.project_index,
-            dateKey: p.date_key,
-            content: p.content,
-            createdAt: p.created_at,
-            updatedAt: p.updated_at,
-            type: p.type,
-            tags: p.tags,
-            order: p.order
-          });
+        const pages = summaries.map((summary) => {
+          this.revisionCache.set(summary.id, summary.revision);
+          return normalizePage({ ...summary, content: '', bodyLoaded: summary.type === 'folder' });
         });
-
-        const migratedPages = this.migratePages(pages);
-        return migratedPages;
+        return this.migratePages(pages);
       } catch (error) {
         console.error('❌ Tauri에서 페이지 로드 실패:', error);
         throw this.makeDesktopStorageError('페이지 로드', error);
@@ -132,13 +131,40 @@ class TauriStorage {
     return pages.map((page: any, index: number) => normalizePage(page, index));
   }
 
-  async savePage(page: Page): Promise<void> {
+  async savePage(page: Page): Promise<number> {
     await this.init();
 
     if (this.isInitialized && this.isTauriAvailable && invoke) {
       try {
-        await invoke('save_page', { page: this.toTauriPage(page) });
-        return;
+        const normalizedPage = normalizePage(page);
+        const baseRevision = this.revisionCache.get(page.id) ?? normalizedPage.revision ?? 0;
+        try {
+          const result = await tauriPageApi.save({
+            id: normalizedPage.id,
+            title: normalizedPage.title,
+            icon: normalizedPage.icon,
+            parentId: normalizedPage.parentId,
+            projectParentId: normalizedPage.projectParentId,
+            projectIndex: Boolean(normalizedPage.projectIndex),
+            dateKey: normalizedPage.dateKey,
+            bodyMarkdown: normalizedPage.content,
+            createdAt: normalizedPage.createdAt,
+            updatedAt: normalizedPage.updatedAt,
+            type: normalizedPage.type,
+            tags: normalizedPage.tags,
+            order: normalizedPage.order,
+            revision: baseRevision,
+            baseRevision,
+            source: 'user',
+          });
+          this.revisionCache.set(page.id, result.body.revision);
+          this.rememberBody(result.body);
+          return result.body.revision;
+        } catch (error) {
+          if (!this.isUnknownCommand(error)) throw error;
+          await invoke('save_page', { page: this.toTauriPage(page) });
+          return baseRevision;
+        }
       } catch (error) {
         console.error('❌ Tauri 저장 실패:', error);
         throw this.makeDesktopStorageError('페이지 저장', error);
@@ -159,6 +185,47 @@ class TauriStorage {
     }
 
     localStorage.setItem('blocknote-pages', JSON.stringify(pages));
+    return normalizedPage.revision ?? 0;
+  }
+
+  async getPageBody(pageId: string): Promise<PageBodyDto> {
+    await this.init();
+    const cached = this.bodyCache.get(pageId);
+    if (cached) return cached;
+    if (this.isInitialized && this.isTauriAvailable && invoke) {
+      try {
+        const body = await tauriPageApi.getBody(pageId);
+        this.revisionCache.set(pageId, body.revision);
+        this.rememberBody(body);
+        return body;
+      } catch (error) {
+        if (!this.isUnknownCommand(error)) {
+          throw this.makeDesktopStorageError('페이지 본문 로드', error);
+        }
+        const legacyPages = await invoke('get_pages') as any[];
+        const page = legacyPages.find((candidate) => candidate.id === pageId);
+        if (!page) throw new Error(`페이지를 찾을 수 없습니다: ${pageId}`);
+        return { pageId, bodyMarkdown: page.content || '', revision: 0 };
+      }
+    }
+    const page = this.getLocalStoragePages().find((candidate) => candidate.id === pageId);
+    if (!page) throw new Error(`페이지를 찾을 수 없습니다: ${pageId}`);
+    return { pageId, bodyMarkdown: page.content, revision: page.revision ?? 0 };
+  }
+
+  private rememberBody(body: PageBodyDto): void {
+    this.bodyCache.delete(body.pageId);
+    this.bodyCache.set(body.pageId, body);
+    while (this.bodyCache.size > 12) {
+      const oldest = this.bodyCache.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.bodyCache.delete(oldest);
+    }
+  }
+
+  private isUnknownCommand(error: unknown): boolean {
+    const message = String(error).toLowerCase();
+    return message.includes('unknown command') || message.includes('command not found');
   }
 
   private getLocalStoragePages(): Page[] {
@@ -226,7 +293,7 @@ class TauriStorage {
     let migratedCount = 0;
     for (const page of legacyPages) {
       if (existingIds.has(page.id)) continue;
-      await invoke('save_page', { page: this.toTauriPage(page) });
+      await this.savePage(page);
       existingIds.add(page.id);
       migratedCount += 1;
     }
@@ -243,7 +310,14 @@ class TauriStorage {
     
     if (this.isInitialized && this.isTauriAvailable && invoke) {
       try {
-        await invoke('delete_page', { pageId });
+        try {
+          await tauriPageApi.trash(pageId);
+        } catch (error) {
+          if (!this.isUnknownCommand(error)) throw error;
+          await invoke('delete_page', { pageId });
+        }
+        this.bodyCache.delete(pageId);
+        this.revisionCache.delete(pageId);
         return;
       } catch (error) {
         console.error('Failed to delete page from Tauri:', error);
