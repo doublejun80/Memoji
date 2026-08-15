@@ -786,6 +786,8 @@ function AppContent() {
               currentPage={currentPage}
               onInsertText={handleInsertText}
               onReplaceText={handleReplaceText}
+              activeTab={workspaceUi.contextTab}
+              onTabChange={setContextTab}
             />
           )}
           leftOpen={workspaceUi.leftOpen}
