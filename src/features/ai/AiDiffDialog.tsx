@@ -6,9 +6,17 @@ interface AiDiffDialogProps {
   onClose: () => void;
   onApply: () => void;
   onReject: () => void;
+  onOpenSource?: (source: AiProposal['sources'][number]) => void;
 }
 
-export function AiDiffDialog({ proposal, open, onClose, onApply, onReject }: AiDiffDialogProps) {
+export function AiDiffDialog({
+  proposal,
+  open,
+  onClose,
+  onApply,
+  onReject,
+  onOpenSource = () => undefined,
+}: AiDiffDialogProps) {
   if (!open || proposal.patch.kind !== 'text') return null;
   const { patch } = proposal;
 
@@ -34,6 +42,20 @@ export function AiDiffDialog({ proposal, open, onClose, onApply, onReject }: AiD
           <ins>{patch.after}</ins>
           {patch.contextAfter && <p className="memoji-ai-diff-context">{patch.contextAfter}</p>}
         </div>
+        {proposal.sources.length > 0 && (
+          <div className="memoji-ai-diff-sources" aria-label="변경 근거">
+            <strong>근거 {proposal.sources.length}개</strong>
+            {proposal.sources.map((source, index) => (
+              <button
+                type="button"
+                key={`${source.pageId}-${source.start ?? source.anchor ?? index}`}
+                onClick={() => onOpenSource(source)}
+              >
+                [{index + 1}] {source.label || source.headingPath?.join(' › ') || source.pageId}
+              </button>
+            ))}
+          </div>
+        )}
         <footer>
           <button type="button" className="memoji-ai-diff-reject" onClick={onReject}>제안 거절</button>
           <button type="button" className="memoji-ai-diff-apply" onClick={onApply}>변경 적용</button>
@@ -42,4 +64,3 @@ export function AiDiffDialog({ proposal, open, onClose, onApply, onReject }: AiD
     </div>
   );
 }
-

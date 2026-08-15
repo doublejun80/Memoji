@@ -58,4 +58,32 @@ describe('AiProposalCard', () => {
     await userEvent.click(screen.getByRole('button', { name: '제안 거절' }));
     expect(onReject).toHaveBeenCalledWith(proposal.id);
   });
+
+  it('opens a cited page source from both the card and review dialog', async () => {
+    const onOpenSource = vi.fn();
+    renderWithProviders(
+      <AiProposalCard
+        proposal={{
+          ...proposal,
+          sources: [{
+            ...proposal.sources[0],
+            label: '출시 근거',
+            anchor: 'release-evidence',
+            headingPath: ['계획', '출시 근거'],
+          }],
+        }}
+        diffOpen
+        onOpenSource={onOpenSource}
+      />,
+    );
+
+    const citationButtons = screen.getAllByRole('button', { name: /출시 근거/ });
+    await userEvent.click(citationButtons[0]);
+    await userEvent.click(citationButtons[1]);
+    expect(onOpenSource).toHaveBeenCalledTimes(2);
+    expect(onOpenSource).toHaveBeenLastCalledWith(expect.objectContaining({
+      pageId: 'page-1',
+      anchor: 'release-evidence',
+    }));
+  });
 });

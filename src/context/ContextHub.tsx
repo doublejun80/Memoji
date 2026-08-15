@@ -8,7 +8,8 @@ import { LinksPanel } from './LinksPanel';
 import { OutlinePanel } from './OutlinePanel';
 import { PropertiesPanel } from './PropertiesPanel';
 import { SearchPinPanel } from './SearchPinPanel';
-import type { AiProposal } from '../features/ai/aiProposalReducer';
+import type { AiProposal, AiSource } from '../features/ai/aiProposalReducer';
+import type { ApplyProposalResult } from '../shared/api/proposalApi';
 
 interface ContextHubProps {
   activeTab: ContextHubTab;
@@ -19,6 +20,8 @@ interface ContextHubProps {
   onPageSelect?: (page: Page) => void;
   onInsertText?: (text: string) => void;
   onApplyProposal?: (proposal: AiProposal) => boolean | Promise<boolean>;
+  onProposalApplied?: (result: ApplyProposalResult) => void | Promise<void>;
+  onOpenSource?: (source: AiSource) => void | Promise<void>;
 }
 
 const TAB_ITEMS = [
@@ -38,6 +41,8 @@ export function ContextHub({
   onPageSelect,
   onInsertText,
   onApplyProposal,
+  onProposalApplied,
+  onOpenSource,
 }: ContextHubProps) {
   const resolvedTab = activeTab === 'search' && !searchPinned ? 'ai' : activeTab;
   const taskCount = parseMarkdownTasks(currentPage?.content ?? '').filter((task) => !task.done).length;
@@ -68,7 +73,10 @@ export function ContextHub({
         <AIChatAssistant
           onInsertText={onInsertText}
           onApplyProposal={onApplyProposal}
+          onProposalApplied={onProposalApplied}
+          onOpenSource={onOpenSource}
           currentPageId={currentPage?.id}
+          currentProjectId={currentPage?.projectParentId ?? undefined}
           currentPageRevision={currentPage?.revision ?? 0}
           currentPageContent={currentPage?.content}
         />

@@ -1,7 +1,8 @@
 import type { ContextHubTab } from '../app/workspaceState';
 import { ContextHub } from '../context/ContextHub';
 import type { Page } from '../types';
-import type { AiProposal } from '../features/ai/aiProposalReducer';
+import type { AiProposal, AiSource } from '../features/ai/aiProposalReducer';
+import type { ApplyProposalResult } from '../shared/api/proposalApi';
 
 interface RightPanelProps {
   pages: Page[];
@@ -14,6 +15,8 @@ interface RightPanelProps {
   currentPage?: Page | null;
   onInsertText?: (text: string) => void;
   onApplyProposal?: (proposal: AiProposal) => boolean | Promise<boolean>;
+  onProposalApplied?: (result: ApplyProposalResult) => void | Promise<void>;
+  onOpenSource?: (source: AiSource) => void | Promise<void>;
   activeTab?: ContextHubTab;
   onTabChange?: (tab: ContextHubTab) => void;
   searchPinned?: boolean;
@@ -27,6 +30,8 @@ export function RightPanel({
   currentPage = null,
   onInsertText,
   onApplyProposal,
+  onProposalApplied,
+  onOpenSource,
   activeTab = 'ai',
   onTabChange = () => undefined,
   searchPinned = false,
@@ -41,6 +46,8 @@ export function RightPanel({
       onPageSelect={onPageSelect}
       onInsertText={onInsertText}
       onApplyProposal={onApplyProposal}
+      onProposalApplied={onProposalApplied}
+      onOpenSource={onOpenSource}
       searchPinned={searchPinned}
     />
   );

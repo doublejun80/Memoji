@@ -20,6 +20,9 @@ export interface AiGenerationRequest {
   requestId: string;
   request: LocalAiGenerateRequest;
   useServer: boolean;
+  currentPageId?: string;
+  currentProjectId?: string;
+  objectType?: 'page' | 'task' | 'event';
 }
 
 export interface AiGenerationCallbacks {

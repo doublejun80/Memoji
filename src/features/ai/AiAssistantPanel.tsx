@@ -28,7 +28,11 @@ import {
 } from './aiProposalReducer';
 import type { AiQuickAction } from './aiTypes';
 import type { EditorSelection } from '../../editor/SelectionAiToolbar';
-import { memoryProposalApi, type ProposalApi } from '../../shared/api/proposalApi';
+import {
+  defaultProposalApi,
+  type ApplyProposalResult,
+  type ProposalApi,
+} from '../../shared/api/proposalApi';
 import { useAiConversation } from './useAiConversation';
 import { useAiRuntimeStatus } from './useAiRuntimeStatus';
 import { useAiStream } from './useAiStream';
@@ -39,7 +43,10 @@ interface AiAssistantPanelProps {
   proposalApi?: ProposalApi;
   onInsertText?: (text: string) => void;
   onApplyProposal?: (proposal: AiProposal) => boolean | Promise<boolean>;
+  onProposalApplied?: (result: ApplyProposalResult) => void | Promise<void>;
+  onOpenSource?: (source: AiProposal['sources'][number]) => void | Promise<void>;
   currentPageId?: string;
+  currentProjectId?: string;
   currentPageRevision?: number;
   currentPageContent?: string;
 }
@@ -87,10 +94,13 @@ const newRequestId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}
 
 export function AiAssistantPanel({
   api = tauriAiApi,
-  proposalApi = memoryProposalApi,
+  proposalApi = defaultProposalApi,
   onInsertText,
   onApplyProposal,
+  onProposalApplied,
+  onOpenSource,
   currentPageId,
+  currentProjectId,
   currentPageRevision = 0,
   currentPageContent,
 }: AiAssistantPanelProps) {
@@ -132,16 +142,31 @@ export function AiAssistantPanel({
             contextBefore: currentPageContent?.slice(Math.max(0, selection.start - 60), selection.start) || '',
             contextAfter: currentPageContent?.slice(selection.end, selection.end + 60) || '',
           },
-          sources: [{
-            pageId: selection.pageId,
-            start: selection.start,
-            end: selection.end,
-            textHash: selection.textHash,
-          }],
+          sources: [
+            {
+              pageId: selection.pageId,
+              start: selection.start,
+              end: selection.end,
+              textHash: selection.textHash,
+              label: '선택한 원문',
+            },
+            ...(response.groundingSources ?? []).map((source) => ({
+              pageId: source.pageId,
+              anchor: source.anchor ?? undefined,
+              headingPath: source.headingPath,
+              start: source.start ?? undefined,
+              end: source.end ?? undefined,
+              textHash: source.textHash ?? undefined,
+              label: source.title,
+              score: source.score,
+            })),
+          ],
           status: 'pending',
         };
         dispatchProposal({ type: 'queue', proposal });
-        void proposalApi.create(proposal);
+        void proposalApi.create(proposal).catch(() => {
+          dispatchProposal({ type: 'mark-conflict', id: proposal.id });
+        });
       }
       assistantByRequestRef.current.delete(requestId);
       proposalIntentByRequestRef.current.delete(requestId);
@@ -165,6 +190,20 @@ export function AiAssistantPanel({
   const runtime = useAiRuntimeStatus(api, stream.isGenerating);
   statusRef.current = runtime.status;
   const [maxNewTokens, setMaxNewTokens] = useState(readLocalAiMaxNewTokens);
+
+  useEffect(() => {
+    let active = true;
+    if (!currentPageId) {
+      dispatchProposal({ type: 'hydrate', proposals: [] });
+      return () => { active = false; };
+    }
+    void proposalApi.list(currentPageId).then((proposals) => {
+      if (active) dispatchProposal({ type: 'hydrate', proposals });
+    }).catch(() => {
+      if (active) dispatchProposal({ type: 'hydrate', proposals: [] });
+    });
+    return () => { active = false; };
+  }, [currentPageId, proposalApi]);
 
   const sendMessage = useCallback((rawPrompt = conversation.input, options: {
     includePageContext?: boolean;
@@ -192,8 +231,11 @@ export function AiAssistantPanel({
         temperature: 0.4,
         topP: 0.95,
       },
+      currentPageId,
+      currentProjectId,
+      objectType: 'page',
     });
-  }, [conversation, currentPageContent, maxNewTokens, runtime.status, stream]);
+  }, [conversation, currentPageContent, currentPageId, currentProjectId, maxNewTokens, runtime.status, stream]);
 
   useEffect(() => {
     const handleSelectionAction = (event: Event) => {
@@ -259,16 +301,27 @@ export function AiAssistantPanel({
 
   const applyProposal = async (id: string) => {
     const proposal = proposalState.items.find((item) => item.id === id);
-    if (!proposal || !onApplyProposal) return;
+    if (!proposal) return;
+    if (proposalApi.apply) {
+      try {
+        const result = await proposalApi.apply(id);
+        dispatchProposal({ type: 'mark-applied', id });
+        await onProposalApplied?.(result);
+      } catch {
+        dispatchProposal({ type: 'mark-conflict', id });
+      }
+      return;
+    }
+    if (!onApplyProposal) return;
     const applied = await onApplyProposal(proposal);
-    const nextStatus = applied ? 'applied' : 'conflicted';
     dispatchProposal({ type: applied ? 'mark-applied' : 'mark-conflict', id });
-    await proposalApi.updateStatus(id, nextStatus);
+    await proposalApi.updateStatus(id, applied ? 'applied' : 'conflicted');
   };
 
   const rejectProposal = async (id: string) => {
     dispatchProposal({ type: 'reject', id });
-    await proposalApi.updateStatus(id, 'rejected');
+    if (proposalApi.reject) await proposalApi.reject(id);
+    else await proposalApi.updateStatus(id, 'rejected');
   };
 
   const status = runtime.status;
@@ -368,6 +421,7 @@ export function AiAssistantPanel({
             onCloseDiff={() => dispatchProposal({ type: 'close-diff' })}
             onApply={(id) => void applyProposal(id)}
             onReject={(id) => void rejectProposal(id)}
+            onOpenSource={(source) => void onOpenSource?.(source)}
           />
         ))}
       </AiConversation>

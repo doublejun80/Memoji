@@ -24,6 +24,9 @@ fn migrates_empty_database_to_current_schema() {
     assert!(has_table(&connection, "pages"));
     assert!(has_table(&connection, "nodes"));
     assert!(has_table(&connection, "page_revisions"));
+    assert!(has_table(&connection, "ai_runs"));
+    assert!(has_table(&connection, "ai_run_sources"));
+    assert!(has_table(&connection, "ai_proposals"));
     let count: i64 = connection
         .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
             row.get(0)

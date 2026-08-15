@@ -102,6 +102,12 @@
 .memoji-ai-proposal > header div { display: grid; flex: 1; gap: 1px; }
 .memoji-ai-proposal > header span { color: var(--muted-foreground); font-size: 9px; }
 .memoji-ai-proposal > p { margin: 0; color: var(--muted-foreground); line-height: 1.45; }
+.memoji-ai-proposal-sources,
+.memoji-ai-diff-sources { display: flex; flex-wrap: wrap; gap: 5px; }
+.memoji-ai-proposal-sources button,
+.memoji-ai-diff-sources button { color: var(--primary); font-size: 10px; text-align: left; }
+.memoji-ai-diff-sources { display: grid; padding: 9px 10px; border-radius: 7px; background: var(--muted); }
+.memoji-ai-diff-sources strong { font-size: 10px; }
 .memoji-ai-proposal > button {
   min-height: 28px; border: 1px solid var(--primary); border-radius: 7px;
   color: var(--primary); font-weight: 600;

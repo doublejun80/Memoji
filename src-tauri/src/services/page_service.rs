@@ -8,7 +8,7 @@ use crate::domain::page::{
 use crate::indexing::worker::IndexWorker;
 use crate::tasks::parser::ensure_task_markers;
 use crate::tasks::service::TaskService;
-use rusqlite::Connection;
+use rusqlite::{Connection, Transaction};
 use std::fmt;
 
 #[derive(Debug)]
@@ -54,8 +54,21 @@ impl PageService {
     ) -> Result<SavePageV2Response, PageServiceError> {
         request.body_markdown = ensure_task_markers(&request.body_markdown, &request.id);
         let transaction = connection.transaction()?;
+        Self::save_in_transaction(&transaction, &request)?;
+        transaction.commit()?;
+
+        Ok(SavePageV2Response {
+            summary: PageRepository::get_summary(connection, &request.id)?,
+            body: PageRepository::get_body(connection, &request.id)?,
+        })
+    }
+
+    pub(crate) fn save_in_transaction(
+        transaction: &Transaction<'_>,
+        request: &SavePageV2Request,
+    ) -> Result<i64, PageServiceError> {
         let actual_revision =
-            PageRepository::current_revision(&transaction, &request.id)?.unwrap_or(0);
+            PageRepository::current_revision(transaction, &request.id)?.unwrap_or(0);
         if actual_revision != request.base_revision {
             return Err(PageServiceError::Conflict {
                 expected: request.base_revision,
@@ -81,17 +94,17 @@ impl PageService {
             updated_at: request.updated_at.clone(),
             deleted_at: None,
         };
-        NodeRepository::upsert(&transaction, &node)?;
-        PageRepository::upsert(&transaction, &request, next_revision)?;
+        NodeRepository::upsert(transaction, &node)?;
+        PageRepository::upsert(transaction, request, next_revision)?;
         IndexWorker::replace_page_index(
-            &transaction,
+            transaction,
             &request.id,
             &request.title,
             &request.body_markdown,
             &request.tags,
         )?;
         TaskService::replace_page_tasks(
-            &transaction,
+            transaction,
             &request.id,
             &request.body_markdown,
             request.project_parent_id.as_deref(),
@@ -101,19 +114,14 @@ impl PageService {
             PageServiceError::Sqlite(rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
         })?;
         RevisionRepository::insert(
-            &transaction,
+            transaction,
             &request.id,
             next_revision,
             &request.body_markdown,
             &request.updated_at,
             &request.source,
         )?;
-        transaction.commit()?;
-
-        Ok(SavePageV2Response {
-            summary: PageRepository::get_summary(connection, &request.id)?,
-            body: PageRepository::get_body(connection, &request.id)?,
-        })
+        Ok(next_revision)
     }
 
     pub fn trash(connection: &mut Connection, page_id: &str) -> Result<(), PageServiceError> {

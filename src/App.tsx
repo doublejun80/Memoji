@@ -27,7 +27,9 @@ import { WorkspaceCanvas } from './workspace/WorkspaceCanvas';
 import {
   applyProposalToDocument,
   type AiProposal,
+  type AiSource,
 } from './features/ai/aiProposalReducer';
+import type { ApplyProposalResult } from './shared/api/proposalApi';
 import { TasksWorkspace } from './features/tasks/TasksWorkspace';
 import { CalendarWorkspace } from './features/calendar/CalendarWorkspace';
 
@@ -236,6 +238,24 @@ function AppContent() {
     return true;
   };
 
+  const handleAiProposalApplied = async (result: ApplyProposalResult) => {
+    tauriStorage.syncPageBody(result.body);
+    const updatedAt = new Date().toISOString();
+    const update = (page: Page): Page => page.id === result.body.pageId
+      ? {
+          ...page,
+          content: result.body.bodyMarkdown,
+          revision: result.body.revision,
+          updatedAt,
+          bodyLoaded: true,
+        }
+      : page;
+    const updatedPages = pagesRef.current.map(update);
+    pagesRef.current = updatedPages;
+    setPages(updatedPages);
+    setCurrentPage((page) => page ? update(page) : page);
+  };
+
   useEffect(() => {
     const showAiReview = () => setContextTab('ai');
     window.addEventListener('memoji:selection-ai', showAiReview);
@@ -350,7 +370,7 @@ function AppContent() {
         await editorRef.current?.flushUnsaved();
       } catch (error) {
         toast.error('페이지를 바꾸기 전에 저장하지 못했습니다: ' + String(error));
-        return;
+        return false;
       }
     }
     const pageDateKey = getPageDateKey(page);
@@ -368,6 +388,27 @@ function AppContent() {
     if (selectedDateKey !== nextSelectionState.selectedDateKey) {
       setSelectedDate(parseDateKey(nextSelectionState.selectedDateKey));
     }
+    return true;
+  };
+
+  const handleOpenAiSource = async (source: AiSource) => {
+    const page = pagesRef.current.find((candidate) => candidate.id === source.pageId);
+    if (!page) {
+      toast.error('AI 근거 페이지를 찾을 수 없습니다.');
+      return;
+    }
+    const opened = await handlePageSelect(page, 'global');
+    if (!opened) return;
+    const headingLabel = source.headingPath?.at(-1) || source.label;
+    if (!headingLabel) return;
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      const heading = [...document.querySelectorAll<HTMLElement>(
+        '.document-workspace h1, .document-workspace h2, .document-workspace h3, .document-workspace h4, .document-workspace h5, .document-workspace h6',
+      )].find((element) => element.textContent?.trim() === headingLabel.trim());
+      heading?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      if (heading) heading.tabIndex = -1;
+      heading?.focus({ preventScroll: true });
+    }));
   };
 
   const createPage = async ({
@@ -818,7 +859,7 @@ function AppContent() {
                   pages={pages}
                   selectedDate={selectedDate}
                   onDateSelect={handleCalendarDateSelect}
-                  onPageOpen={handlePageSelect}
+                  onPageOpen={(page) => { void handlePageSelect(page); }}
                 />
               )}
             />
@@ -835,6 +876,8 @@ function AppContent() {
               currentPage={currentPage}
               onInsertText={handleInsertText}
               onApplyProposal={handleApplyAiProposal}
+              onProposalApplied={handleAiProposalApplied}
+              onOpenSource={handleOpenAiSource}
               activeTab={workspaceUi.contextTab}
               onTabChange={setContextTab}
             />

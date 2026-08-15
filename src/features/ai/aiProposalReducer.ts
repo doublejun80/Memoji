@@ -20,10 +20,13 @@ export interface StructuredPatch {
 
 export interface AiSource {
   pageId: string;
+  anchor?: string;
+  headingPath?: string[];
   start?: number;
   end?: number;
   textHash?: string;
   label?: string;
+  score?: number;
 }
 
 export interface AiProposal {
@@ -50,6 +53,7 @@ export const initialAiProposalState: AiProposalState = {
 };
 
 export type AiProposalAction =
+  | { type: 'hydrate'; proposals: AiProposal[] }
   | { type: 'queue'; proposal: AiProposal }
   | { type: 'open-diff'; id: string }
   | { type: 'close-diff' }
@@ -62,6 +66,9 @@ export function aiProposalReducer(
   state: AiProposalState,
   action: AiProposalAction,
 ): AiProposalState {
+  if (action.type === 'hydrate') {
+    return { items: action.proposals, openDiffId: null };
+  }
   if (action.type === 'queue') {
     return { ...state, items: [...state.items, { ...action.proposal, status: 'pending' }] };
   }
@@ -132,4 +139,3 @@ export function applyProposalToDocument(
     content: `${content.slice(0, anchor.start)}${after}${content.slice(anchor.end)}`,
   };
 }
-

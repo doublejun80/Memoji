@@ -223,6 +223,11 @@ class TauriStorage {
     }
   }
 
+  syncPageBody(body: PageBodyDto): void {
+    this.revisionCache.set(body.pageId, body.revision);
+    this.rememberBody(body);
+  }
+
   private isUnknownCommand(error: unknown): boolean {
     const message = String(error).toLowerCase();
     return message.includes('unknown command') || message.includes('command not found');

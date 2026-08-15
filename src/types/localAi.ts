@@ -112,6 +112,19 @@ export interface LocalAiGenerateResponse {
   promptTokens: number;
   generatedTokens: number;
   finishReason: string;
+  groundingSources?: LocalAiGroundingSource[];
+}
+
+export interface LocalAiGroundingSource {
+  pageId: string;
+  title: string;
+  anchor?: string | null;
+  headingPath: string[];
+  snippet: string;
+  score: number;
+  start?: number | null;
+  end?: number | null;
+  textHash?: string | null;
 }
 
 export interface LocalAiGenerateStreamChunk {

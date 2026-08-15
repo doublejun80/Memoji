@@ -12,6 +12,10 @@ mod tasks;
 
 use ai::metrics::{MtpMetrics, RuntimeMetrics};
 use ai::runtime::capabilities::RuntimeCapabilities;
+use commands::ai::{
+    apply_ai_proposal, create_ai_proposal, create_ai_run, finish_ai_run, get_ai_proposal,
+    list_ai_proposals, reject_ai_proposal,
+};
 use commands::calendar::{
     delete_calendar_event, export_calendar_ics, import_calendar_ics, list_calendar_items,
     save_calendar_event,
@@ -1082,6 +1086,13 @@ pub fn run() {
             local_ai_generate_stream,
             local_ai_generate_mtp_stream,
             local_ai_cancel,
+            create_ai_run,
+            finish_ai_run,
+            create_ai_proposal,
+            get_ai_proposal,
+            list_ai_proposals,
+            apply_ai_proposal,
+            reject_ai_proposal,
             list_page_summaries,
             get_page_body,
             save_page_v2,
