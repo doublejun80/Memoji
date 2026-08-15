@@ -6,8 +6,7 @@ import { SearchModal } from './components/SearchModal';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { SettingsModal } from './components/SettingsModal';
 import { RightPanel } from './components/RightPanel';
-import { ThemeProvider } from './contexts/ThemeContext';
-import { FocusModeProvider, useFocusMode } from './contexts/FocusModeContext';
+import { useFocusMode } from './contexts/FocusModeContext';
 import { Page, PageNavigationIndex, PageSelectionSource } from './types';
 import { tauriStorage } from './utils/tauriStorage';
 import { getEnvironment, logEnvironmentInfo } from './utils/environment';
@@ -17,7 +16,9 @@ import { getPageDateKey, getPagesForDate, getProjectParentId, isProjectIndexPage
 import { resolvePageSelectionState } from './utils/navigationState';
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner';
-import { WorkspaceControllerProvider } from './app/useWorkspaceController';
+import { useWorkspaceController } from './app/useWorkspaceController';
+import { AppShell } from './app/AppShell';
+import { WorkspaceLayout } from './workspace/WorkspaceLayout';
 
 interface CreatePageOptions {
   title: string;
@@ -49,11 +50,15 @@ function AppContent() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isRightPanelOpen, setIsRightPanelOpen] = useState(true); // 우측 패널 상태
-  const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true); // 좌측 패널 상태
   const [appTitle, setAppTitle] = useState<string>('Memoji');
   const [startupError, setStartupError] = useState<string | null>(null);
   const { isFocusMode } = useFocusMode();
+  const {
+    state: workspaceUi,
+    togglePanel,
+    setPanelOpen,
+    setPanelWidth,
+  } = useWorkspaceController();
   const pagesRef = useRef<Page[]>([]);
   const editorRef = useRef<MarkdownEditorHandle>(null);
 
@@ -675,39 +680,33 @@ function AppContent() {
   };
 
   return (
-    <div className={`memoji-app-shell h-screen flex flex-col bg-background text-foreground ${isFocusMode ? 'focus-mode' : ''}`}>
-      {/* TopBar - 집중 모드에서 숨김 */}
-      {!isFocusMode && (
-          <TopBar
-            onSave={handleSave}
+    <AppShell
+      focusMode={isFocusMode}
+      topBar={!isFocusMode ? (
+        <TopBar
+          onSave={handleSave}
           onShortcutsOpen={() => setIsShortcutsOpen(true)}
-            onSettingsOpen={() => {
-              void handleSave()
-                .then(() => setIsSettingsOpen(true))
-                .catch((error) => toast.error('설정을 열기 전에 저장하지 못했습니다: ' + String(error)));
-            }}
-          onRightPanelToggle={() => setIsRightPanelOpen(!isRightPanelOpen)}
-          isRightPanelOpen={isRightPanelOpen}
-          onLeftPanelToggle={() => setIsLeftPanelOpen(!isLeftPanelOpen)}
-          isLeftPanelOpen={isLeftPanelOpen}
+          onSettingsOpen={() => {
+            void handleSave()
+              .then(() => setIsSettingsOpen(true))
+              .catch((error) => toast.error('설정을 열기 전에 저장하지 못했습니다: ' + String(error)));
+          }}
+          onRightPanelToggle={() => togglePanel('right')}
+          isRightPanelOpen={workspaceUi.rightOpen}
+          onLeftPanelToggle={() => togglePanel('left')}
+          isLeftPanelOpen={workspaceUi.leftOpen}
           appTitle={appTitle}
           onExport={handleExport}
         />
-      )}
-
-      {startupError && (
-        <div className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+      ) : undefined}
+      notice={startupError ? (
+        <div role="alert" className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
           저장소를 열지 못했습니다. {startupError}
         </div>
-      )}
-
-      <div className="flex flex-1 overflow-hidden min-h-0">
-        {/* Sidebar - 집중 모드에서 숨김 */}
-        {!isFocusMode && isLeftPanelOpen && (
-          <div
-            className="flex-shrink-0"
-            style={{ width: '16rem', minWidth: '16rem', maxWidth: '16rem' }}
-          >
+      ) : undefined}
+      workspace={(
+        <WorkspaceLayout
+          left={(
             <Sidebar
               pages={pages}
               dailyPages={getDailyPages()}
@@ -725,42 +724,46 @@ function AppContent() {
               onDateSelect={handleDateSelect}
               selectedDate={selectedDate}
               datesWithPages={getDatesWithPages()}
-              onClose={() => setIsLeftPanelOpen(false)}
+              onClose={() => setPanelOpen('left', false)}
               onInsertText={handleInsertText}
             />
-          </div>
-        )}
-
-        {/* Main Editor */}
-        <div className="flex-1 overflow-hidden flex flex-col min-h-0 border-r border-border">
-          <MarkdownEditor
-            ref={editorRef}
-            currentPage={currentPage}
-            onPageUpdate={handlePageUpdate}
-            pages={pages}
-            onPageSelect={handlePageSelect}
-            onPageCreate={handlePageCreate}
-          />
-        </div>
-
-        {/* Right Panel - 집중 모드에서 숨김 */}
-        {!isFocusMode && isRightPanelOpen && (
-          <RightPanel
-            pages={pages}
-            onPageSelect={handlePageSelect}
-            isOpen={isRightPanelOpen}
-            onClose={() => setIsRightPanelOpen(false)}
-            onDateSelect={handleDateSelect}
-            selectedDate={selectedDate}
-            datesWithPages={getDatesWithPages()}
-            currentPage={currentPage}
-            onInsertText={handleInsertText}
-            onReplaceText={handleReplaceText}
-          />
-        )}
-      </div>
-
-      {/* 검색 모달 */}
+          )}
+          center={(
+            <MarkdownEditor
+              ref={editorRef}
+              currentPage={currentPage}
+              onPageUpdate={handlePageUpdate}
+              pages={pages}
+              onPageSelect={handlePageSelect}
+              onPageCreate={handlePageCreate}
+            />
+          )}
+          right={(
+            <RightPanel
+              pages={pages}
+              onPageSelect={handlePageSelect}
+              isOpen={workspaceUi.rightOpen}
+              onClose={() => setPanelOpen('right', false)}
+              onDateSelect={handleDateSelect}
+              selectedDate={selectedDate}
+              datesWithPages={getDatesWithPages()}
+              currentPage={currentPage}
+              onInsertText={handleInsertText}
+              onReplaceText={handleReplaceText}
+            />
+          )}
+          leftOpen={workspaceUi.leftOpen}
+          rightOpen={workspaceUi.rightOpen}
+          leftWidth={workspaceUi.leftWidth}
+          rightWidth={workspaceUi.rightWidth}
+          focusMode={isFocusMode}
+          onLeftOpenChange={(open) => setPanelOpen('left', open)}
+          onRightOpenChange={(open) => setPanelOpen('right', open)}
+          onLeftWidthChange={(width) => setPanelWidth('left', width)}
+          onRightWidthChange={(width) => setPanelWidth('right', width)}
+        />
+      )}
+    >
       <SearchModal
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
@@ -787,19 +790,10 @@ function AppContent() {
       />
 
       <Toaster />
-    </div>
+    </AppShell>
   );
 }
 
-// 메인 App 컴포넌트 (Provider들로 감싸기)
 export default function App() {
-  return (
-    <ThemeProvider>
-      <FocusModeProvider>
-        <WorkspaceControllerProvider>
-          <AppContent />
-        </WorkspaceControllerProvider>
-      </FocusModeProvider>
-    </ThemeProvider>
-  );
+  return <AppContent />;
 }

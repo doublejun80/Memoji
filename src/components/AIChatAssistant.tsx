@@ -360,6 +360,8 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
           <div className="flex items-center gap-1.5 min-w-0">
             <span style={{ fontSize: '10px' }} aria-hidden="true">AI</span>
             <select
+              id="memoji-ai-model"
+              name="ai-model"
               value={selectedRuntimeKind}
               onChange={(event) => changeRuntimePreset(event.target.value as LocalAiRuntimeKind)}
               disabled={isGenerating || isLoadingModel || isSavingRuntime}
@@ -468,6 +470,9 @@ const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
 
         <div className="flex gap-1.5 items-end">
           <textarea
+            id="memoji-ai-message"
+            name="ai-message"
+            aria-label="AI 메시지"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}

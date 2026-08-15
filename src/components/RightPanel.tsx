@@ -93,6 +93,9 @@ export const RightPanel: React.FC<RightPanelProps> = ({
         {/* 검색 입력창 */}
         <div className="relative">
           <Input
+            id="memoji-context-search"
+            name="context-search"
+            aria-label="컨텍스트 검색"
             ref={inputRef}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -102,6 +105,8 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           />
           {searchQuery && (
             <button
+              type="button"
+              aria-label="검색어 지우기"
               onClick={() => setSearchQuery('')}
               className="absolute right-1 top-1/2 transform -translate-y-1/2 text-sidebar-foreground/50 hover:text-sidebar-foreground"
             >

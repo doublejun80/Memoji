@@ -89,6 +89,8 @@ export const TopBar: React.FC<TopBarProps> = ({
             onClick={onLeftPanelToggle}
             onMouseDown={stopDrag}
             title={isLeftPanelOpen ? '왼쪽 패널 닫기' : '왼쪽 패널 열기'}
+            aria-label={isLeftPanelOpen ? '왼쪽 패널 닫기' : '왼쪽 패널 열기'}
+            data-panel-toggle="left"
           >
             {isLeftPanelOpen ? <PanelLeftClose className={iconClass} /> : <PanelLeftOpen className={iconClass} />}
           </Button>
@@ -126,6 +128,8 @@ export const TopBar: React.FC<TopBarProps> = ({
               onClick={onRightPanelToggle}
               onMouseDown={stopDrag}
               title={isRightPanelOpen ? '오른쪽 패널 닫기' : '오른쪽 패널 열기'}
+              aria-label={isRightPanelOpen ? '오른쪽 패널 닫기' : '오른쪽 패널 열기'}
+              data-panel-toggle="right"
             >
               {isRightPanelOpen ? <PanelRightClose className={iconClass} /> : <PanelRightOpen className={iconClass} />}
             </Button>

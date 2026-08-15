@@ -1,0 +1,119 @@
+.memoji-app-shell {
+  display: flex;
+  height: 100vh;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--memoji-surface-canvas);
+  color: var(--memoji-text-primary);
+  font-family: var(--memoji-font-ui);
+  font-size: var(--memoji-text-ui);
+  line-height: var(--memoji-leading-ui);
+  letter-spacing: var(--memoji-tracking-ui);
+}
+
+.memoji-workspace-frame,
+.memoji-workspace-layout,
+.memoji-inline-panels,
+.memoji-panel,
+.memoji-pane {
+  min-width: 0;
+  min-height: 0;
+}
+
+.memoji-workspace-frame {
+  position: relative;
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.memoji-workspace-layout,
+.memoji-inline-panels,
+.memoji-pane {
+  width: 100%;
+  height: 100%;
+}
+
+.memoji-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--memoji-surface-canvas);
+}
+
+.memoji-pane-left,
+.memoji-pane-right {
+  background: var(--memoji-surface-subtle);
+}
+
+.memoji-pane > * {
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+}
+
+.memoji-resize-handle {
+  position: relative;
+  width: 1px;
+  flex: 0 0 1px;
+  background: var(--memoji-border);
+  transition: background-color 120ms ease;
+}
+
+.memoji-resize-handle::after {
+  position: absolute;
+  inset: 0 -4px;
+  content: "";
+}
+
+.memoji-resize-handle:hover,
+.memoji-resize-handle[data-resize-handle-active] {
+  background: var(--memoji-primary);
+}
+
+.memoji-resize-handle:focus-visible {
+  outline: 2px solid var(--memoji-focus-ring);
+  outline-offset: 2px;
+}
+
+.memoji-overlay-backdrop {
+  position: absolute;
+  z-index: 30;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: var(--memoji-overlay-scrim);
+}
+
+.memoji-overlay-pane {
+  position: absolute;
+  z-index: 40;
+  top: 0;
+  bottom: 0;
+  max-width: calc(100% - 48px);
+  background: var(--memoji-surface-raised);
+  box-shadow: var(--memoji-shadow-float);
+  overscroll-behavior: contain;
+}
+
+.memoji-overlay-left {
+  left: 0;
+  border-right: 1px solid var(--memoji-border-strong);
+}
+
+.memoji-overlay-right {
+  right: 0;
+  border-left: 1px solid var(--memoji-border-strong);
+}
+
+.memoji-app-shell :where(button, input, textarea, select, a):focus-visible {
+  outline: 2px solid var(--memoji-focus-ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .memoji-resize-handle {
+    transition: none;
+  }
+}
