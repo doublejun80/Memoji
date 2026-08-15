@@ -1,5 +1,4 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { Sidebar } from './components/Sidebar';
 import { MarkdownEditor, MarkdownEditorHandle } from './components/MarkdownEditor';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { SettingsModal } from './components/SettingsModal';
@@ -23,6 +22,7 @@ import { createCommandRegistry } from './commands/commandRegistry';
 import type { CommandContext } from './commands/types';
 import { bindCommandKeyboard } from './app/keyboardBindings';
 import { CommandPalette } from './commands/CommandPalette';
+import { WorkspaceSidebar } from './workspace/WorkspaceSidebar';
 
 interface CreatePageOptions {
   title: string;
@@ -722,7 +722,7 @@ function AppContent() {
       workspace={(
         <WorkspaceLayout
           left={(
-            <Sidebar
+            <WorkspaceSidebar
               pages={pages}
               dailyPages={getDailyPages()}
               currentPage={currentPage}
@@ -741,6 +741,8 @@ function AppContent() {
               datesWithPages={getDatesWithPages()}
               onClose={() => setPanelOpen('left', false)}
               onInsertText={handleInsertText}
+              activeView={workspaceUi.leftView}
+              onViewChange={setLeftView}
             />
           )}
           center={(

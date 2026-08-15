@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Page, PageNavigationIndex, PageSelectionSource } from '../types';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -70,7 +70,7 @@ const ActionGlyph: React.FC<{ name: ActionGlyphName }> = ({ name }) => {
   return <Icon className={ACTION_ICON_CLASS} aria-hidden="true" />;
 };
 
-interface SidebarProps {
+export interface SidebarProps {
   pages: Page[];
   dailyPages: Page[];
   currentPage: Page | null;
@@ -89,6 +89,8 @@ interface SidebarProps {
   datesWithPages: string[];
   onClose: () => void;
   onInsertText?: (text: string) => void;
+  forcedIndex?: PageNavigationIndex;
+  hideIndexSwitcher?: boolean;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -107,18 +109,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onPageParentChange,
   onDateSelect,
   selectedDate,
-  datesWithPages
+  datesWithPages,
+  forcedIndex,
+  hideIndexSwitcher = false,
 }) => {
   const [expandedPages, setExpandedPages] = useState<Set<string>>(new Set());
   const [editingPage, setEditingPage] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [emojiMenuPage, setEmojiMenuPage] = useState<string | null>(null);
-  const [activeIndex, setActiveIndex] = useState<PageNavigationIndex>('daily');
-  const [isWideLayout, setIsWideLayout] = useState(false);
+  const [activeIndex, setActiveIndex] = useState<PageNavigationIndex>(forcedIndex ?? 'daily');
   const [draggedPageId, setDraggedPageId] = useState<string | null>(null);
   const [dropTargetPageId, setDropTargetPageId] = useState<string | null>(null);
-  const sidebarRef = useRef<HTMLDivElement>(null);
 
   const projectPages = useMemo(() => getProjectIndexPages(pages), [pages]);
   const projectPageById = useMemo(
@@ -137,20 +139,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }, [projectPages]);
 
   useEffect(() => {
-    if (!sidebarRef.current) return;
-
-    const resizeObserver = new ResizeObserver(([entry]) => {
-      setIsWideLayout(entry.contentRect.width >= 520);
-    });
-
-    resizeObserver.observe(sidebarRef.current);
-    return () => resizeObserver.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (!currentPage || isWideLayout) return;
-    setActiveIndex(currentPageIndex);
-  }, [currentPage, currentPageIndex, isWideLayout]);
+    if (forcedIndex) {
+      setActiveIndex(forcedIndex);
+      return;
+    }
+    if (currentPage) setActiveIndex(currentPageIndex);
+  }, [currentPage, currentPageIndex, forcedIndex]);
 
   const toggleExpanded = (pageId: string) => {
     setExpandedPages(prev => {
@@ -455,7 +449,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      <div className="flex-shrink-0 border-t border-sidebar-border p-3">
+      <div
+        role="region"
+        aria-label="미니 캘린더"
+        className="flex-shrink-0 border-t border-sidebar-border p-3"
+      >
         <CalendarWidget
           onDateSelect={onDateSelect}
           selectedDate={selectedDate}
@@ -836,21 +834,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   );
 
   return (
-    <div ref={sidebarRef} className="h-full w-full border-r border-border bg-sidebar">
-      {isWideLayout ? (
-        <div
-          className="grid h-full min-h-0"
-          style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)' }}
-        >
-          <div className="min-w-0 border-r border-sidebar-border">
-            {renderDailyIndex()}
-          </div>
-          <div className="min-w-0">
-            {renderProjectIndex()}
-          </div>
-        </div>
-      ) : (
-        <div className="flex h-full min-h-0 flex-col">
+    <div className="h-full w-full bg-sidebar">
+      <div className="flex h-full min-h-0 flex-col">
+        {!hideIndexSwitcher ? (
           <div className="flex gap-1 border-b border-sidebar-border p-2">
             <button
               type="button"
@@ -876,11 +862,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               프로젝트
             </button>
           </div>
-          <div className="min-h-0 flex-1">
-            {activeIndex === 'daily' ? renderDailyIndex() : renderProjectIndex()}
-          </div>
+        ) : null}
+        <div className="min-h-0 flex-1">
+          {activeIndex === 'daily' ? renderDailyIndex() : renderProjectIndex()}
         </div>
-      )}
+      </div>
     </div>
   );
 };
