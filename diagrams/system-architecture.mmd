@@ -1,0 +1,24 @@
+flowchart TB
+    UI["React UI<br/>App Shell · Editor · Tasks · Calendar · Knowledge · Context Hub"]
+    CMD["Tauri Commands / Events"]
+    SERVICE["Application Services<br/>Page · Search · Task · Event · Knowledge · AI Proposal"]
+    DB["SQLite Canonical Store<br/>Markdown · Metadata · Revisions · Relations"]
+    IDX["Derived Indexes<br/>FTS5 · Tags · Links · Tasks · Chunks · Entities"]
+    JOB["Background Job Queue<br/>parse · reindex · embed · backup"]
+    ORCH["Local AI Orchestrator<br/>retrieve · prompt · stream · metrics · proposal"]
+    LITERT["LiteRT-LM Runtime<br/>VDI default candidate"]
+    CANDLE["Candle GGUF Runtime<br/>fallback"]
+    FILES["Local File Store<br/>attachments · exports · backups"]
+
+    UI --> CMD
+    CMD --> SERVICE
+    SERVICE --> DB
+    SERVICE --> IDX
+    SERVICE --> JOB
+    JOB --> IDX
+    SERVICE --> ORCH
+    ORCH --> LITERT
+    ORCH --> CANDLE
+    SERVICE --> FILES
+    DB --> FILES
+    IDX --> ORCH

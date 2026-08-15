@@ -1,0 +1,42 @@
+flowchart LR
+    APP["App.tsx<br/>Provider composition only"]
+    SHELL["app/AppShell.tsx"]
+    COMMAND["commands/CommandPalette.tsx"]
+    LEFT["workspace/WorkspaceSidebar.tsx"]
+    CANVAS["workspace/WorkspaceCanvas.tsx"]
+    HUB["context/ContextHub.tsx"]
+    EDITOR["editor/DocumentWorkspace.tsx"]
+    TASKS["tasks/TasksWorkspace.tsx"]
+    CAL["calendar/CalendarWorkspace.tsx"]
+    KNOW["knowledge/KnowledgeWorkspace.tsx"]
+    AI["ai/AiAssistantPanel.tsx"]
+    PROPOSAL["ai/AiProposalCard.tsx"]
+    OUTLINE["context/OutlinePanel.tsx"]
+    LINKS["context/LinksPanel.tsx"]
+    PROPS["context/PropertiesPanel.tsx"]
+    STORE["app/workspaceState.ts"]
+    API["shared/api/tauriCommands.ts"]
+
+    APP --> SHELL
+    SHELL --> COMMAND
+    SHELL --> LEFT
+    SHELL --> CANVAS
+    SHELL --> HUB
+    SHELL --> STORE
+    CANVAS --> EDITOR
+    CANVAS --> TASKS
+    CANVAS --> CAL
+    CANVAS --> KNOW
+    HUB --> AI
+    HUB --> OUTLINE
+    HUB --> LINKS
+    HUB --> PROPS
+    AI --> PROPOSAL
+    LEFT --> STORE
+    COMMAND --> STORE
+    STORE --> API
+    EDITOR --> API
+    TASKS --> API
+    CAL --> API
+    KNOW --> API
+    AI --> API

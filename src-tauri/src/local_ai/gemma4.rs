@@ -1208,16 +1208,17 @@ mod tests {
     #[test]
     fn gemma4_tokenizer_stop_tokens_include_turn_boundaries() {
         let tokenizer_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("resources")
-            .join("models")
-            .join("tokenizer.json");
+            .join("tests")
+            .join("fixtures")
+            .join("gemma4-tokenizer.json");
         let tokenizer = LocalTokenizer::from_file(&tokenizer_path).expect("tokenizer should load");
 
         let stop_token_ids = stop_token_ids_from_tokenizer(&tokenizer, 1);
 
         assert!(stop_token_ids.contains(&1));
-        assert!(stop_token_ids.contains(&105));
-        assert!(stop_token_ids.contains(&106));
+        assert!(stop_token_ids.contains(&2));
+        assert!(stop_token_ids.contains(&3));
+        assert!(stop_token_ids.contains(&4));
     }
 
     #[test]

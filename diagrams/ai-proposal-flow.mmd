@@ -1,0 +1,26 @@
+sequenceDiagram
+    actor U as 사용자
+    participant E as Editor / Context Hub
+    participant R as Retrieval
+    participant A as Local AI Runtime
+    participant P as Proposal Store
+    participant D as Page Repository
+
+    U->>E: 요약/정리/할 일 추출/선택 문장 다듬기
+    E->>R: 현재 페이지, 선택 범위, 프로젝트 문맥 요청
+    R-->>E: 근거 Chunk + page/heading 위치
+    E->>A: 구조화 Prompt + 근거
+    A-->>E: 토큰 스트림 + 완료 메트릭
+    E->>P: baseRevision과 Proposal 저장
+    E-->>U: 결과·근거·Diff 미리보기
+    alt 적용
+        U->>E: 적용
+        E->>D: baseRevision 검증 후 새 Revision 저장
+        D-->>E: newRevision
+        E-->>U: 적용 완료
+    else 현재 문서가 변경됨
+        D-->>E: revision conflict
+        E-->>U: 자동 적용 중단, 새 Diff 요청
+    else 폐기
+        U->>P: Proposal 폐기
+    end

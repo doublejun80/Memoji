@@ -1,0 +1,364 @@
+erDiagram
+    WORKSPACE ||--o{ NODE : contains
+    OBJECT_TYPE ||--o{ NODE : classifies
+    OBJECT_TYPE ||--o{ PROPERTY_DEFINITION : defines
+    NODE ||--o| PAGE : page_detail
+    NODE ||--o| PROJECT : project_detail
+    NODE ||--o| TASK : task_detail
+    NODE ||--o| EVENT : event_detail
+    NODE ||--o| ATTACHMENT : attachment_detail
+    PAGE ||--o{ PAGE_REVISION : keeps
+    PAGE ||--o{ BLOCK_ANCHOR : contains
+    NODE ||--o{ PROPERTY_VALUE : has
+    PROPERTY_DEFINITION ||--o{ PROPERTY_VALUE : validates
+    WORKSPACE ||--o{ TAG : owns
+    NODE ||--o{ NODE_TAG : tagged_with
+    TAG ||--o{ NODE_TAG : applies_to
+    NODE ||--o{ NODE_RELATION : source_node
+    NODE ||--o{ NODE_RELATION : target_node
+    PROJECT ||--o{ TASK : groups
+    TASK ||--o{ TASK_DEPENDENCY : task_side
+    TASK ||--o{ TASK_DEPENDENCY : dependency_side
+    RECURRENCE_RULE ||--o{ TASK : repeats
+    RECURRENCE_RULE ||--o{ EVENT : repeats
+    NODE ||--o{ OCCURRENCE : expands_to
+    PAGE ||--o{ DOCUMENT_CHUNK : splits_into
+    BLOCK_ANCHOR ||--o{ DOCUMENT_CHUNK : anchors
+    DOCUMENT_CHUNK ||--o| CHUNK_EMBEDDING : vectorizes
+    AI_MODEL ||--o{ CHUNK_EMBEDDING : creates
+    WORKSPACE ||--o{ SAVED_VIEW : owns
+    AI_BACKEND ||--o{ AI_MODEL : serves
+    WORKSPACE ||--o{ AI_RUN : records
+    AI_MODEL ||--o{ AI_RUN : executes
+    AI_RUN ||--o{ AI_RUN_SOURCE : cites
+    NODE ||--o{ AI_RUN_SOURCE : referenced_by
+    AI_RUN ||--o{ AI_PROPOSAL : creates
+    PAGE ||--o{ AI_PROPOSAL : targets
+    AI_MODEL ||--o{ MODEL_BENCHMARK : measured_by
+    WORKSPACE ||--o{ JOB : queues
+    WORKSPACE ||--o{ SETTING : configures
+    WORKSPACE ||--o{ BACKUP_RUN : backs_up
+    WORKSPACE ||--o{ AUDIT_LOG : audits
+
+    WORKSPACE {
+        string id PK
+        string name
+        string storage_mode
+        string data_path
+        datetime created_at
+        datetime updated_at
+    }
+
+    NODE {
+        string id PK
+        string workspace_id FK
+        string object_type_id FK
+        string node_kind
+        string title
+        string status
+        int version
+        string content_hash
+        datetime created_at
+        datetime updated_at
+        datetime deleted_at
+    }
+
+    PAGE {
+        string node_id PK
+        string parent_node_id FK
+        string body_markdown
+        string icon
+        string date_key
+        boolean is_daily
+        int sort_order
+        string frontmatter_json
+    }
+
+    PAGE_REVISION {
+        string id PK
+        string page_id FK
+        int revision_no
+        string body_markdown
+        string content_hash
+        string reason
+        datetime created_at
+    }
+
+    BLOCK_ANCHOR {
+        string id PK
+        string page_id FK
+        string anchor_key
+        string block_kind
+        int source_start
+        int source_end
+        string text_hash
+        string plain_text
+        datetime updated_at
+    }
+
+    OBJECT_TYPE {
+        string id PK
+        string workspace_id FK
+        string name
+        string icon
+        string base_kind
+        string template_markdown
+        boolean system_type
+    }
+
+    PROPERTY_DEFINITION {
+        string id PK
+        string object_type_id FK
+        string property_key
+        string label
+        string data_type
+        boolean required
+        int sort_order
+        string options_json
+    }
+
+    PROPERTY_VALUE {
+        string id PK
+        string node_id FK
+        string definition_id FK
+        string value_text
+        float value_number
+        boolean value_boolean
+        string value_date
+        string value_datetime
+        string value_node_id FK
+        string value_json
+    }
+
+    TAG {
+        string id PK
+        string workspace_id FK
+        string name
+        string normalized_name
+        string color
+    }
+
+    NODE_TAG {
+        string node_id PK
+        string tag_id PK
+        string source
+        datetime created_at
+    }
+
+    NODE_RELATION {
+        string id PK
+        string source_node_id FK
+        string target_node_id FK
+        string relation_type
+        string source_anchor_id FK
+        datetime created_at
+    }
+
+    PROJECT {
+        string node_id PK
+        string project_status
+        string start_date
+        string due_date
+        int priority
+        float progress
+    }
+
+    TASK {
+        string node_id PK
+        string project_id FK
+        string source_page_id FK
+        string source_anchor_id FK
+        string task_status
+        int priority
+        string start_at
+        string due_at
+        string completed_at
+        int estimate_minutes
+        string recurrence_rule_id FK
+    }
+
+    TASK_DEPENDENCY {
+        string task_id PK
+        string depends_on_task_id PK
+        string dependency_type
+    }
+
+    EVENT {
+        string node_id PK
+        string source_page_id FK
+        string start_at
+        string end_at
+        boolean all_day
+        string timezone
+        string location
+        string recurrence_rule_id FK
+    }
+
+    RECURRENCE_RULE {
+        string id PK
+        string rrule
+        string timezone
+        string until_at
+        int occurrence_count
+    }
+
+    OCCURRENCE {
+        string id PK
+        string source_node_id FK
+        string occurrence_start
+        string occurrence_end
+        string state
+        string override_json
+    }
+
+    ATTACHMENT {
+        string node_id PK
+        string page_id FK
+        string filename
+        string mime_type
+        string relative_path
+        int size_bytes
+        string sha256
+    }
+
+    DOCUMENT_CHUNK {
+        string id PK
+        string page_id FK
+        string anchor_id FK
+        int chunk_no
+        string heading_path
+        string plain_text
+        int token_count
+        string content_hash
+        string embedding_status
+    }
+
+    CHUNK_EMBEDDING {
+        string chunk_id PK
+        string model_id FK
+        int dimensions
+        blob vector_blob
+        string quantization
+        datetime updated_at
+    }
+
+    SAVED_VIEW {
+        string id PK
+        string workspace_id FK
+        string name
+        string target_kind
+        string layout
+        string query_json
+        string sort_json
+        string group_json
+    }
+
+    AI_BACKEND {
+        string id PK
+        string backend_kind
+        string endpoint
+        boolean enabled
+        string capabilities_json
+    }
+
+    AI_MODEL {
+        string id PK
+        string backend_id FK
+        string model_key
+        string model_role
+        string format
+        string quantization
+        string local_path
+        string sha256
+        int context_tokens
+    }
+
+    AI_RUN {
+        string id PK
+        string workspace_id FK
+        string model_id FK
+        string action_type
+        string status
+        string prompt_hash
+        int prompt_tokens
+        int generated_tokens
+        int ttft_ms
+        int total_ms
+        float prefill_tps
+        float decode_tps
+        float mtp_acceptance_rate
+        string error_code
+        datetime started_at
+        datetime ended_at
+    }
+
+    AI_RUN_SOURCE {
+        string ai_run_id PK
+        string node_id PK
+        string anchor_id FK
+        int source_rank
+        float relevance_score
+    }
+
+    AI_PROPOSAL {
+        string id PK
+        string ai_run_id FK
+        string page_id FK
+        int base_revision
+        string proposal_type
+        string patch_text
+        string status
+        datetime reviewed_at
+    }
+
+    MODEL_BENCHMARK {
+        string id PK
+        string model_id FK
+        string device_fingerprint
+        string config_json
+        int load_ms
+        int ttft_ms
+        float prefill_tps
+        float decode_tps
+        int peak_rss_mb
+        datetime created_at
+    }
+
+    JOB {
+        string id PK
+        string workspace_id FK
+        string job_type
+        string entity_id
+        string status
+        int priority
+        int attempts
+        string available_at
+        string last_error
+    }
+
+    SETTING {
+        string workspace_id PK
+        string setting_key PK
+        string value_json
+        datetime updated_at
+    }
+
+    BACKUP_RUN {
+        string id PK
+        string workspace_id FK
+        string backup_path
+        string sha256
+        int size_bytes
+        string status
+        datetime created_at
+    }
+
+    AUDIT_LOG {
+        string id PK
+        string workspace_id FK
+        string actor
+        string action
+        string target_node_id FK
+        string detail_json
+        datetime created_at
+    }

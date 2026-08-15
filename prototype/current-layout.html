@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Memoji Current UI Code-based Reconstruction</title>
+  <link rel="stylesheet" href="./prototype.css" />
+</head>
+<body>
+  <div class="app current-app">
+    <header class="topbar">
+      <div class="top-left"><button class="icon-btn">☰</button><div class="workspace-title">Memoji</div></div>
+      <div class="current-top-icons">
+        <button class="icon-btn">⛶</button><button class="icon-btn">◐</button><button class="icon-btn">◫</button>
+        <span style="width:1px;height:23px;background:var(--border)"></span>
+        <button class="icon-btn">▣</button><button class="icon-btn">⇩</button>
+        <span style="width:1px;height:23px;background:var(--border)"></span>
+        <button class="icon-btn">⌨</button><button class="icon-btn">⚙</button>
+        <span style="width:1px;height:23px;background:var(--border)"></span>
+        <button class="icon-btn">−</button><button class="icon-btn">□</button><button class="icon-btn close">×</button>
+      </div>
+    </header>
+    <main class="shell">
+      <aside class="left-panel">
+        <div class="current-tabs"><button class="active">▣ 데일리</button><button>▤ 프로젝트</button></div>
+        <div class="left-content">
+          <div class="section-title"><span>8월 14일(금)</span><span class="mini-actions"><button>+</button></span></div>
+          <div class="tree">
+            <div class="tree-row selected"><span>📄</span><span class="grow">구매AX Sprint1 개발회의</span><span>•••</span></div>
+            <div class="tree-row"><span>📄</span><span class="grow">주간 보고 초안</span><span>•••</span></div>
+            <div class="tree-row"><span>📄</span><span class="grow">AI 아이디어 메모</span><span>•••</span></div>
+          </div>
+        </div>
+        <div class="left-footer">
+          <div class="day-summary">
+            <strong>2026년 8월</strong>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;text-align:center;font-size:9px">
+              <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+              <span>9</span><span>10</span><span>11</span><span>12</span><span>13</span><span style="background:var(--accent);color:white;border-radius:50%">14</span><span>15</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+      <section class="canvas" style="grid-template-rows:auto minmax(0,1fr)">
+        <div class="document-bar">
+          <div class="doc-main"><div class="doc-title-row"><span class="doc-title">구매AX Sprint1 개발회의</span><span class="save-label">저장됨</span></div></div>
+          <div class="mode-switch"><button class="active">편집</button><button>원문</button></div>
+        </div>
+        <div class="editor-scroll">
+          <article class="editor-page">
+            <h1>구매AX Sprint1 개발회의</h1>
+            <p>현재 Memoji 화면은 데일리·프로젝트 탐색, Markdown 즉시 편집, 우측 검색과 로컬 AI를 한 화면에서 사용할 수 있도록 구성돼 있다.</p>
+            <h2>현재 구조의 장점</h2>
+            <ul><li>좌측 탐색·중앙 작성·우측 보조의 역할이 직관적이다.</li><li>페이지를 보면서 AI 답변을 바로 삽입할 수 있다.</li><li>VDI에서도 별도 웹 이동 없이 작업을 이어갈 수 있다.</li></ul>
+            <h2>공간 문제</h2>
+            <p>1,200px 창에서 좌우 패널이 각각 256px이므로 중앙은 약 688px이다. 우측 검색 결과와 AI가 세로로 고정 분할돼 기능 확장 시 서로 공간을 빼앗는다.</p>
+          </article>
+        </div>
+      </section>
+      <aside class="right-panel current-right">
+        <div class="current-search">
+          <input placeholder="검색..." />
+          <div class="current-filters"><button>⌕</button><button>제목</button><button>내용</button><button>#</button></div>
+        </div>
+        <div class="current-results">
+          <div class="generic-row"><strong>검색 결과</strong><small>구매AX Sprint1 개발회의</small></div>
+          <div class="generic-row"><strong>연관 페이지</strong><small>화면설계 검토</small></div>
+        </div>
+        <div class="current-ai">
+          <div class="current-ai-header"><strong>AI · Gemma 4 E2B</strong><br><span style="color:var(--faint)">VDI 스트리밍 · 최대 512토큰</span></div>
+          <div class="current-quick"><button>요약</button><button>정리</button><button>선택</button></div>
+          <div class="current-chat">
+            <div class="ai-bubble">로컬 Gemma 모델로 메모 작성을 도울 수 있습니다.</div>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+</body>
+</html>

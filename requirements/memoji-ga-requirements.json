@@ -1,0 +1,266 @@
+{
+  "package": {
+    "name": "Memoji 2.0 GA",
+    "generated_at": "2026-08-14",
+    "repository": "doublejun80/Memoji",
+    "baseline": {
+      "required": true,
+      "source": "PR #1 codex/review-settings-vdi-performance",
+      "reason": "autosave, close flush, Settings UX, VDI runtime manager를 보존해야 함"
+    }
+  },
+  "global_constraints": [
+    {
+      "id": "GC-001",
+      "rule": "Page Markdown remains the canonical source of truth."
+    },
+    {
+      "id": "GC-002",
+      "rule": "Default operation is fully offline; no cloud LLM endpoint is allowed."
+    },
+    {
+      "id": "GC-003",
+      "rule": "AI HTTP endpoints are loopback-only and must be authenticated when managed by Memoji."
+    },
+    {
+      "id": "GC-004",
+      "rule": "Existing memoji.db data must migrate transactionally with a pre-migration backup."
+    },
+    {
+      "id": "GC-005",
+      "rule": "The current three-pane desktop skeleton must remain recognizable."
+    },
+    {
+      "id": "GC-006",
+      "rule": "PR #1 save/flush/runtime reliability changes must not regress."
+    },
+    {
+      "id": "GC-007",
+      "rule": "No AI text replacement may bypass revision validation and user approval."
+    },
+    {
+      "id": "GC-008",
+      "rule": "Windows VDI at 800x600 is a supported minimum viewport."
+    }
+  ],
+  "priorities": {
+    "P0": "GA blocker",
+    "P1": "GA required",
+    "P2": "2.1 recommended",
+    "P3": "later or conditional"
+  },
+  "functional_requirements": [
+    {
+      "id": "FR-001",
+      "priority": "P0",
+      "title": "Resizable three-pane shell",
+      "acceptance": [
+        "left default 240px, right default 304px, center min 560px",
+        "panel sizes persist per device",
+        "right becomes overlay below 1100px"
+      ]
+    },
+    {
+      "id": "FR-002",
+      "priority": "P0",
+      "title": "Unified command palette",
+      "acceptance": [
+        "Ctrl+K opens pages, commands, tasks, recent items",
+        "search is no longer permanently consuming the right panel"
+      ]
+    },
+    {
+      "id": "FR-003",
+      "priority": "P0",
+      "title": "Context Hub",
+      "acceptance": [
+        "tabs: AI, Outline, Links, Tasks, Properties",
+        "active tab persists",
+        "AI tab uses full panel height"
+      ]
+    },
+    {
+      "id": "FR-004",
+      "priority": "P0",
+      "title": "Safe AI proposal flow",
+      "acceptance": [
+        "replace operations create proposal with baseRevision",
+        "diff preview and explicit apply are required",
+        "revision conflict blocks apply"
+      ]
+    },
+    {
+      "id": "FR-005",
+      "priority": "P0",
+      "title": "Save flush preservation",
+      "acceptance": [
+        "page/date/view/settings/export/close transitions flush editor",
+        "failed flush prevents navigation or close"
+      ]
+    },
+    {
+      "id": "FR-006",
+      "priority": "P1",
+      "title": "Workspace views",
+      "acceptance": [
+        "center supports editor, tasks, calendar, knowledge, search",
+        "opening a page returns to editor view"
+      ]
+    },
+    {
+      "id": "FR-007",
+      "priority": "P1",
+      "title": "Document header and metadata strip",
+      "acceptance": [
+        "title, save state, type, project, due date, tags, revision are visible",
+        "full properties are edited in Properties tab"
+      ]
+    },
+    {
+      "id": "FR-008",
+      "priority": "P1",
+      "title": "Backlinks and outline",
+      "acceptance": [
+        "current page headings appear in Outline",
+        "incoming and outgoing links appear in Links"
+      ]
+    },
+    {
+      "id": "FR-009",
+      "priority": "P1",
+      "title": "Tasks index",
+      "acceptance": [
+        "Markdown checkboxes remain in source",
+        "Today, Upcoming, Overdue and Completed filters exist"
+      ]
+    },
+    {
+      "id": "FR-010",
+      "priority": "P1",
+      "title": "Calendar workspace",
+      "acceptance": [
+        "month, week and day views",
+        "task due dates and events are shown together"
+      ]
+    },
+    {
+      "id": "FR-011",
+      "priority": "P1",
+      "title": "SQLite FTS search",
+      "acceptance": [
+        "title, body, tags and properties are indexed",
+        "large workspaces do not require loading every body into React"
+      ]
+    },
+    {
+      "id": "FR-012",
+      "priority": "P1",
+      "title": "Page revisions",
+      "acceptance": [
+        "every accepted content change creates revision history",
+        "restore creates a new revision instead of deleting history"
+      ]
+    },
+    {
+      "id": "FR-013",
+      "priority": "P1",
+      "title": "Runtime capability reporting",
+      "acceptance": [
+        "UI distinguishes local server streaming from verified MTP",
+        "target, assistant and acceptance rate appear only when reported"
+      ]
+    },
+    {
+      "id": "FR-014",
+      "priority": "P1",
+      "title": "AI cancellation and metrics",
+      "acceptance": [
+        "user can cancel generation",
+        "TTFT, prompt tokens, generated tokens and decode TPS are recorded"
+      ]
+    },
+    {
+      "id": "FR-015",
+      "priority": "P2",
+      "title": "Object types and properties",
+      "acceptance": [
+        "project, meeting, task, decision, risk, person, supplier, item and document templates"
+      ]
+    },
+    {
+      "id": "FR-016",
+      "priority": "P2",
+      "title": "Saved views",
+      "acceptance": [
+        "table, kanban, calendar and timeline definitions are persisted"
+      ]
+    },
+    {
+      "id": "FR-017",
+      "priority": "P2",
+      "title": "RAG with citations",
+      "acceptance": [
+        "AI answers cite page and heading sources",
+        "clicking source opens exact page and anchor"
+      ]
+    },
+    {
+      "id": "FR-018",
+      "priority": "P3",
+      "title": "Attachments, PDF, OCR and transcript import",
+      "acceptance": [
+        "implemented only after core storage and indexing are stable"
+      ]
+    }
+  ],
+  "nonfunctional_requirements": [
+    {
+      "id": "NFR-001",
+      "priority": "P0",
+      "title": "Offline security",
+      "target": "No outbound network access in default profile."
+    },
+    {
+      "id": "NFR-002",
+      "priority": "P0",
+      "title": "Data integrity",
+      "target": "No acknowledged save may be lost after process termination."
+    },
+    {
+      "id": "NFR-003",
+      "priority": "P0",
+      "title": "Accessibility",
+      "target": "Keyboard-complete navigation, visible focus and WCAG 2.2 AA contrast."
+    },
+    {
+      "id": "NFR-004",
+      "priority": "P1",
+      "title": "Startup",
+      "target": "Shell interactive under 2 seconds excluding AI model load on reference VDI."
+    },
+    {
+      "id": "NFR-005",
+      "priority": "P1",
+      "title": "Search latency",
+      "target": "p95 under 150ms for 10,000 pages after warm index."
+    },
+    {
+      "id": "NFR-006",
+      "priority": "P1",
+      "title": "UI typography",
+      "target": "No persistent control text below 11px; normal sidebar/control text 12-13px."
+    },
+    {
+      "id": "NFR-007",
+      "priority": "P1",
+      "title": "AI observability",
+      "target": "Cold/warm load, TTFT, prefill TPS, decode TPS and peak RSS are benchmarked."
+    },
+    {
+      "id": "NFR-008",
+      "priority": "P1",
+      "title": "Release integrity",
+      "target": "Signed executables, SHA256 manifest, NOTICE and SBOM."
+    }
+  ]
+}

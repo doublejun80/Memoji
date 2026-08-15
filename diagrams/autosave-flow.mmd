@@ -1,0 +1,23 @@
+sequenceDiagram
+    actor U as 사용자
+    participant M as Milkdown
+    participant H as useMarkdownPageEditor
+    participant Q as Serialized Save Queue
+    participant T as Tauri Page Command
+    participant DB as SQLite
+
+    U->>M: Markdown 편집
+    M->>H: onChange(markdown)
+    H->>H: debounce + contentHash 계산
+    H->>Q: enqueue(pageId, baseRevision, markdown)
+    Q->>T: save_page_v2
+    T->>DB: BEGIN IMMEDIATE
+    DB->>DB: revision 비교
+    DB->>DB: pages UPSERT
+    DB->>DB: page_versions INSERT
+    DB->>DB: index_jobs INSERT
+    DB-->>T: COMMIT + newRevision
+    T-->>Q: SaveResult
+    Q-->>H: 저장됨 / 충돌
+    H-->>M: 저장 상태 표시
+    Note over H,Q: 페이지 전환·날짜 변경·설정·내보내기·창 닫기 전 flushUnsaved()

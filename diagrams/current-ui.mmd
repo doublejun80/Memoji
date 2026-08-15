@@ -1,0 +1,17 @@
+flowchart TB
+    TBAR["TopBar · 52px<br/>패널 토글 · 집중모드 · 테마 · 저장 · 내보내기 · 설정 · 창 제어"]
+    BODY["기본 창 1200 × 800"]
+    LEFT["Left Sidebar · 256px 고정<br/>데일리 / 프로젝트 탭<br/>페이지·폴더 트리<br/>하단 미니 달력"]
+    CENTER["Markdown Editor · 가변 폭<br/>페이지 제목 · 저장 상태<br/>편집 / 원문<br/>Milkdown"]
+    RIGHT["Right Panel · 256px 고정<br/>상단 검색 + 필터<br/>결과 최대 180px<br/>나머지 AI Chat"]
+    SEARCH["SearchModal · Ctrl+K<br/>페이지 전체 배열을 프런트에서 검색"]
+    SETTINGS["SettingsModal<br/>PR #1에서 좌측 분류 / 우측 상세로 개선"]
+    AI["AIChatAssistant<br/>현재 문서 끝 2,000자<br/>요약 · 정리 · 선택<br/>삽입 · 치환"]
+
+    TBAR --> BODY
+    BODY --> LEFT
+    BODY --> CENTER
+    BODY --> RIGHT
+    RIGHT --> AI
+    TBAR -. Ctrl+K .-> SEARCH
+    TBAR -. 설정 .-> SETTINGS

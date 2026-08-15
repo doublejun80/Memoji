@@ -1,0 +1,19 @@
+flowchart TB
+    TOP["Top Command Bar · 48px<br/>좌측 패널 · Workspace · 통합 검색/명령 · 저장 상태 · AI 상태 · 우측 패널 · 창 제어"]
+    SHELL["Resizable Workspace Layout"]
+    LEFT["Workspace Sidebar · 기본 240px<br/>오늘 · 데일리 · 프로젝트 · 할 일 · 캘린더 · 지식<br/>현재 보기의 목록/트리만 표시"]
+    CANVAS["Workspace Canvas · 최소 560px<br/>Editor / Tasks / Calendar / Knowledge / Search"]
+    RIGHT["Context Hub · 기본 304px<br/>AI · 목차 · 링크 · 할 일 · 속성"]
+    STATUS["Context Status Bar · 22px<br/>저장 · Revision · 인덱스 · 단어 수 · Runtime"]
+    CMD["Command Palette · Ctrl+K<br/>페이지 · 명령 · 할 일 · 최근 · 빠른 캡처"]
+    SELECTION["Editor Selection Toolbar<br/>다듬기 · 요약 · 번역 · 할 일 추출"]
+    PROPOSAL["AI Proposal Card<br/>근거 · Diff 미리보기 · 적용 · 복사 · 폐기"]
+
+    TOP --> SHELL
+    SHELL --> LEFT
+    SHELL --> CANVAS
+    SHELL --> RIGHT
+    CANVAS --> STATUS
+    TOP -.-> CMD
+    CANVAS -. 선택 .-> SELECTION
+    RIGHT --> PROPOSAL

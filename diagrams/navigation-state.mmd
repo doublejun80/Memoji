@@ -1,0 +1,25 @@
+stateDiagram-v2
+    [*] --> editor
+    editor --> tasks: 할 일 보기
+    editor --> calendar: 캘린더 보기
+    editor --> knowledge: 지식 보기
+    editor --> search: 검색 결과 고정
+    tasks --> editor: 원문 페이지 열기
+    calendar --> editor: 연결 페이지 열기
+    knowledge --> editor: 객체/페이지 열기
+    search --> editor: 결과 선택
+
+    state editor {
+        [*] --> daily
+        daily --> project: 프로젝트 선택
+        project --> daily: 날짜 선택
+    }
+
+    state context_hub {
+        [*] --> ai
+        ai --> outline
+        outline --> links
+        links --> tasks_panel
+        tasks_panel --> properties
+        properties --> ai
+    }
