@@ -359,13 +359,37 @@
   border-left: 1px solid var(--memoji-border-strong);
 }
 
-.memoji-app-shell :where(button, input, textarea, select, a):focus-visible {
+.memoji-app-shell :where(button, input, textarea, select, a, [tabindex]):focus-visible {
   outline: 2px solid var(--memoji-focus-ring);
   outline-offset: 2px;
 }
 
+.workspace-loading,
+.modal-loading {
+  display: grid;
+  min-height: 120px;
+  place-items: center;
+  padding: 24px;
+  color: var(--memoji-text-secondary);
+  font-size: var(--memoji-text-sm);
+}
+
+.modal-loading {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  min-height: 0;
+  background: var(--memoji-overlay-scrim);
+  color: white;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .memoji-resize-handle {
+  .memoji-app-shell *,
+  .memoji-app-shell *::before,
+  .memoji-app-shell *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition: none;
   }
 }

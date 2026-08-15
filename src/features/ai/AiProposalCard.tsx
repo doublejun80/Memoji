@@ -1,6 +1,10 @@
+import { lazy, Suspense } from 'react';
 import { GitCompareArrows, TriangleAlert } from 'lucide-react';
-import { AiDiffDialog } from './AiDiffDialog';
 import type { AiProposal } from './aiProposalReducer';
+
+const AiDiffDialog = lazy(() => import('./AiDiffDialog').then((module) => ({
+  default: module.AiDiffDialog,
+})));
 
 interface AiProposalCardProps {
   proposal: AiProposal;
@@ -56,14 +60,18 @@ export function AiProposalCard({
       {proposal.status === 'pending' && (
         <button type="button" onClick={() => onOpenDiff?.(proposal.id)}>변경 비교</button>
       )}
-      <AiDiffDialog
-        proposal={proposal}
-        open={diffOpen}
-        onClose={onCloseDiff}
-        onApply={() => onApply(proposal.id)}
-        onReject={() => onReject(proposal.id)}
-        onOpenSource={onOpenSource}
-      />
+      {diffOpen && (
+        <Suspense fallback={<span role="status">변경 비교 불러오는 중…</span>}>
+          <AiDiffDialog
+            proposal={proposal}
+            open
+            onClose={onCloseDiff}
+            onApply={() => onApply(proposal.id)}
+            onReject={() => onReject(proposal.id)}
+            onOpenSource={onOpenSource}
+          />
+        </Suspense>
+      )}
     </article>
   );
 }

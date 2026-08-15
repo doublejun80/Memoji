@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-16T02:01:00+09:00",
+  "environment": {
+    "browser": "Chromium via Playwright",
+    "viewport": "1200x800",
+    "zoom": 1.25,
+    "reducedMotion": false
+  },
+  "measurements": {
+    "contextPanelToggleSamples": 20,
+    "contextPanelToggleP50Ms": 49.2,
+    "contextPanelToggleP95Ms": 49.8,
+    "horizontalOverflowPx": 0
+  },
+  "method": "Each sample clicks the responsive context-panel toggle and waits for two animation frames before recording elapsed performance.now time.",
+  "limitations": [
+    "This is a browser-preview interaction measurement, not a native Tauri or Windows VDI trace.",
+    "The two-animation-frame observation intentionally includes presentation synchronization time."
+  ]
+}

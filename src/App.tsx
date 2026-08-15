@@ -1,7 +1,6 @@
-import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { MarkdownEditor, MarkdownEditorHandle } from './components/MarkdownEditor';
+import React, { lazy, Suspense, useCallback, useState, useEffect, useRef } from 'react';
+import type { MarkdownEditorHandle } from './components/MarkdownEditor';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
-import { SettingsModal } from './components/SettingsModal';
 import { RightPanel } from './components/RightPanel';
 import { useFocusMode } from './contexts/FocusModeContext';
 import { Page, PageNavigationIndex, PageSelectionSource } from './types';
@@ -30,8 +29,23 @@ import {
   type AiSource,
 } from './features/ai/aiProposalReducer';
 import type { ApplyProposalResult } from './shared/api/proposalApi';
-import { TasksWorkspace } from './features/tasks/TasksWorkspace';
-import { CalendarWorkspace } from './features/calendar/CalendarWorkspace';
+
+const MarkdownEditor = lazy(() => import('./components/MarkdownEditor').then((module) => ({
+  default: module.MarkdownEditor,
+})));
+const TasksWorkspace = lazy(() => import('./features/tasks/TasksWorkspace').then((module) => ({
+  default: module.TasksWorkspace,
+})));
+const CalendarWorkspace = lazy(() => import('./features/calendar/CalendarWorkspace').then((module) => ({
+  default: module.CalendarWorkspace,
+})));
+const SettingsModal = lazy(() => import('./components/SettingsModal').then((module) => ({
+  default: module.SettingsModal,
+})));
+
+function WorkspaceLoading({ label }: { label: string }) {
+  return <div className="workspace-loading" role="status">{label} 불러오는 중…</div>;
+}
 
 interface CreatePageOptions {
   title: string;
@@ -837,30 +851,36 @@ function AppContent() {
             <WorkspaceCanvas
               view={workspaceUi.workspaceView}
               editor={(
-                <MarkdownEditor
-                  ref={editorRef}
-                  currentPage={currentPage}
-                  onPageUpdate={handlePageUpdate}
-                  pages={pages}
-                  onPageSelect={handlePageSelect}
-                  onPageCreate={handlePageCreate}
-                />
+                <Suspense fallback={<WorkspaceLoading label="편집기" />}>
+                  <MarkdownEditor
+                    ref={editorRef}
+                    currentPage={currentPage}
+                    onPageUpdate={handlePageUpdate}
+                    pages={pages}
+                    onPageSelect={handlePageSelect}
+                    onPageCreate={handlePageCreate}
+                  />
+                </Suspense>
               )}
               tasks={(
-                <TasksWorkspace
-                  pages={pages}
-                  onPageSelect={handlePageSelect}
-                  onPageUpdate={handlePageUpdate}
-                  onTasksUpdated={reloadPagesFromStorage}
-                />
+                <Suspense fallback={<WorkspaceLoading label="작업" />}>
+                  <TasksWorkspace
+                    pages={pages}
+                    onPageSelect={handlePageSelect}
+                    onPageUpdate={handlePageUpdate}
+                    onTasksUpdated={reloadPagesFromStorage}
+                  />
+                </Suspense>
               )}
               calendar={(
-                <CalendarWorkspace
-                  pages={pages}
-                  selectedDate={selectedDate}
-                  onDateSelect={handleCalendarDateSelect}
-                  onPageOpen={(page) => { void handlePageSelect(page); }}
-                />
+                <Suspense fallback={<WorkspaceLoading label="캘린더" />}>
+                  <CalendarWorkspace
+                    pages={pages}
+                    selectedDate={selectedDate}
+                    onDateSelect={handleCalendarDateSelect}
+                    onPageOpen={(page) => { void handlePageSelect(page); }}
+                  />
+                </Suspense>
               )}
             />
           )}
@@ -927,13 +947,17 @@ function AppContent() {
       />
 
       {/* 설정 모달 */}
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        appTitle={appTitle}
-        onAppTitleChange={handleAppTitleChange}
-        onDataImported={reloadPagesFromStorage}
-      />
+      {isSettingsOpen && (
+        <Suspense fallback={<div className="modal-loading" role="status">설정 불러오는 중…</div>}>
+          <SettingsModal
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            appTitle={appTitle}
+            onAppTitleChange={handleAppTitleChange}
+            onDataImported={reloadPagesFromStorage}
+          />
+        </Suspense>
+      )}
 
       <Toaster />
     </AppShell>

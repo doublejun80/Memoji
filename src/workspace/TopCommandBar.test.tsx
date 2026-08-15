@@ -29,7 +29,7 @@ describe('TopCommandBar', () => {
 
     expect(screen.getByRole('button', { name: '왼쪽 패널 닫기' })).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Memoji' })).toBeVisible();
-    expect(screen.getByRole('button', { name: '명령 또는 검색 열기' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '명령 또는 검색 Ctrl K 열기' })).toBeVisible();
     expect(screen.getByRole('button', { name: '저장됨' })).toBeVisible();
     expect(screen.getByText('로컬 AI 준비')).toBeVisible();
     expect(screen.getByRole('button', { name: '오른쪽 패널 닫기' })).toBeVisible();

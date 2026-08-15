@@ -556,8 +556,9 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
     if (!toolbar) return;
 
     const headingButton = toolbar.querySelector('.top-bar-heading-button') as HTMLElement | null;
+    const visibleHeadingLabel = headingButton?.textContent?.trim() || '문단 형식';
     headingButton?.setAttribute('title', '문단 형식');
-    headingButton?.setAttribute('aria-label', '문단 형식');
+    headingButton?.setAttribute('aria-label', `${visibleHeadingLabel} 문단 형식`);
 
     const buttons = Array.from(toolbar.querySelectorAll('.top-bar-item')) as HTMLElement[];
     buttons.forEach((button, index) => {
@@ -725,6 +726,10 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
       defaultValue: valueRef.current,
       features: {
         [Crepe.Feature.BlockEdit]: false,
+        // Crepe's decorated list-item node view inserts a div between ul/ol
+        // and li. Native Milkdown list rendering preserves valid list
+        // semantics while retaining Markdown list editing.
+        [Crepe.Feature.ListItem]: false,
         [Crepe.Feature.Table]: true,
         [Crepe.Feature.TopBar]: true,
       },
@@ -768,6 +773,7 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
       crepe.editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
         if (!view) return;
+        view.dom.setAttribute('aria-label', '문서 본문 편집기');
         if (crepe.getMarkdown() === valueRef.current) return;
         replaceAll(valueRef.current)(ctx);
       });

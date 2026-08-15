@@ -32,21 +32,21 @@
   background: var(--background); font-size: 11px;
 }
 .memoji-ai-spinner { width: 14px; height: 14px; animation: spin 1s linear infinite; }
-.memoji-ai-clear { color: var(--muted-foreground); font-size: 10px; }
+.memoji-ai-clear { color: var(--muted-foreground); font-size: 11px; }
 .memoji-ai-status-card {
   display: grid; gap: 4px; padding: 8px;
   border: 1px solid var(--sidebar-border); border-radius: 7px;
-  background: color-mix(in srgb, var(--muted) 72%, transparent); font-size: 10px;
+  background: color-mix(in srgb, var(--muted) 72%, transparent); font-size: 11px;
 }
-.memoji-ai-status-card span { color: var(--muted-foreground); line-height: 1.4; }
+.memoji-ai-status-card span { color: var(--memoji-text-secondary); line-height: 1.4; }
 .memoji-ai-status-card button,
 .memoji-ai-token-presets button,
 .memoji-ai-quick-actions button,
 .memoji-ai-message-actions button {
   min-height: 24px; padding: 0 8px; border: 1px solid var(--sidebar-border);
-  border-radius: 6px; background: var(--background); font-size: 10px;
+  border-radius: 6px; background: var(--background); font-size: 11px;
 }
-.memoji-ai-runtime-row { color: var(--muted-foreground); font-size: 10px; }
+.memoji-ai-runtime-row { color: var(--muted-foreground); font-size: 11px; }
 .memoji-ai-runtime-badge {
   padding: 2px 6px; border-radius: 999px; background: var(--muted);
   color: var(--foreground); font-weight: 600;
@@ -100,14 +100,14 @@
 .memoji-ai-proposal > header { display: flex; align-items: center; gap: 7px; }
 .memoji-ai-proposal > header svg { width: 15px; height: 15px; color: var(--primary); }
 .memoji-ai-proposal > header div { display: grid; flex: 1; gap: 1px; }
-.memoji-ai-proposal > header span { color: var(--muted-foreground); font-size: 9px; }
+.memoji-ai-proposal > header span { color: var(--muted-foreground); font-size: 11px; }
 .memoji-ai-proposal > p { margin: 0; color: var(--muted-foreground); line-height: 1.45; }
 .memoji-ai-proposal-sources,
 .memoji-ai-diff-sources { display: flex; flex-wrap: wrap; gap: 5px; }
 .memoji-ai-proposal-sources button,
-.memoji-ai-diff-sources button { color: var(--primary); font-size: 10px; text-align: left; }
+.memoji-ai-diff-sources button { color: var(--primary); font-size: 11px; text-align: left; }
 .memoji-ai-diff-sources { display: grid; padding: 9px 10px; border-radius: 7px; background: var(--muted); }
-.memoji-ai-diff-sources strong { font-size: 10px; }
+.memoji-ai-diff-sources strong { font-size: 11px; }
 .memoji-ai-proposal > button {
   min-height: 28px; border: 1px solid var(--primary); border-radius: 7px;
   color: var(--primary); font-weight: 600;
@@ -124,10 +124,10 @@
   border-radius: 12px; background: var(--background); box-shadow: 0 20px 60px rgb(0 0 0 / .28);
 }
 .memoji-ai-diff-dialog > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
-.memoji-ai-diff-dialog > header span { color: var(--muted-foreground); font-size: 10px; }
+.memoji-ai-diff-dialog > header span { color: var(--muted-foreground); font-size: 11px; }
 .memoji-ai-diff-dialog h3 { margin: 2px 0 0; font-size: 16px; }
 .memoji-ai-diff-dialog > header button { width: 28px; height: 28px; border-radius: 6px; }
-.memoji-ai-diff-meta { display: flex; gap: 18px; margin: 0; font-size: 10px; }
+.memoji-ai-diff-meta { display: flex; gap: 18px; margin: 0; font-size: 11px; }
 .memoji-ai-diff-meta div { display: flex; gap: 5px; }
 .memoji-ai-diff-meta dt { color: var(--muted-foreground); }
 .memoji-ai-diff-meta dd { margin: 0; font-weight: 600; }

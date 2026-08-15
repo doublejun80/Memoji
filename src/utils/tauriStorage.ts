@@ -1,6 +1,7 @@
 import { Page } from '../types';
 import { normalizePage } from './pageModel';
 import { tauriPageApi, type PageBodyDto, type PageSummaryDto } from '../shared/api/pageApi';
+import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 
 export interface DatabaseImportSummary {
   imported: number;
@@ -15,15 +16,13 @@ export interface PagesZipExportSummary {
 }
 
 // Dynamic import for Tauri API to handle environments where it's not available
-let invoke: any = null;
+let invoke: typeof tauriInvoke | null = tauriInvoke;
 
 const initTauri = async () => {
   try {
     // Check if we're in a Tauri environment
     if (typeof window !== 'undefined' && 
         ((window as any).__TAURI__ || (window as any).__TAURI_INTERNALS__)) {
-      const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
-      invoke = tauriInvoke;
       return true;
     }
   } catch (error) {

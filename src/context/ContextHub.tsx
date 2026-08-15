@@ -61,7 +61,12 @@ export function ContextHub({
         <span>CONTEXT</span>
         <Tabs.List className="context-hub-tabs" aria-label="Context Hub">
           {tabs.map(({ id, label, icon: Icon }) => (
-            <Tabs.Trigger key={id} value={id} aria-label={label} title={label}>
+            <Tabs.Trigger
+              key={id}
+              value={id}
+              aria-label={id === 'tasks' && taskCount > 0 ? `${label}, 미완료 ${taskCount}개` : label}
+              title={label}
+            >
               <Icon aria-hidden="true" />
               {id === 'tasks' && taskCount > 0 ? <span className="context-tab-badge">{taskCount}</span> : null}
             </Tabs.Trigger>

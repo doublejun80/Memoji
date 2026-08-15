@@ -101,7 +101,7 @@ export function TopCommandBar(props: TopCommandBarProps) {
       <button
         type="button"
         className="memoji-command-launcher"
-        aria-label="명령 또는 검색 열기"
+        aria-label="명령 또는 검색 Ctrl K 열기"
         onClick={props.onOpenPalette}
       >
         <Command aria-hidden="true" />

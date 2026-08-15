@@ -51,7 +51,7 @@ describe('AiProposalCard', () => {
       />,
     );
 
-    expect(screen.getByRole('dialog', { name: 'AI 변경 제안 비교' })).toHaveTextContent('<script>안전한 텍스트</script>');
+    expect(await screen.findByRole('dialog', { name: '선택 영역 다듬기' })).toHaveTextContent('<script>안전한 텍스트</script>');
     expect(screen.queryByRole('script')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: '변경 적용' }));
     expect(onApply).toHaveBeenCalledWith(proposal.id);
@@ -77,7 +77,7 @@ describe('AiProposalCard', () => {
       />,
     );
 
-    const citationButtons = screen.getAllByRole('button', { name: /출시 근거/ });
+    const citationButtons = await screen.findAllByRole('button', { name: /출시 근거/ });
     await userEvent.click(citationButtons[0]);
     await userEvent.click(citationButtons[1]);
     expect(onOpenSource).toHaveBeenCalledTimes(2);

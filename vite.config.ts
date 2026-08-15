@@ -64,6 +64,54 @@ export default defineConfig({
     // produce sourcemaps for debug builds
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
     outDir: 'dist',
+    // The Milkdown + CodeMirror runtime is a single deferred editor boundary.
+    // Keep the warning below 1 MB while the always-on shell stays below 500 KB.
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        onlyExplicitManualChunks: true,
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          const crepeFeature = id.match(/\/@milkdown\/crepe\/lib\/esm\/feature\/([^/]+)/)?.[1];
+          if (crepeFeature) return `editor-crepe-${crepeFeature}`;
+          if (id.includes('/@milkdown/crepe/')) return 'editor-crepe';
+          if (
+            id.includes('/@milkdown/') ||
+            id.includes('/prosemirror-') ||
+            id.includes('/node_modules/orderedmap/') ||
+            id.includes('/node_modules/rope-sequence/') ||
+            id.includes('/node_modules/w3c-keyname/')
+          ) return 'editor-milkdown';
+          if (id.includes('/node_modules/vue/') || id.includes('/node_modules/@vue/')) return 'editor-vue';
+          if (id.includes('/node_modules/lodash-es/')) return 'editor-utilities';
+          if (id.includes('/node_modules/dompurify/')) return 'editor-sanitize';
+          if (
+            id.includes('/node_modules/codemirror/') ||
+            /\/node_modules\/@codemirror\/(autocomplete|commands|language|language-data|lint|search|state|theme-one-dark|view)\//.test(id) ||
+            /\/node_modules\/@lezer\/(common|highlight|lr)\//.test(id) ||
+            id.includes('/node_modules/@marijn/') ||
+            id.includes('/node_modules/style-mod/') ||
+            id.includes('/node_modules/crelt/')
+          ) return 'editor-milkdown';
+          if (id.includes('/node_modules/katex/') || id.includes('/node_modules/remark-math/')) return 'editor-math';
+          if (
+            id.includes('/node_modules/micromark') ||
+            id.includes('/node_modules/mdast-util-') ||
+            id.includes('/node_modules/remark-') ||
+            id.includes('/node_modules/unist-util-') ||
+            id.includes('/node_modules/vfile') ||
+            id.includes('/node_modules/unified/') ||
+            /\/node_modules\/(bail|ccount|decode-named-character-reference|devlop|escape-string-regexp|extend|is-plain-obj|longest-streak|markdown-table|trough|zwitch)\//.test(id)
+          ) return 'editor-markdown-runtime';
+          if (id.includes('/node_modules/@ocavue/')) return 'editor-milkdown';
+          if (id.includes('/node_modules/@floating-ui/')) return 'shared-floating';
+          // CodeMirror language data uses dynamic imports. Let Rollup preserve
+          // those boundaries instead of collapsing every grammar into one
+          // multi-megabyte editor chunk.
+          return undefined;
+        },
+      },
+    },
   },
   server: {
     // make sure this port matches the devUrl port in tauri.conf.json file

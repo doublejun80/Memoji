@@ -8,6 +8,14 @@ import type {
   LocalAiStatus,
 } from '../../types/localAi';
 import type { AiGenerationRequest } from '../../features/ai/aiTypes';
+import { getEnvironment } from '../../utils/environment';
+
+const nativeInvoke = <T>(command: string, payload?: Record<string, unknown>): Promise<T> => {
+  if (!getEnvironment().isTauri) {
+    return Promise.reject(new Error('로컬 AI는 Memoji 데스크톱 앱에서 사용할 수 있습니다.'));
+  }
+  return invoke<T>(command, payload);
+};
 
 export interface AiApi {
   getStatus(): Promise<LocalAiStatus>;
@@ -34,14 +42,14 @@ const finishRun = (request: {
   promptTokens?: number;
   generatedTokens?: number;
   errorCode?: string;
-}) => invoke<void>('finish_ai_run', { request });
+}) => nativeInvoke<void>('finish_ai_run', { request });
 
 export const tauriAiApi: AiApi = {
-  getStatus: () => invoke<LocalAiStatus>('local_ai_status'),
-  loadModel: () => invoke<LocalAiStatus>('local_ai_load'),
-  saveRuntimeConfig: (config) => invoke('local_ai_save_runtime_config', { config }),
+  getStatus: () => nativeInvoke<LocalAiStatus>('local_ai_status'),
+  loadModel: () => nativeInvoke<LocalAiStatus>('local_ai_load'),
+  saveRuntimeConfig: (config) => nativeInvoke('local_ai_save_runtime_config', { config }),
   generate: async ({ requestId, request, useServer, currentPageId, currentProjectId, objectType }) => {
-    const prepared = await invoke<PreparedAiRun>('create_ai_run', {
+    const prepared = await nativeInvoke<PreparedAiRun>('create_ai_run', {
       request: {
         id: requestId,
         pageId: currentPageId,
@@ -53,7 +61,7 @@ export const tauriAiApi: AiApi = {
       },
     });
     try {
-      const response = await invoke<LocalAiGenerateResponse>(
+      const response = await nativeInvoke<LocalAiGenerateResponse>(
         useServer ? 'local_ai_generate_mtp_stream' : 'local_ai_generate_stream',
         {
           requestId,
@@ -80,12 +88,15 @@ export const tauriAiApi: AiApi = {
   },
   cancel: async (requestId) => {
     await Promise.allSettled([
-      invoke<void>('local_ai_cancel', { requestId }),
+      nativeInvoke<void>('local_ai_cancel', { requestId }),
       finishRun({ id: requestId, status: 'cancelled' }),
     ]);
   },
-  subscribeToChunks: async (listener) => listen<LocalAiGenerateStreamChunk>(
-    'local-ai-generate-chunk',
-    (event) => listener(event.payload),
-  ),
+  subscribeToChunks: async (listener) => {
+    if (!getEnvironment().isTauri) return () => undefined;
+    return listen<LocalAiGenerateStreamChunk>(
+      'local-ai-generate-chunk',
+      (event) => listener(event.payload),
+    );
+  },
 };

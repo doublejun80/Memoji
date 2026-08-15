@@ -25,7 +25,7 @@
 
 .calendar-title span {
   color: var(--memoji-text-tertiary);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: .12em;
 }
@@ -205,7 +205,7 @@
   padding: 1px 4px;
   background: var(--memoji-primary-tint);
   color: var(--memoji-text-primary);
-  font-size: 10px;
+  font-size: 11px;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -224,7 +224,7 @@
 .calendar-cell-items small {
   padding-left: 5px;
   color: var(--memoji-text-tertiary);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .calendar-week {
@@ -252,7 +252,7 @@
 
 .calendar-week-date span {
   color: var(--memoji-text-tertiary);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .calendar-week-date strong {
@@ -284,7 +284,7 @@
 
 .calendar-week-items span {
   color: var(--memoji-text-tertiary);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .calendar-week-items strong {
