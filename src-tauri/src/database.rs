@@ -1,6 +1,7 @@
-use rusqlite::{params, Connection, OptionalExtension, Result};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -210,6 +211,47 @@ impl Database {
         Ok(())
     }
 
+    pub fn import_pages_from_path(
+        &self,
+        source_path: &Path,
+        backup_path: &Path,
+    ) -> std::result::Result<ImportDatabaseSummary, String> {
+        const SQLITE_HEADER: &[u8; 16] = b"SQLite format 3\0";
+
+        let canonical_source = source_path
+            .canonicalize()
+            .map_err(|error| format!("Failed to resolve imported database path: {error}"))?;
+        let metadata = canonical_source
+            .metadata()
+            .map_err(|error| format!("Failed to inspect imported database: {error}"))?;
+        if !metadata.is_file() {
+            return Err("선택한 경로가 DB 파일이 아닙니다.".to_string());
+        }
+
+        let mut source_file = std::fs::File::open(&canonical_source)
+            .map_err(|error| format!("Failed to open imported database: {error}"))?;
+        let mut header = [0_u8; 16];
+        source_file
+            .read_exact(&mut header)
+            .map_err(|_| "SQLite memoji.db 파일이 아닙니다.".to_string())?;
+        if &header != SQLITE_HEADER {
+            return Err("SQLite memoji.db 파일이 아닙니다.".to_string());
+        }
+        drop(source_file);
+
+        let source =
+            Connection::open_with_flags(&canonical_source, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|error| format!("Failed to open imported database read-only: {error}"))?;
+        validate_source_database(&source)?;
+
+        if let Some(parent) = backup_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("Failed to create backup directory: {error}"))?;
+        }
+        self.backup_to(backup_path)?;
+        self.import_pages_from_connection(&source)
+    }
+
     pub fn import_pages_from_connection(
         &self,
         source: &Connection,
@@ -370,6 +412,7 @@ impl Database {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageExportEntry {
+    pub page_id: String,
     pub path: String,
     pub content: String,
 }
@@ -382,6 +425,7 @@ pub fn build_page_export_entries(pages: &[Page]) -> Vec<PageExportEntry> {
         .iter()
         .filter(|page| page.page_type != "folder")
         .map(|page| PageExportEntry {
+            page_id: page.id.clone(),
             path: page_export_path(page, &pages_by_id),
             content: page_export_content(page),
         })
@@ -747,11 +791,60 @@ fn unique_import_id(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn in_memory_database() -> Database {
         Database {
             conn: Connection::open_in_memory().unwrap(),
         }
+    }
+
+    fn import_test_directory(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "memoji-import-{name}-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).expect("create import test directory");
+        directory
+    }
+
+    fn create_import_source(path: &Path, page_id: &str, content: &str) {
+        let source = Connection::open(path).expect("open source database");
+        source
+            .execute_batch(
+                "CREATE TABLE pages (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    icon TEXT NOT NULL,
+                    parent_id TEXT,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    tags TEXT NOT NULL,
+                    page_order INTEGER NOT NULL
+                );",
+            )
+            .expect("create source schema");
+        source
+            .execute(
+                "INSERT INTO pages
+                    (id, title, icon, parent_id, content, created_at, updated_at, type, tags, page_order)
+                 VALUES (?1, '가져온 메모', '📄', NULL, ?2,
+                    '2026-08-16T00:00:00Z', '2026-08-16T00:00:00Z', 'page', '[]', 0)",
+                params![page_id, content],
+            )
+            .expect("insert source page");
+    }
+
+    fn create_file_target(path: &Path) -> Database {
+        let database = Database::new(path.to_path_buf()).expect("open target database");
+        database.init().expect("init target database");
+        database
     }
 
     fn export_test_page(
@@ -1056,5 +1149,102 @@ mod tests {
         assert!(pages
             .iter()
             .any(|page| page.id != "same-id" && page.content == "가져온 내용"));
+    }
+
+    #[test]
+    fn path_import_rejects_non_sqlite_and_corrupt_databases_without_changing_target() {
+        let directory = import_test_directory("reject");
+        let target_path = directory.join("target.db");
+        let target = create_file_target(&target_path);
+        target
+            .save_page(&export_test_page(
+                "existing",
+                "기존 메모",
+                "page",
+                None,
+                Some("2026-08-16"),
+                0,
+            ))
+            .expect("save existing page");
+
+        let text_path = directory.join("not-sqlite.db");
+        std::fs::write(&text_path, b"not a sqlite database").expect("write text fixture");
+        let text_backup = directory.join("text-backup.db");
+        let text_error = target
+            .import_pages_from_path(&text_path, &text_backup)
+            .expect_err("non-SQLite file must fail");
+        assert!(text_error.contains("SQLite memoji.db"));
+        assert!(!text_backup.exists());
+
+        let corrupt_path = directory.join("corrupt.db");
+        std::fs::write(&corrupt_path, b"SQLite format 3\0corrupt payload")
+            .expect("write corrupt fixture");
+        let corrupt_backup = directory.join("corrupt-backup.db");
+        assert!(target
+            .import_pages_from_path(&corrupt_path, &corrupt_backup)
+            .is_err());
+        assert!(!corrupt_backup.exists());
+
+        let pages = target.get_pages().expect("read unchanged target");
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].id, "existing");
+        assert!(!directory.join("imports").exists());
+        std::fs::remove_dir_all(directory).expect("clean import test directory");
+    }
+
+    #[test]
+    fn path_import_streams_large_database_creates_backup_and_merges_duplicates() {
+        let directory = import_test_directory("large");
+        let target_path = directory.join("target.db");
+        let target = create_file_target(&target_path);
+        target
+            .save_page(&export_test_page(
+                "same-id",
+                "기존 메모",
+                "page",
+                None,
+                Some("2026-08-16"),
+                0,
+            ))
+            .expect("save existing page");
+
+        let source_path = directory.join("large-source.db");
+        create_import_source(&source_path, "same-id", "가져온 내용");
+        {
+            let source = Connection::open(&source_path).expect("reopen source");
+            source
+                .execute_batch("CREATE TABLE padding (payload BLOB NOT NULL);")
+                .expect("create padding table");
+            source
+                .execute(
+                    "INSERT INTO padding(payload) VALUES (zeroblob(?1))",
+                    [33_i64 * 1024 * 1024],
+                )
+                .expect("pad source over legacy byte-array limit");
+        }
+        assert!(
+            std::fs::metadata(&source_path)
+                .expect("source metadata")
+                .len()
+                > 32 * 1024 * 1024
+        );
+
+        let backup_path = directory.join("backups/before-import.db");
+        let summary = target
+            .import_pages_from_path(&source_path, &backup_path)
+            .expect("large path import");
+        assert_eq!(summary.duplicated, 1);
+        assert!(backup_path.exists());
+        assert_eq!(target.get_pages().expect("merged pages").len(), 2);
+
+        let backup = Connection::open_with_flags(&backup_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .expect("open backup");
+        let backup_count: i64 = backup
+            .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))
+            .expect("backup count");
+        assert_eq!(backup_count, 1);
+        drop(backup);
+
+        std::fs::remove_dir_all(directory).expect("clean import test directory");
     }
 }

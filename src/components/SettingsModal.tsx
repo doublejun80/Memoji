@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-dialog';
 import {
   AppWindow,
   Bot,
@@ -109,7 +110,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [editorPreferences, setEditorPreferences] = useState(readEditorPreferences);
   const [aiAdvancedOpen, setAiAdvancedOpen] = useState(false);
   const [aiDiagnosticsOpen, setAiDiagnosticsOpen] = useState(false);
-  const databaseInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setTitle(appTitle);
@@ -331,20 +331,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const importDatabase = async (file: File | null | undefined) => {
-    if (!file) return;
+  const importDatabase = async () => {
+    let selectedPath: string | string[] | null;
+    try {
+      selectedPath = await open({
+        title: 'Memoji DB 가져오기',
+        multiple: false,
+        directory: false,
+        filters: [{ name: 'SQLite database', extensions: ['db'] }],
+      });
+    } catch (error) {
+      toast.error('DB 파일 선택 실패: ' + String(error));
+      return;
+    }
+    if (!selectedPath) return;
+    if (Array.isArray(selectedPath)) {
+      toast.error('DB 파일은 하나만 선택해주세요.');
+      return;
+    }
 
     setIsImportingDatabase(true);
     try {
-      const summary = await tauriStorage.importDatabaseFile(file);
+      const summary = await tauriStorage.importDatabasePath(selectedPath);
       await onDataImported?.();
       const addedCount = summary.imported + summary.duplicated;
-      toast.success(`DB 가져오기 완료: ${addedCount}개 추가, ${summary.skipped}개 중복 건너뜀`);
+      toast.success(`DB 가져오기 완료: ${addedCount}개 추가, ${summary.skipped}개 중복 건너뜀`, {
+        description: `자동 백업: ${summary.backup_path}`,
+      });
     } catch (error) {
       toast.error('DB 가져오기 실패: ' + String(error));
     } finally {
       setIsImportingDatabase(false);
-      if (databaseInputRef.current) databaseInputRef.current.value = '';
     }
   };
 
@@ -876,18 +893,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <p>가져오기는 현재 DB를 먼저 백업한 뒤 병합합니다.</p>
                     </div>
                   </div>
-                  <input
-                    ref={databaseInputRef}
-                    type="file"
-                    accept=".db,application/x-sqlite3,application/vnd.sqlite3,application/octet-stream"
-                    className="memoji-settings-file-input"
-                    onChange={(event) => void importDatabase(event.target.files?.[0])}
-                  />
                   <div className="memoji-settings-data-actions">
                     <Button
                       variant="outline"
                       type="button"
-                      onClick={() => databaseInputRef.current?.click()}
+                      onClick={() => void importDatabase()}
                       disabled={!isDesktopData || isImportingDatabase || isExportingPages}
                     >
                       {isImportingDatabase

@@ -7,6 +7,10 @@ on:
       - main
       - master
 
+concurrency:
+  group: windows-dist-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows-x64:
     name: Build Windows x64
@@ -26,46 +30,60 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
 
-      - name: Install frontend dependencies
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install locked frontend dependencies
         run: npm ci
 
+      - name: Verify versions and quality gates
+        run: |
+          node scripts/verify-release-version.mjs
+          npm run check
+          cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check
+          cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+          cargo test --manifest-path src-tauri/Cargo.toml --locked
+
       - name: Build Windows bundle
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri:build -- --target x86_64-pc-windows-msvc
 
-      - name: Collect artifacts
+      - name: Read application version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Collect artifacts and provenance
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Force -Path "release/windows-x64" | Out-Null
+          $version = "${{ steps.version.outputs.version }}"
+          $releaseRoot = "src-tauri/target/x86_64-pc-windows-msvc/release"
+          $output = "release/windows-x64"
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
 
-          $appCandidates = @(
-            "src-tauri/target/x86_64-pc-windows-msvc/release/Memoji.exe",
-            "src-tauri/target/x86_64-pc-windows-msvc/release/app.exe",
-            "src-tauri/target/release/Memoji.exe",
-            "src-tauri/target/release/app.exe"
-          )
-          $setupCandidates = @(
-            "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/Memoji_2.0.0_x64-setup.exe",
-            "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/Memoji_2.0.0-setup.exe",
-            "src-tauri/target/release/bundle/nsis/Memoji_2.0.0_x64-setup.exe",
-            "src-tauri/target/release/bundle/nsis/Memoji_2.0.0-setup.exe"
-          )
-
+          $appCandidates = @("$releaseRoot/Memoji.exe", "$releaseRoot/app.exe")
           $appPath = $appCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          $setupPath = $setupCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          $setupPath = Get-ChildItem "$releaseRoot/bundle/nsis" -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $appPath) { throw "Windows executable was not found after tauri build." }
 
-          if (-not $appPath) {
-            throw "Windows executable was not found after tauri build."
-          }
-
-          Copy-Item $appPath "release/windows-x64/Memoji_2.0.0_x64.exe" -Force
-          if ($setupPath) {
-            Copy-Item $setupPath "release/windows-x64/Memoji_2.0.0_x64-setup.exe" -Force
-          }
+          Copy-Item $appPath "$output/Memoji_${version}_x64.exe" -Force
+          if ($setupPath) { Copy-Item $setupPath.FullName "$output/Memoji_${version}_x64-setup.exe" -Force }
+          Copy-Item NOTICE.md "$output/NOTICE.md" -Force
+          pwsh -File scripts/generate-sbom.ps1 -OutputPath "$output/sbom.cdx.json"
+          node scripts/generate-checksums.mjs --input $output --output "$output/SHA256SUMS"
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Memoji-2.0.0-windows-x64
+          name: Memoji-${{ steps.version.outputs.version }}-windows-x64
           path: release/windows-x64/*
+          if-no-files-found: error

@@ -33,9 +33,10 @@ use local_ai::{
     LocalAiGenerateStreamChunk, LocalAiRuntimeKind, LocalAiState, LocalAiStatus, MtpConfig,
     DEFAULT_MTP_MODEL,
 };
-use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
-use std::io::Write;
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, Window};
@@ -105,6 +106,56 @@ struct ImportDatabaseResult {
 struct PagesZipExportResult {
     exported: usize,
     zip_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportDatabaseManifest {
+    path: String,
+    sha256: String,
+    bytes: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportCountsManifest {
+    pages: usize,
+    markdown_files: usize,
+    revisions: i64,
+    attachments: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportPageManifest {
+    id: String,
+    title: String,
+    page_type: String,
+    revision: i64,
+    updated_at: String,
+    markdown_path: Option<String>,
+    sha256: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportAttachmentManifest {
+    path: String,
+    sha256: String,
+    bytes: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportManifest {
+    format_version: u32,
+    app_version: String,
+    schema_version: i64,
+    generated_at: String,
+    database: ExportDatabaseManifest,
+    counts: ExportCountsManifest,
+    pages: Vec<ExportPageManifest>,
+    attachments: Vec<ExportAttachmentManifest>,
 }
 
 impl ImportDatabaseResult {
@@ -332,6 +383,51 @@ mod runtime_config_tests {
         assert!(config.migrate_legacy_litert_endpoint());
         assert_eq!(config.endpoint, DEFAULT_LITERT_LM_ENDPOINT);
     }
+
+    #[test]
+    fn export_manifest_uses_versioned_camel_case_contract_and_sha256() {
+        let manifest = ExportManifest {
+            format_version: 1,
+            app_version: "2.0.0".to_string(),
+            schema_version: 6,
+            generated_at: "2026-08-16T00:00:00+09:00".to_string(),
+            database: ExportDatabaseManifest {
+                path: "database/memoji.db".to_string(),
+                sha256: sha256_bytes(b"abc"),
+                bytes: 3,
+            },
+            counts: ExportCountsManifest {
+                pages: 1,
+                markdown_files: 1,
+                revisions: 2,
+                attachments: 0,
+            },
+            pages: vec![ExportPageManifest {
+                id: "page-1".to_string(),
+                title: "테스트".to_string(),
+                page_type: "page".to_string(),
+                revision: 2,
+                updated_at: "2026-08-16T00:00:00Z".to_string(),
+                markdown_path: Some("daily/2026-08-16/테스트__page-1.md".to_string()),
+                sha256: Some(sha256_bytes(b"body")),
+            }],
+            attachments: Vec::new(),
+        };
+
+        let json = serde_json::to_value(manifest).expect("serialize export manifest");
+        assert_eq!(json["formatVersion"], 1);
+        assert_eq!(json["appVersion"], "2.0.0");
+        assert_eq!(json["schemaVersion"], 6);
+        assert_eq!(
+            json["database"]["sha256"],
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            json["pages"][0]["markdownPath"],
+            "daily/2026-08-16/테스트__page-1.md"
+        );
+        assert_eq!(json["attachments"].as_array().map(Vec::len), Some(0));
+    }
 }
 
 /// 데이터 저장 디렉토리 결정
@@ -474,25 +570,25 @@ fn open_data_folder(state: State<AppState>) -> Result<(), String> {
 
 #[tauri::command]
 fn import_memoji_database(
-    db_bytes: Vec<u8>,
+    db_path: String,
     state: State<AppState>,
 ) -> Result<ImportDatabaseResult, String> {
-    const SQLITE_HEADER: &[u8] = b"SQLite format 3\0";
-    // 현재 프런트 IPC는 byte 배열을 JSON 숫자 배열로 직렬화하므로 원본보다
-    // 훨씬 큰 메모리를 사용한다. 파일 경로 기반 import로 바꾸기 전까지 보수적으로 제한한다.
-    const MAX_IMPORT_BYTES: usize = 32 * 1024 * 1024;
-
-    if db_bytes.len() < SQLITE_HEADER.len() || !db_bytes.starts_with(SQLITE_HEADER) {
-        return Err("SQLite memoji.db 파일이 아닙니다.".to_string());
-    }
-
-    if db_bytes.len() > MAX_IMPORT_BYTES {
-        return Err("DB 파일이 너무 큽니다. data 폴더에서 직접 백업 후 교체해주세요.".to_string());
-    }
-
     let data_dir = state.data_dir.clone();
     std::fs::create_dir_all(&data_dir)
         .map_err(|error| format!("Failed to create data directory: {}", error))?;
+
+    let selected_path = PathBuf::from(db_path);
+    let selected_canonical = selected_path
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve imported database path: {error}"))?;
+    let live_path = data_dir.join("memoji.db");
+    if live_path
+        .canonicalize()
+        .map(|path| path == selected_canonical)
+        .unwrap_or(false)
+    {
+        return Err("현재 사용 중인 memoji.db는 가져오기 소스로 선택할 수 없습니다.".to_string());
+    }
 
     let now = chrono::Local::now();
     let import_stamp = format!(
@@ -500,30 +596,15 @@ fn import_memoji_database(
         now.format("%Y%m%d-%H%M%S"),
         now.timestamp_subsec_millis()
     );
-    let import_dir = data_dir.join("imports");
-    std::fs::create_dir_all(&import_dir)
-        .map_err(|error| format!("Failed to create import directory: {}", error))?;
-    let import_path = import_dir.join(format!("memoji-import-{}.db", import_stamp));
-    std::fs::write(&import_path, db_bytes)
-        .map_err(|error| format!("Failed to stage imported database: {}", error))?;
-
-    let source = Connection::open_with_flags(&import_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(|error| format!("Failed to open imported database: {}", error))?;
-
     let backup_dir = data_dir.join("backups");
     std::fs::create_dir_all(&backup_dir)
         .map_err(|error| format!("Failed to create backup directory: {}", error))?;
     let backup_path = backup_dir.join(format!("memoji-before-import-{}.db", import_stamp));
 
     let import_summary_result: Result<ImportDatabaseSummary, String> = match state.db.lock() {
-        Ok(db) => db
-            .backup_to(&backup_path)
-            .and_then(|_| db.import_pages_from_connection(&source)),
+        Ok(db) => db.import_pages_from_path(&selected_canonical, &backup_path),
         Err(error) => Err(error.to_string()),
     };
-
-    drop(source);
-    let _ = std::fs::remove_file(&import_path);
     let import_summary = import_summary_result?;
 
     Ok(ImportDatabaseResult::from_summary(
@@ -534,16 +615,6 @@ fn import_memoji_database(
 
 #[tauri::command]
 fn export_pages_zip(state: State<AppState>) -> Result<PagesZipExportResult, String> {
-    let pages = {
-        let db = state.db.lock().map_err(|error| error.to_string())?;
-        db.get_pages().map_err(|error| error.to_string())?
-    };
-
-    if pages.is_empty() {
-        return Err("내보낼 페이지가 없습니다.".to_string());
-    }
-
-    let entries = build_page_export_entries(&pages);
     let data_dir = state.data_dir.clone();
     let export_dir = data_dir.join("exports");
     std::fs::create_dir_all(&export_dir)
@@ -556,34 +627,167 @@ fn export_pages_zip(state: State<AppState>) -> Result<PagesZipExportResult, Stri
         now.timestamp_subsec_millis()
     );
     let zip_path = export_dir.join(format!("memoji-pages-{}.zip", export_stamp));
-    let zip_file = std::fs::File::create(&zip_path)
-        .map_err(|error| format!("Failed to create export zip: {}", error))?;
-    let mut zip = zip::ZipWriter::new(zip_file);
-    let options = SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Stored)
-        .unix_permissions(0o644);
+    let snapshot_path = export_dir.join(format!("memoji-export-snapshot-{}.db", export_stamp));
 
-    let manifest = serde_json::to_string_pretty(&pages)
-        .map_err(|error| format!("Failed to serialize export manifest: {}", error))?;
-    zip.start_file("manifest.json", options)
-        .map_err(|error| format!("Failed to write manifest: {}", error))?;
-    zip.write_all(manifest.as_bytes())
-        .map_err(|error| format!("Failed to write manifest: {}", error))?;
+    let export_result = (|| -> Result<PagesZipExportResult, String> {
+        let (pages, schema_version, revision_count, page_revisions) = {
+            let db = state.db.lock().map_err(|error| error.to_string())?;
+            db.backup_to(&snapshot_path)?;
+            let pages = db.get_pages().map_err(|error| error.to_string())?;
+            let schema_version = db
+                .connection()
+                .query_row(
+                    "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|error| format!("Failed to read schema version: {error}"))?;
+            let revision_count = db
+                .connection()
+                .query_row("SELECT COUNT(*) FROM page_revisions", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .map_err(|error| format!("Failed to count page revisions: {error}"))?;
+            let mut statement = db
+                .connection()
+                .prepare("SELECT id, revision FROM pages")
+                .map_err(|error| format!("Failed to read page revisions: {error}"))?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })
+                .map_err(|error| format!("Failed to read page revisions: {error}"))?;
+            let mut page_revisions = HashMap::new();
+            for row in rows {
+                let (page_id, revision) =
+                    row.map_err(|error| format!("Failed to read page revision: {error}"))?;
+                page_revisions.insert(page_id, revision);
+            }
+            (pages, schema_version, revision_count, page_revisions)
+        };
 
-    for entry in &entries {
-        zip.start_file(&entry.path, options)
-            .map_err(|error| format!("Failed to write '{}': {}", entry.path, error))?;
-        zip.write_all(entry.content.as_bytes())
-            .map_err(|error| format!("Failed to write '{}': {}", entry.path, error))?;
+        if pages.is_empty() {
+            return Err("내보낼 페이지가 없습니다.".to_string());
+        }
+
+        let entries = build_page_export_entries(&pages);
+        let entry_by_id: HashMap<String, (&str, &str)> = entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry.page_id.clone(),
+                    (entry.path.as_str(), entry.content.as_str()),
+                )
+            })
+            .collect();
+        let page_manifest = pages
+            .iter()
+            .map(|page| {
+                let exported = entry_by_id.get(&page.id);
+                ExportPageManifest {
+                    id: page.id.clone(),
+                    title: page.title.clone(),
+                    page_type: page.page_type.clone(),
+                    revision: page_revisions.get(&page.id).copied().unwrap_or(0),
+                    updated_at: page.updated_at.clone(),
+                    markdown_path: exported.map(|(path, _)| (*path).to_string()),
+                    sha256: exported.map(|(_, content)| sha256_bytes(content.as_bytes())),
+                }
+            })
+            .collect();
+        let database_hash = sha256_file(&snapshot_path)?;
+        let database_bytes = snapshot_path
+            .metadata()
+            .map_err(|error| format!("Failed to inspect export snapshot: {error}"))?
+            .len();
+        let manifest = ExportManifest {
+            format_version: 1,
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            schema_version,
+            generated_at: chrono::Local::now().to_rfc3339(),
+            database: ExportDatabaseManifest {
+                path: "database/memoji.db".to_string(),
+                sha256: database_hash,
+                bytes: database_bytes,
+            },
+            counts: ExportCountsManifest {
+                pages: pages.len(),
+                markdown_files: entries.len(),
+                revisions: revision_count,
+                attachments: 0,
+            },
+            pages: page_manifest,
+            attachments: Vec::new(),
+        };
+
+        let zip_file = std::fs::File::create(&zip_path)
+            .map_err(|error| format!("Failed to create export zip: {}", error))?;
+        let mut zip = zip::ZipWriter::new(zip_file);
+        let options = SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored)
+            .unix_permissions(0o644);
+
+        let manifest_json = serde_json::to_string_pretty(&manifest)
+            .map_err(|error| format!("Failed to serialize export manifest: {}", error))?;
+        zip.start_file("manifest.json", options)
+            .map_err(|error| format!("Failed to write manifest: {}", error))?;
+        zip.write_all(manifest_json.as_bytes())
+            .map_err(|error| format!("Failed to write manifest: {}", error))?;
+
+        zip.start_file("database/memoji.db", options)
+            .map_err(|error| format!("Failed to write database snapshot: {error}"))?;
+        let mut snapshot_file = std::fs::File::open(&snapshot_path)
+            .map_err(|error| format!("Failed to open export snapshot: {error}"))?;
+        std::io::copy(&mut snapshot_file, &mut zip)
+            .map_err(|error| format!("Failed to stream database snapshot: {error}"))?;
+
+        for entry in &entries {
+            zip.start_file(&entry.path, options)
+                .map_err(|error| format!("Failed to write '{}': {}", entry.path, error))?;
+            zip.write_all(entry.content.as_bytes())
+                .map_err(|error| format!("Failed to write '{}': {}", entry.path, error))?;
+        }
+
+        zip.finish()
+            .map_err(|error| format!("Failed to finalize export zip: {}", error))?;
+
+        Ok(PagesZipExportResult {
+            exported: entries.len(),
+            zip_path: zip_path.to_string_lossy().to_string(),
+        })
+    })();
+
+    let _ = std::fs::remove_file(&snapshot_path);
+    if export_result.is_err() {
+        let _ = std::fs::remove_file(&zip_path);
     }
+    export_result
+}
 
-    zip.finish()
-        .map_err(|error| format!("Failed to finalize export zip: {}", error))?;
+fn sha256_bytes(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
 
-    Ok(PagesZipExportResult {
-        exported: entries.len(),
-        zip_path: zip_path.to_string_lossy().to_string(),
-    })
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let mut file = std::fs::File::open(path)
+        .map_err(|error| format!("Failed to open '{}' for hashing: {error}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let bytes_read = file
+            .read(&mut buffer)
+            .map_err(|error| format!("Failed to hash '{}': {error}", path.display()))?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 #[tauri::command]
@@ -936,7 +1140,7 @@ async fn local_ai_cancel(request_id: String, state: State<'_, AppState>) -> Resu
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default();
+    let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
 
     // Release builds keep single-instance behavior. In dev, a stale app process can outlive
     // Vite and leave the WebView on a blank dev URL, so keep debug launches independent.
