@@ -1,7 +1,6 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { MarkdownEditor, MarkdownEditorHandle } from './components/MarkdownEditor';
-import { SearchModal } from './components/SearchModal';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { SettingsModal } from './components/SettingsModal';
 import { RightPanel } from './components/RightPanel';
@@ -23,6 +22,7 @@ import { useTheme } from './contexts/ThemeContext';
 import { createCommandRegistry } from './commands/commandRegistry';
 import type { CommandContext } from './commands/types';
 import { bindCommandKeyboard } from './app/keyboardBindings';
+import { CommandPalette } from './commands/CommandPalette';
 
 interface CreatePageOptions {
   title: string;
@@ -53,7 +53,6 @@ function AppContent() {
   const [currentPage, setCurrentPage] = useState<Page | null>(null);
   const [currentPageIndex, setCurrentPageIndex] = useState<PageNavigationIndex>('daily');
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [appTitle, setAppTitle] = useState<string>('Memoji');
@@ -68,6 +67,7 @@ function AppContent() {
     setLeftView,
     setWorkspaceView,
     setContextTab,
+    setCommandPaletteOpen,
   } = useWorkspaceController();
   const pagesRef = useRef<Page[]>([]);
   const editorRef = useRef<MarkdownEditorHandle>(null);
@@ -687,7 +687,7 @@ function AppContent() {
     openSettings: openSettingsAfterSave,
     toggleFocus: toggleFocusMode,
     togglePanel,
-    openCommandPalette: () => setIsSearchOpen(true),
+    openCommandPalette: () => setCommandPaletteOpen(true),
   };
 
   return (
@@ -702,7 +702,7 @@ function AppContent() {
           runtimeState="로컬 AI"
           onToggleLeft={() => togglePanel('left')}
           onToggleRight={() => togglePanel('right')}
-          onOpenPalette={() => setIsSearchOpen(true)}
+          onOpenPalette={() => setCommandPaletteOpen(true)}
           onSave={handleSave}
           onExport={async () => {
             await handleExport();
@@ -779,13 +779,29 @@ function AppContent() {
         />
       )}
     >
-      <SearchModal
-        isOpen={isSearchOpen}
-        onClose={() => setIsSearchOpen(false)}
-        pages={pages}
-        onPageSelect={(page) => {
-          handlePageSelect(page);
-          setIsSearchOpen(false);
+      <CommandPalette
+        open={workspaceUi.commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
+        commands={APP_COMMANDS}
+        context={commandContextRef.current}
+        pages={pages
+          .filter((page) => page.type === 'page')
+          .map((page) => ({
+            id: page.id,
+            title: page.title,
+            excerpt: page.content.replace(/\s+/g, ' ').trim().slice(0, 120),
+            tags: page.tags,
+            updatedAt: page.updatedAt,
+          }))}
+        tasks={[]}
+        recentPageIds={currentPage ? [currentPage.id] : undefined}
+        onPageSelect={(pageSummary) => {
+          const page = pagesRef.current.find((candidate) => candidate.id === pageSummary.id);
+          if (page) void handlePageSelect(page);
+        }}
+        onTaskSelect={() => {
+          setLeftView('tasks');
+          setWorkspaceView('tasks');
         }}
       />
 

@@ -23,7 +23,7 @@ export function AppShell({
       {topBar}
       {notice}
       <div className="memoji-workspace-frame">{workspace}</div>
-      {children}
+      {children ? <div className="memoji-overlay-host">{children}</div> : null}
     </div>
   );
 }
