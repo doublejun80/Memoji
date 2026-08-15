@@ -1,4 +1,5 @@
 mod database;
+mod db;
 mod local_ai;
 
 use database::{build_page_export_entries, Database, ImportDatabaseSummary, Page};

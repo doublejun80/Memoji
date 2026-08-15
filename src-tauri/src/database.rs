@@ -33,8 +33,8 @@ pub struct ImportDatabaseSummary {
 }
 
 impl Database {
-    pub fn new(db_path: PathBuf) -> Result<Self> {
-        let conn = Connection::open(db_path)?;
+    pub fn new(db_path: PathBuf) -> std::result::Result<Self, String> {
+        let conn = crate::db::open_database(&db_path).map_err(|error| error.to_string())?;
         Ok(Database { conn })
     }
 
