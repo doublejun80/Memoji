@@ -7,12 +7,12 @@ Recorded: 2026-08-16 (Asia/Seoul)
 The always-on workspace shell is now separated from the document editor, calendar, task
 workspace, settings, and AI diff viewer. The production HTML does not preload the deferred
 editor chunks. The former approximately 2,063 KB main JavaScript bundle (644 KB gzip) is now
-a 491.40 KB shell entry (152.90 KB gzip), a reduction of about 76% in both raw and compressed
-size. The deferred Milkdown and CodeMirror runtime is 909.83 KB (287.54 KB gzip) and loads only
+a 491.20 KB shell entry (152.79 KB gzip), a reduction of about 76% in both raw and compressed
+size. The deferred Milkdown and CodeMirror runtime is 909.83 KB (287.53 KB gzip) and loads only
 when a document editor is requested.
 
 The final production build completed without circular-chunk or size warnings. Total JavaScript
-assets are 3,299,414 bytes because CodeMirror retains independently deferred language grammars;
+assets are 3,299,638 bytes because CodeMirror retains independently deferred language grammars;
 that total is not an initial-load claim.
 
 ## Test environment

@@ -1,212 +1,122 @@
-# Memoji 2.0 - 로컬 AI Markdown 노트 앱 PRD
+# Memoji 2.0 제품 요구사항과 현재 제품 진실
 
-## 🎯 제품 개요
+상태 기준일: 2026-08-16
 
-**Memoji 2.0**은 Typora식 즉시 렌더링 Markdown 편집, 계층적 페이지 관리, 로컬 Gemma AI를 제공하는 데스크톱 노트 애플리케이션입니다. Tauri를 사용하여 React 프론트엔드를 단일 실행 파일로 빌드하며, VDI 환경에서도 사용할 수 있도록 모든 데이터를 로컬 SQLite에 저장합니다.
+상세 요구사항: `docs/memoji-ga/04_FUNCTIONAL_REQUIREMENTS.md`
 
-### 핵심 가치 제안
-- **오프라인 우선**: 모든 데이터를 로컬에 저장하여 네트워크 없이도 사용 가능
-- **VDI 호환**: 단일 실행 파일로 제공되어 제한된 환경에서도 설치 가능
-- **키보드 중심**: 마우스 없이도 효율적으로 사용할 수 있는 키보드 단축키
-- **계층적 구조**: 날짜별/태그별로 체계적인 메모 관리
-- **태그 시스템**: #태그를 통한 빠른 분류 및 검색
+구현 판정: `MEMOJI_2_GA_IMPLEMENTATION_REPORT.md`
 
----
+## 제품 정의
 
-## 📋 핵심 기능
+Memoji는 개인 또는 단일 사용자 VDI 세션에서 Markdown 지식, 일일 기록, 프로젝트,
+할 일과 일정을 로컬로 관리하는 Tauri 데스크톱 앱이다. Markdown이 canonical source이고
+SQLite의 tag/link/task/FTS/AI index는 재생성 가능한 파생 데이터다. 외부 cloud LLM이나
+실시간 협업을 기본 제품 범위로 삼지 않는다.
 
-### 1. 날짜별 메모 관리
-- **달력 기반 네비게이션**: 직관적인 달력 위젯으로 날짜 선택
-- **날짜별 필터링**: 선택한 날짜의 메모만 사이드바에 표시
-- **시각적 표시**: 메모가 있는 날짜는 달력에서 볼드체 + 점으로 표시
-- **자동 날짜 할당**: 새 메모는 현재 선택된 날짜로 자동 설정
+핵심 경험은 다음 한 문장으로 정의한다.
 
-### 2. 마크다운 에디터
-- **즉시 렌더링 편집**: Milkdown 기반 WYSIWYG Markdown 편집
-- **마크다운 지원**: GFM 표, task list, code block, wiki link, tag 저장/복원
-- **태그 렌더링**: #태그가 클릭 가능한 파란색 배지로 표시
-- **키보드 단축키**: 
-  - `Ctrl+N`: 새 메모 생성
-  - `Ctrl+F`: 검색 포커스
-  - `Escape`: 검색 초기화
+> 익숙한 3단 문서 작업공간에서 Markdown을 즉시 편집하고, 검색·업무 보기·근거 있는 로컬
+> AI 변경 제안을 원본과 revision을 잃지 않고 검토한다.
 
-### 3. 태그 시스템
-- **한글 태그 지원**: #할일, #아이디어 등 한글 태그 완전 지원
-- **실시간 렌더링**: 즉시 편집 화면에서 태그가 배지로 표시
-- **클릭 검색**: 태그 클릭 시 자동으로 해당 태그로 검색
-- **태그 기반 필터링**: #태그명으로 직접 검색 가능
+## 대상 사용자와 환경
 
-### 4. 고급 검색
-- **전체 텍스트 검색**: 제목과 내용 전체에서 검색
-- **태그 검색**: #태그명으로 태그 기반 검색
-- **접두사 검색**:
-  - `title:검색어`: 제목에서만 검색
-  - `content:검색어`: 내용에서만 검색
-- **실시간 검색**: 300ms 디바운스로 성능 최적화
+- 로컬 우선 개인 지식 작업 사용자
+- cloud AI 호출이 금지된 조직 또는 VDI 사용자
+- Daily/Project Markdown에서 task와 calendar를 함께 관리하려는 사용자
+- 최소 UI viewport 800×600, desktop acceptance viewport 1200×800
 
-### 5. 사이드바 관리
-- **접을 수 있는 사이드바**: 토글 가능한 사이드바
-- **페이지 목록**: 선택된 날짜의 메모 목록 표시
-- **상태 저장**: 사이드바 접힘 상태 localStorage에 저장
-- **검색 결과**: 검색어에 따른 실시간 필터링
+Windows 10/11 x64와 조직 VDI가 우선 배포 대상이지만, signed installer와 실제 VDI AI
+matrix가 없는 개발 호스트 결과를 Windows GA 증빙으로 간주하지 않는다.
 
-### 6. 데이터 관리
-- **로컬 저장**: 모든 데이터를 로컬 SQLite에 저장
-- **자동 저장**: 실시간으로 변경사항 자동 저장
-- **빈 페이지 정리**: 내용이 없는 페이지 자동 삭제
-- **마이그레이션**: 기존 블록 데이터 자동 정리
+## 제품 원칙
 
----
+1. Markdown 원본을 숨기거나 vendor format으로 대체하지 않는다.
+2. page 전환, view 전환, settings, export, close 전에 unsaved 내용을 flush한다.
+3. AI가 원문을 사용자 승인 없이 바꾸지 않는다.
+4. 기존 DB는 transaction과 pre-migration backup 없이 변경하지 않는다.
+5. 실제 runtime capability와 측정값만 UI·문서에 표시한다.
+6. loopback은 cloud 차단 조건이지 runtime authentication의 대체물이 아니다.
+7. 코어 app, optional AI runtime, model artifact의 크기와 release status를 분리한다.
 
-## 🏗️ 기술 스택
+## GA 사용자 흐름
 
-### Frontend
-- **React 18**: 현대적인 React 훅 기반 개발
-- **TypeScript**: 타입 안전성과 개발 생산성
-- **Tailwind CSS v4**: 유틸리티 우선 스타일링
-- **Shadcn/ui**: 고품질 React 컴포넌트 라이브러리
-- **Lucide React**: 일관된 아이콘 시스템
+### 탐색과 편집
 
-### Desktop
-- **Tauri v2**: Rust 기반 데스크톱 앱 프레임워크
-- **SQLite**: 로컬 데이터베이스
-- **Single Binary**: 단일 실행 파일 배포
+- left view에서 Today, Daily, Projects, Tasks, Calendar, Knowledge를 전환한다.
+- page를 열면 center가 editor workspace로 돌아간다.
+- Milkdown 즉시 편집과 Markdown source mode 사이에서 원본이 보존된다.
+- document bar와 metadata strip에서 문서 위치, 저장 상태, mode와 compact metadata를 본다.
+- focus mode에서는 panel/chrome을 숨겨도 editor와 selection AI를 사용할 수 있다.
 
-### Development
-- **Vite**: 빠른 개발 서버와 빌드
-- **ESLint + TypeScript**: 코드 품질 관리
-- **PostCSS**: CSS 전처리
+### 검색과 명령
 
----
+- `Ctrl+K`에서 command, page, task와 recent item을 찾는다.
+- title/body/tag 검색은 SQLite FTS backend를 사용하고 한글 1–2자는 fallback한다.
+- top bar, keyboard shortcut, palette는 동일 command registry를 사용한다.
 
-## 🎨 디자인 시스템
+### 지식과 업무
 
-### 색상 팔레트
-- **라이트 모드**: 깔끔한 흰색 배경 기반
-- **다크 모드**: 편안한 어두운 톤 지원
-- **브랜드 컬러**: 블루 계열 액센트
-- **상태 표시**: 성공/경고/오류 상태별 색상
+- page 저장 시 tag, wiki link, heading anchor, task, FTS가 갱신된다.
+- Context Hub에서 outline, incoming/outgoing/unresolved link, page task를 본다.
+- task status·due·priority 변경은 Markdown 원본에 새 revision으로 반영된다.
+- calendar는 month/week/day에서 due task와 local event를 함께 보여준다.
 
-### 타이포그래피
-- **기본 글꼴**: 시스템 폰트 스택
-- **크기 체계**: rem 기반 반응형 크기
-- **한글 최적화**: 한글 가독성 고려한 행간
+### 로컬 AI
 
-### 컴포넌트
-- **일관된 라운드**: 10px 기본 border-radius
-- **부드러운 애니메이션**: 300ms 기본 전환
-- **접근성**: WCAG 2.1 AA 준수
-- **반응형**: 다양한 화면 크기 지원
+- current page/project/link 문맥에서 source를 검색하고 citation을 기록한다.
+- rewrite/structure 계열 결과는 proposal로 저장하며 before/after diff를 먼저 보여준다.
+- apply 시 base revision을 재확인하고 conflict면 자동 적용하지 않는다.
+- 실행은 취소 가능하고 TTFT/token/TPS/runtime mode를 기록한다.
+- MTP label은 target, assistant, acceptance rate가 실제 보고될 때만 보인다.
 
----
+### 데이터 이전
 
-## 🚀 개발 계획
+- native file chooser에서 선택한 DB path를 Rust가 read-only로 검증한다.
+- import와 migration 전에 DB snapshot을 만들고 hash와 size를 기록한다.
+- export ZIP에는 Markdown, consistent DB snapshot, manifest, page/revision hash와 attachment
+  목록을 담는다.
 
-### Phase 1: 핵심 기능 완성 ✅
-- [x] 기본 마크다운 에디터
-- [x] 날짜별 메모 관리
-- [x] 사이드바 구현
-- [x] 태그 시스템
-- [x] 검색 기능
-- [x] Tauri 통합
+## 현재 구현 상태
 
-### Phase 2: UX 향상 (진행 중)
-- [x] 키보드 단축키
-- [x] 자동 저장
-- [x] 빈 페이지 정리
-- [ ] 성능 최적화
-- [ ] 오류 처리 강화
+P0 33개 중 31개가 구현되었다. 다음 두 항목은 GA blocker다.
 
-### Phase 3: 고급 기능
-- [ ] 내보내기/가져오기
-- [ ] 백업/복원
-- [ ] 플러그인 시스템
-- [ ] 테마 커스터마이징
+- Runtime Auth: 승인된 LiteRT-LM server가 authentication을 제공하지 않는다.
+- Signed Release: certificate/key와 signed Windows artifact 검증이 없다.
 
----
+P1은 42개 중 25개 완료, 15개 부분 완료, Windows VDI benchmark 1개 차단, diagnostic
+ZIP 1개 미구현이다. 상세 ID별 판정과 증빙은 최종 구현 보고서가 authoritative source다.
 
-## 🎯 타겟 사용자
+## 명시적 비범위
 
-### Primary Users
-- **개발자**: 코드 스니펫과 기술 메모 관리
-- **연구원**: 연구 노트와 아이디어 정리
-- **프로젝트 매니저**: 회의록과 할일 관리
+- cloud LLM endpoint
+- 실시간 협업과 multi-user DB 동시 편집
+- cloud/P2P sync
+- 외부 calendar 양방향 sync
+- plugin marketplace와 autonomous agent
+- Canvas/whiteboard
+- OCR, transcript, semantic embedding
+- 사용자 승인 없는 AI 원문 수정
 
-### Secondary Users  
-- **학생**: 강의 노트와 과제 관리
-- **작가**: 아이디어와 초안 관리
-- **VDI 사용자**: 제한된 환경에서의 메모 필요
+Object type/property/relation/saved table/board와 업무 template는 2.1 이후 범위다.
 
-### User Journey
-1. **첫 사용**: 간단한 메모 작성으로 시작
-2. **습관 형성**: 날짜별 메모 작성 습관화
-3. **고급 활용**: 태그와 검색을 통한 체계적 관리
-4. **의존성**: 일상적인 메모 도구로 정착
+## 품질과 릴리스 수용 기준
 
----
+- 1200×800에서 3단 shell, 1024/800에서 overlay/center-first 동작
+- viewport 전체에서 document horizontal overflow 0
+- keyboard focus, Escape, visible focus ring과 modal containment
+- 기존 DB logical content/count 보존과 `PRAGMA quick_check=ok`
+- 10k 합성 page에서 summary/body 분리와 SQLite FTS 측정
+- typecheck, tests, production build, fmt, clippy warnings-denied, Rust tests 통과
+- version 일치, dynamic artifact name, checksum, SBOM, NOTICE
+- signed Windows artifact와 strict target-VDI runtime/benchmark/EDR/rollback evidence
 
-## 📊 성공 지표
+성능 수치는 host와 fixture를 함께 기록하고 다른 환경의 보장값으로 일반화하지 않는다.
+현재 local 측정은 `docs/implementation/performance-report.md`와 `artifacts/benchmark/`에 있다.
 
-### 기능적 지표
-- **응답 시간**: 검색 결과 < 100ms
-- **시작 시간**: 앱 실행 < 2초
-- **메모리 사용량**: < 100MB 기본 상태
-- **파일 크기**: 실행 파일 < 50MB
+## 릴리스 판정 규칙
 
-### 사용성 지표
-- **태그 인식률**: 99% 이상 정확도
-- **검색 정확도**: 관련성 90% 이상
-- **키보드 커버리지**: 80% 기능 키보드로 접근
-- **오프라인 가용성**: 100% 오프라인 작동
-
-### 품질 지표
-- **크래시율**: < 0.1%
-- **데이터 무결성**: 99.99%
-- **호환성**: Windows/macOS/Linux 모두 지원
-- **접근성**: WCAG 2.1 AA 준수
-
----
-
-## 🔒 보안 및 프라이버시
-
-### 데이터 보안
-- **로컬 저장**: 모든 데이터를 로컬 SQLite에 저장
-- **암호화 옵션**: 민감한 데이터의 선택적 암호화
-- **백업 보안**: 로컬 백업 파일 보호
-
-### 프라이버시
-- **네트워크 없음**: 기본적으로 외부 연결 없이 작동
-- **데이터 수집 없음**: 사용자 데이터 수집하지 않음
-- **완전한 오프라인**: 인터넷 연결 불필요
-
----
-
-## 🛠️ 배포 및 유지보수
-
-### 배포 전략
-- **GitHub Releases**: 자동화된 릴리스 프로세스
-- **다중 플랫폼**: Windows, macOS, Linux 동시 배포
-- **자동 업데이트**: Tauri 기본 업데이트 시스템 활용
-
-### 유지보수 계획
-- **정기 업데이트**: 월 1회 정기 업데이트
-- **보안 패치**: 필요시 즉시 배포
-- **커뮤니티 피드백**: GitHub Issues를 통한 피드백 수집
-
----
-
-## 📝 라이선스 및 오픈소스
-
-### 라이선스
-- **MIT License**: 자유로운 사용과 수정 허용
-- **상업적 이용**: 제한 없음
-- **재배포**: 라이선스 고지 조건
-
-### 기여 가이드라인
-- **코드 기여**: PR을 통한 기여 환영
-- **이슈 리포팅**: 상세한 재현 단계 포함
-- **문서화**: 기능 추가 시 문서 업데이트 필수
-
----
-
-*이 PRD는 Memoji 2.0의 현재 상태와 향후 계획을 담고 있으며, 프로젝트 진행에 따라 지속적으로 업데이트됩니다.*
+- P0가 구현되지 않았거나 외부 조건으로 차단되면 전체 GA는 NO-GO다.
+- “스크립트가 존재함”과 “target artifact가 검증됨”을 같은 상태로 쓰지 않는다.
+- AI가 없어도 editing/search/data core는 작동해야 한다.
+- AI 포함 제품명·용량·성능 주장은 exact runtime/model manifest와 target VDI 결과가 있을 때만
+  사용한다.

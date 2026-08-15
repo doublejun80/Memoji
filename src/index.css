@@ -3068,6 +3068,40 @@ input[type="checkbox"]:checked:after {
   margin: 4px 7px !important;
 }
 
+.dark .memoji-milkdown .milkdown-top-bar {
+  border-bottom-color: var(--memoji-border);
+  background: color-mix(in srgb, var(--memoji-surface-raised), transparent 3%);
+  color: var(--memoji-text-primary);
+}
+
+.dark .memoji-milkdown .milkdown-top-bar .top-bar-heading-button {
+  border-color: var(--memoji-border-strong) !important;
+  background: var(--memoji-surface-subtle) !important;
+  color: var(--memoji-text-primary) !important;
+}
+
+.dark .memoji-milkdown .milkdown-top-bar .top-bar-heading-label,
+.dark .memoji-milkdown .milkdown-top-bar .top-bar-chevron,
+.dark .memoji-milkdown .milkdown-top-bar .top-bar-item {
+  color: var(--memoji-text-secondary) !important;
+}
+
+.dark .memoji-milkdown .milkdown-top-bar .top-bar-item:hover,
+.dark .memoji-milkdown .milkdown-top-bar .top-bar-item:focus-visible {
+  background: var(--memoji-surface-subtle) !important;
+  color: var(--memoji-text-primary) !important;
+}
+
+.dark .memoji-milkdown .milkdown-top-bar .top-bar-heading-button svg,
+.dark .memoji-milkdown .milkdown-top-bar .top-bar-item svg {
+  color: currentColor !important;
+  stroke: currentColor !important;
+}
+
+.dark .memoji-milkdown .milkdown-top-bar .top-bar-divider {
+  background: var(--memoji-border-strong) !important;
+}
+
 .memoji-milkdown .milkdown-top-bar::-webkit-scrollbar {
   width: 8px;
   height: 8px;

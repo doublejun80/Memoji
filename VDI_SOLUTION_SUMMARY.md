@@ -10,8 +10,8 @@
   데이터 폴더 fallback, 설정에서 실제 DB 경로 확인, 수동 내보내기/가져오기.
 - 구현되지 않음: `portable.txt`, VDI 자동 감지, 예약/종료 시 자동 백업, 자동 동기화,
   여러 VDI 인스턴스의 DB 동시 공유 보호.
-- 기본 AI: 외부 클라우드가 아닌 VDI 내부 LiteRT-LM 루프백 서버. 단, 서버 설치·모델
-  가져오기·프로세스 시작은 운영자가 해야 함.
+- 기본 AI: 외부 클라우드가 아닌 VDI 내부 LiteRT-LM 루프백 서버. 검증된 bundle이 있으면
+  앱이 managed child 시작을 시도하고, 없으면 운영자가 runtime/model을 준비해야 함.
 
 따라서 “실행 파일만 복사하면 데이터가 절대 사라지지 않는다”거나 “VDI에서 완벽하게
 안전하다”는 표현은 정확하지 않습니다.
@@ -46,10 +46,10 @@ setx MEMOJI_DATA_PATH "H:\Memoji\data"
 
 현재 설정 화면은 다음 기능을 제공합니다.
 
-- 전체 페이지 ZIP 내보내기: Markdown 페이지와 manifest를 `exports` 폴더에 생성.
-  앱 설정을 포함한 완전한 DB 백업은 아님.
+- 전체 페이지 ZIP 내보내기: Markdown, manifest와 consistent DB snapshot을 `exports`에 생성.
+  app/schema version, count, revision, SHA-256, byte size와 attachment manifest를 기록.
 - 기존 DB 가져오기: 현재 DB를 `backups` 폴더에 먼저 백업한 뒤 페이지 병합.
-  프런트 IPC 메모리 사용 때문에 32MB 이하 파일만 허용.
+  native path를 Rust가 직접 검증하므로 JS byte array와 과거 32 MB 제한이 없음.
 - 데이터 폴더 열기: 현재 앱이 실제 사용하는 폴더를 표시/열기.
 
 주기적 자동 백업과 자동 복원은 없습니다. 전체 DB를 직접 백업할 때는 앱을 완전히
@@ -76,7 +76,8 @@ model: gemma4-e2b
 ```
 
 Memoji는 `localhost`, `127.0.0.0/8`, `::1`만 허용하고 공용/LAN 주소를 거부합니다.
-하지만 LiteRT-LM 바이너리와 모델을 앱에 내장해 자동 실행하지는 않습니다.
+검증된 `ai` bundle 또는 사용자 registry/runtime을 발견하면 managed child를 시작할 수
+있지만, 코어 app 자체가 모델을 포함한다고 가정하지 않습니다.
 
 이미지 준비 단계:
 
@@ -86,7 +87,7 @@ litert-lm import --from-huggingface-repo=litert-community/gemma-4-E2B-it-litert-
   gemma-4-E2B-it.litertlm gemma4-e2b
 ```
 
-사용자 세션 시작 단계:
+bundle을 사용하지 않는 사용자 세션 시작 예:
 
 ```powershell
 litert-lm serve --host 127.0.0.1 --port 9379
@@ -116,6 +117,8 @@ litert-lm serve --host 127.0.0.1 --port 9379
 | LiteRT-LM 서버 미실행 | `/v1/models` 준비 상태 확인 | 로그인 시작 작업과 상태 모니터링 |
 | 모델/레지스트리 누락 | 연결 실패 표시 | 이미지에 모델과 사용자 접근 권한 포함 |
 | CPU-only VDI 지연 | 응답 길이 선택, 내장 벤치마크 | 64/256 토큰 제한 및 실제 풀 성능 측정 |
+| Runtime 인증 부재 | loopback, random session port, capability 표시 | 인증 강제 runtime/격리 구조 없이는 GA 금지 |
+| Signed artifact 부재 | CI와 provenance script | certificate 연결 후 EXE/MSI/NSIS/runtime 검증 |
 
 ## 배포 완료 기준
 
@@ -126,6 +129,7 @@ litert-lm serve --host 127.0.0.1 --port 9379
 - [ ] 사용자 세션에서 LiteRT-LM 모델 레지스트리가 보임
 - [ ] `127.0.0.1:9379/v1/models`가 응답하고 앱 상태가 준비됨
 - [ ] 대표 VDI 사양에서 허용 가능한 응답 시간이 확인됨
+- [ ] runtime 인증, installer/runtime 서명, EDR와 rollback matrix가 통과함
 
 위 조건을 통과한 배포에 한해 해당 조직의 VDI에서 안전하게 운영된다고 판단할 수
 있습니다.

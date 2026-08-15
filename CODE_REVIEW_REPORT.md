@@ -1,5 +1,9 @@
 # Memoji 전체 코드·UI/UX 리뷰 보고서
 
+> **보관된 PR #1 기준선 보고서입니다.** 아래의 32 MB JS byte-array import 제한과 당시의
+> 미구현 항목은 이후 GA branch에서 변경되었습니다. 현재 판정은
+> `MEMOJI_2_GA_IMPLEMENTATION_REPORT.md`를 따릅니다.
+
 - 검토일: 2026-07-10
 - 대상: React/Vite 프런트엔드, Tauri/Rust 백엔드, SQLite 저장, 로컬 AI, VDI 문서
 - 작업 브랜치: `codex/review-settings-vdi-performance`

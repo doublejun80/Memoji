@@ -1,153 +1,149 @@
-# 릴리스 빌드 가이드
+# Memoji 2.0 릴리스 절차
 
-## 🚀 자동 빌드 시스템
+이 문서는 구현된 workflow와 실제 GA 승인 조건을 설명합니다. signing credential, target
+Windows VDI evidence 또는 필수 provenance가 없으면 draft release를 게시하지 마세요.
 
-GitHub Actions를 사용하여 Windows, macOS, Linux 모든 플랫폼의 설치 파일을 자동으로 빌드합니다.
+## 1. 사전 조건
 
----
+- clean release commit과 승인된 tag
+- `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`의 동일 version
+- Windows code-signing certificate와 CI secret
+- macOS 배포 시 Apple signing/notarization credential
+- 승인된 LiteRT runtime/model manifest와 SHA-256
+- target Windows VDI에서 runtime/benchmark/EDR/rollback evidence
 
-## 📋 릴리스 방법
+현재 2.0 후보의 전체 판정은
+[MEMOJI_2_GA_IMPLEMENTATION_REPORT.md](MEMOJI_2_GA_IMPLEMENTATION_REPORT.md)에 있습니다.
+FR-078과 FR-090이 닫히기 전에는 Windows VDI GA tag를 게시하면 안 됩니다.
 
-### 방법 1: 태그로 릴리스 (권장)
+## 2. 로컬 release gate
 
-1. **버전 태그 생성 및 푸시**
-   ```bash
-   git tag v1.0.0
-   git push origin v1.0.0
-   ```
+repository root에서 실행합니다.
 
-2. **자동 빌드 시작**
-   - GitHub Actions가 자동으로 실행됩니다
-   - 약 10-15분 소요
-
-3. **GitHub Releases 확인**
-   - https://github.com/[사용자명]/[저장소명]/releases
-   - Draft 상태로 릴리스가 생성됩니다
-   - 다음 파일들이 자동으로 업로드됩니다:
-     - **Windows**: `Memoji_1.0.0_x64_en-US.msi`, `Memoji_1.0.0_x64-setup.exe`
-     - **macOS**: `Memoji_1.0.0_universal.dmg` (Intel + Apple Silicon)
-     - **Linux**: `memoji_1.0.0_amd64.deb`, `memoji_1.0.0_amd64.AppImage`
-
-4. **릴리스 노트 작성 및 게시**
-   - Draft 릴리스를 열어서 변경사항 작성
-   - "Publish release" 클릭
-
-### 방법 2: 수동 실행
-
-1. **GitHub 저장소 > Actions 탭**
-2. **"Release Build" 워크플로우 선택**
-3. **"Run workflow" 클릭**
-4. **브랜치 선택 후 실행**
-
----
-
-## 🔧 버전 업데이트 방법
-
-릴리스 전에 버전을 업데이트해야 합니다:
-
-### 1. package.json
-```json
-{
-  "version": "1.0.0"  // 여기 수정
-}
-```
-
-### 2. src-tauri/Cargo.toml
-```toml
-[package]
-version = "1.0.0"  # 여기 수정
-```
-
-### 3. src-tauri/tauri.conf.json
-```json
-{
-  "version": "1.0.0"  // 여기 수정
-}
-```
-
-**팁**: 세 파일의 버전을 동일하게 유지하세요!
-
----
-
-## 📦 생성되는 파일
-
-### Windows
-- `Memoji_[버전]_x64_en-US.msi` - Windows Installer (권장)
-- `Memoji_[버전]_x64-setup.exe` - NSIS Installer
-
-### macOS
-- `Memoji_[버전]_universal.dmg` - Universal Binary (Intel + Apple Silicon)
-- `Memoji.app` - 애플리케이션 번들
-
-### Linux
-- `memoji_[버전]_amd64.deb` - Debian/Ubuntu 패키지
-- `memoji_[버전]_amd64.AppImage` - Portable 실행 파일
-
----
-
-## ⚠️ 주의사항
-
-### 1. 태그 이름 규칙
-- 반드시 `v`로 시작해야 합니다: `v1.0.0`, `v2.1.3`
-- 잘못된 예: `1.0.0`, `version-1.0.0`
-
-### 2. 빌드 실패 시
-- GitHub Actions 탭에서 로그 확인
-- 주로 발생하는 문제:
-  - 버전 불일치
-  - 의존성 설치 실패
-  - Rust 컴파일 오류
-
-### 3. macOS 서명 (선택사항)
-- 현재는 서명 없이 빌드됩니다
-- 사용자가 "확인되지 않은 개발자" 경고를 볼 수 있습니다
-- Apple Developer 계정이 있다면 서명 추가 가능
-
----
-
-## 🎯 빠른 릴리스 체크리스트
-
-- [ ] 모든 변경사항 커밋
-- [ ] 버전 업데이트 (package.json, Cargo.toml, tauri.conf.json)
-- [ ] 태그 생성 및 푸시: `git tag v1.0.0 && git push origin v1.0.0`
-- [ ] GitHub Actions 빌드 완료 대기 (10-15분)
-- [ ] GitHub Releases에서 Draft 확인
-- [ ] 릴리스 노트 작성
-- [ ] "Publish release" 클릭
-
----
-
-## 💡 팁
-
-### 로컬에서 테스트 빌드
-릴리스 전에 로컬에서 빌드 테스트:
 ```bash
-npm run tauri:build
+npm ci
+npm run check
+node scripts/verify-release-version.mjs
+cd src-tauri
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked
 ```
 
-### 태그 삭제 (실수한 경우)
+추가 확인:
+
 ```bash
-# 로컬 태그 삭제
-git tag -d v1.0.0
-
-# 원격 태그 삭제
-git push origin :refs/tags/v1.0.0
+npm audit --omit=dev
+git diff --check
 ```
 
-### 버전 자동 업데이트 스크립트
-추후 버전 업데이트를 자동화하는 스크립트를 추가할 수 있습니다.
+실제 model이 있는 release host에서는 ignored model smoke test와 local-AI harness를 별도로
+실행합니다. target VDI에서는 `--strict`가 `blocked` evidence를 성공으로 취급하지 않도록 합니다.
 
----
+```powershell
+node scripts\verify-litert-runtime.mjs --strict
+node scripts\benchmark-local-ai.mjs --strict
+```
 
-## 📞 문제 해결
+## 3. 버전과 tag
 
-빌드 실패 시:
-1. GitHub Actions 로그 확인
-2. 로컬에서 `npm run tauri:build` 테스트
-3. 버전 번호 일치 확인
-4. 의존성 설치 확인: `npm install`
+세 파일의 version을 한 commit에서 바꾸고 검증합니다. workflow나 filename에 `2.0.0`을 직접
+하드코딩하지 않습니다.
 
----
+```bash
+node scripts/verify-release-version.mjs
+git tag v<version>
+git push origin v<version>
+```
 
-**이제 `git tag v1.0.0 && git push origin v1.0.0` 명령어만 실행하면 모든 플랫폼의 설치 파일이 자동으로 빌드됩니다!** 🚀
+`release.yml`은 tag version과 manifest version의 불일치를 거부합니다. 수동 workflow도
+동일 gate를 거칩니다.
 
+## 4. CI와 bundle gate
+
+`.github/workflows/ci.yml`은 pull request와 push에서 다음을 실행합니다.
+
+1. npm clean install
+2. typecheck, unit/component test, production build
+3. Rust fmt
+4. Rust clippy with warnings denied
+5. Rust tests
+
+`.github/workflows/release.yml`과 `windows-dist.yml`은 위 gate와 version 검사를 통과한 뒤에만
+bundle을 만듭니다. 플랫폼 matrix와 bundle 종류는 workflow가 실제 생성한 artifact를
+기준으로 확인해야 하며 문서의 예상 filename만으로 성공을 판정하지 않습니다.
+
+## 5. Signing과 provenance
+
+Windows release는 EXE, MSI/NSIS installer와 포함되는 runtime binary의 Authenticode 서명을
+검증해야 합니다. 인증서 또는 secret이 없을 때 unsigned artifact를 “테스트용”으로 공개 GA에
+올리지 않습니다. macOS 외부 배포는 Developer ID signing과 notarization evidence가 필요합니다.
+
+각 release에 다음 파일을 보존합니다.
+
+- platform installer/bundle
+- `SHA256SUMS`
+- `sbom.cdx.json`
+- `NOTICE.md`
+- exact commit/tag and workflow run URL
+- app/runtime/model version, size, SHA-256, license manifest
+- signing certificate subject/thumbprint와 검증 결과
+- VDI runtime/benchmark/EDR/rollback evidence JSON
+
+체크섬과 SBOM 생성:
+
+```bash
+node scripts/generate-checksums.mjs --input <artifact-directory>
+```
+
+```powershell
+.\scripts\generate-sbom.ps1 -OutputPath .\release\sbom.cdx.json
+```
+
+SBOM script는 npm과 Cargo dependency를 함께 기록하며 Windows release job에서 실제 생성·검증
+후 업로드합니다.
+
+## 6. AI bundle 승격
+
+현재 기본 lock은 LiteRT-LM 0.13.1입니다. 0.16.0은
+`docs/implementation/litert-lm-0.16-compatibility.md`의 모든 promotion gate를 통과해야 합니다.
+
+필수 matrix:
+
+- `--version`, `--help`, `serve --help`, `/v1/models`
+- start/stop와 세 번의 crash/restart cycle
+- Korean UTF-8 streaming과 cancellation
+- 2K/4K context
+- E2B 256/1024 prompt × 64/256 output × cold/warm × thread 조합
+- TTFT, total latency, tokens/s, peak RSS
+- port collision, missing model, EDR policy
+- runtime/model hash와 rollback rehearsal
+
+코어 app bundle과 AI bundle은 서로 다른 artifact로 계산·승인합니다. 모델을 포함하지 않은 app
+크기로 AI 포함 배포 크기를 주장하지 않습니다.
+
+## 7. Draft 검수와 게시
+
+workflow는 release를 draft 상태로 만들어야 합니다. 게시 전 독립 검수자는 다음을 확인합니다.
+
+- 모든 required job이 green이고 ignored/blocked가 숨겨지지 않았음
+- version/tag/file metadata 일치
+- installer와 runtime signature 유효
+- `SHA256SUMS`가 실제 다운로드 artifact와 일치
+- SBOM/NOTICE/license 포함
+- clean Windows VM 설치/실행/제거
+- target VDI 데이터 보존, import/export, offline editing/search
+- AI를 포함한 경우 runtime auth와 strict matrix 통과
+- rollback runbook rehearsal와 복구 데이터 hash/count 일치
+
+모든 조건이 충족된 뒤에만 draft를 게시합니다.
+
+## 8. 실패와 rollback
+
+배포 중 문제가 발생하면 release를 unpublished/draft로 유지하고 새 artifact로 조용히 교체하지
+마세요. 실패 artifact와 hash를 보존하고 새 build number 또는 patch version을 만듭니다.
+데이터와 app version 복구는
+[docs/implementation/rollback-runbook.md](docs/implementation/rollback-runbook.md)를 따릅니다.
+
+특히 newer schema DB를 older binary로 직접 열지 말고 pre-upgrade DB와 이전 signed app을 한 쌍으로
+복원해야 합니다.

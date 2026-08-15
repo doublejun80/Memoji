@@ -13,10 +13,10 @@ npm ci
 .\scripts\build-windows-vdi.ps1
 ```
 
-`release\memoji-vdi` 전체를 골든 이미지의 쓰기 가능한 로컬 경로에 복사합니다. 모델이
-2GB를 넘으므로 일반 MSI/NSIS 안에 넣지 않고 portable 폴더로 배포합니다. `Memoji.exe`
-한 파일만 복사하면 AI 런타임과 Gemma가 누락됩니다. WebView2와 실행 정책도 대상
-이미지에서 확인하세요.
+`release\memoji-vdi` 전체를 골든 이미지의 쓰기 가능한 로컬 경로에 복사합니다. AI
+runtime/model은 코어 MSI/NSIS와 별도 자산으로 취급하고 `bundle-manifest.json`의 실제
+byte count와 SHA-256으로 승인합니다. `Memoji.exe` 한 파일만 복사하면 AI 런타임과 Gemma가
+누락됩니다. WebView2와 실행 정책도 대상 이미지에서 확인하세요.
 
 Gemma 4는 Apache 2.0 라이선스 모델입니다. 배포 폴더의 `ai\NOTICE.txt`를 모델과 함께
 유지하고 조직의 오픈소스 고지 절차에도 반영하세요.
@@ -79,7 +79,12 @@ Model: gemma4-e2b
 
 Memoji는 보안상 `localhost`, `127.0.0.0/8`, `::1`만 허용합니다. 설정 → 로컬 AI에서
 오프라인 번들 감지와 `GET /v1/models` 성공을 확인합니다. 서버가 비정상 종료되면 다음
-상태 확인 시 자동 재시작하며, 설정의 `내장 Gemma 서버 시작` 버튼으로도 복구할 수 있습니다.
+상태 확인/시작에서 복구를 시도하며 설정에서도 다시 시작할 수 있습니다. 최대 재시작
+횟수 정책은 아직 없으므로 운영 모니터링으로 반복 crash를 차단해야 합니다.
+
+현재 승인된 LiteRT-LM 0.13.1과 검토 후보 0.16.0에는 확인된 server authentication
+옵션이 없습니다. loopback과 random session port는 같은 사용자 세션의 임의 프로세스를
+인증 차단하지 못하므로 FR-078이 해결되기 전에는 GA로 승인하지 마세요.
 
 ### VDI 응답성 권장값
 
@@ -88,7 +93,7 @@ Memoji는 보안상 `localhost`, `127.0.0.0/8`, `::1`만 허용합니다. 설정
 - 가능한 경우 VDI가 제공하는 GPU 가속을 사용하되, 실제 호스트 풀에서 TTFT와 생성 속도를 측정합니다.
 - CPU-only 풀에서는 vCPU 과할당과 전원 절약 정책을 줄이고 추론 프로세스에 안정적인 CPU를 확보합니다.
 - `memoji-vdi` 폴더는 느린 네트워크 홈이 아닌 VDI 로컬 디스크에 배치합니다.
-- 최초 CPU 캐시 생성을 위해 `ai\registry`에 쓰기 권한과 약 1GB의 여유 공간을 둡니다.
+- 최초 CPU 캐시 생성을 위해 `ai\registry`에 쓰기 권한과 target 측정으로 산정한 여유 공간을 둡니다.
 - speculative decoding/MTP는 LiteRT-LM 서버가 지원하는 모델·백엔드에서 서버 측으로 켭니다.
   설정의 draft 문자열만 입력해도 MTP가 활성화되는 것은 아닙니다.
 
@@ -97,11 +102,11 @@ Memoji는 보안상 `localhost`, `127.0.0.0/8`, `::1`만 허용합니다. 설정
 Memoji에는 주기적 자동 백업이 없습니다.
 
 - 전체 DB 백업: Memoji를 완전히 종료한 뒤 `memoji.db`를 복사합니다.
-- 콘텐츠 백업: 설정 → 데이터 → 전체 페이지 ZIP 내보내기를 사용합니다. ZIP은 페이지
-  콘텐츠용이며 앱 설정을 포함한 전체 DB 복제본이 아닙니다.
+- 콘텐츠/DB snapshot export: 설정 → 데이터 → 전체 페이지 ZIP 내보내기를 사용합니다.
+  Markdown, manifest와 consistent DB snapshot이 함께 들어갑니다.
 - DB 가져오기: 현재 DB를 `backups` 폴더에 먼저 백업한 뒤 페이지를 병합합니다.
-  가져오기 UI는 메모리 사용을 제한하기 위해 32MB 이하 DB만 허용합니다.
-- 더 큰 DB는 앱을 종료한 상태에서 관리자가 검증된 SQLite 백업/복원 절차를 사용하세요.
+  native path import이므로 JS byte array와 과거 32 MB 제한을 사용하지 않습니다. backup의
+  SHA-256과 크기가 결과에 기록됩니다.
 
 복원 전 원본 DB를 별도 보관하고, 복원 후 페이지 수와 최근 변경 내용을 점검합니다.
 
@@ -116,6 +121,9 @@ Memoji에는 주기적 자동 백업이 없습니다.
 - [ ] LiteRT-LM 모델 레지스트리가 실제 사용자 세션에 보이는지 확인
 - [ ] `127.0.0.1:9379/v1/models`와 설정의 서버 연결 확인 성공
 - [ ] 대표 VDI 사양에서 첫 토큰 지연과 64/256 토큰 응답 시간 측정
+- [ ] 비인가 local process 요청이 실패하는 runtime auth 검증
+- [ ] EXE/MSI/NSIS/runtime binary 서명 검증
+- [ ] strict runtime, EDR, memory, rollback matrix 통과
 - [ ] 조직 백업 정책과 복원 리허설 완료
 
 ## 문제 해결

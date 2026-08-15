@@ -100,6 +100,8 @@ struct ImportDatabaseResult {
     duplicated: usize,
     skipped: usize,
     backup_path: String,
+    backup_sha256: String,
+    backup_bytes: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -159,12 +161,19 @@ struct ExportManifest {
 }
 
 impl ImportDatabaseResult {
-    fn from_summary(summary: ImportDatabaseSummary, backup_path: PathBuf) -> Self {
+    fn from_summary(
+        summary: ImportDatabaseSummary,
+        backup_path: PathBuf,
+        backup_sha256: String,
+        backup_bytes: u64,
+    ) -> Self {
         Self {
             imported: summary.imported,
             duplicated: summary.duplicated,
             skipped: summary.skipped,
             backup_path: backup_path.to_string_lossy().to_string(),
+            backup_sha256,
+            backup_bytes,
         }
     }
 }
@@ -606,10 +615,17 @@ fn import_memoji_database(
         Err(error) => Err(error.to_string()),
     };
     let import_summary = import_summary_result?;
+    let backup_sha256 = sha256_file(&backup_path)?;
+    let backup_bytes = backup_path
+        .metadata()
+        .map_err(|error| format!("Failed to inspect import backup: {error}"))?
+        .len();
 
     Ok(ImportDatabaseResult::from_summary(
         import_summary,
         backup_path,
+        backup_sha256,
+        backup_bytes,
     ))
 }
 

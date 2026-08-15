@@ -32,9 +32,10 @@ Memoji를 실행한 뒤 설정 → 데이터에서 다음을 확인합니다.
 
 ## 로컬 AI 사용
 
-VDI 배포본은 LiteRT-LM 런타임과 Gemma 4 E2B 모델을 `ai` 폴더에 포함합니다. 앱이
-`Memoji.exe` 옆의 폴더를 감지해 로컬 서버를 자동으로 시작하므로 사용자별 설치나
-다운로드는 필요하지 않습니다.
+검증된 VDI AI 배포본은 LiteRT-LM 런타임과 Gemma 4 E2B 모델을 `ai` 폴더에 포함할 수
+있습니다. 앱은 그 폴더를 감지하면 managed child server 시작을 시도합니다. 실제 번들을
+준비하지 않은 코어 설치본에는 runtime/model이 없으며 AI는 명확한 준비 안 됨 상태를
+표시합니다.
 
 ```text
 Memoji VDI 폴더/
@@ -44,8 +45,8 @@ Memoji VDI 폴더/
 └── data/
 ```
 
-폴더 전체를 쓰기 가능한 로컬 디스크에 복사하세요. 첫 실행에 모델 최적화 캐시가
-`ai/registry` 아래 생성될 수 있으므로 약 1GB의 추가 여유 공간을 확보합니다.
+폴더 전체를 쓰기 가능한 로컬 디스크에 복사하세요. 모델과 캐시 크기는
+`ai/bundle-manifest.json`의 실제 byte count와 target VDI 측정값으로 산정합니다.
 
 기본 엔드포인트는 `http://127.0.0.1:9379/v1/chat/completions`, 모델 ID는
 `gemma4-e2b`입니다. 설정 → 로컬 AI의 연결 상태가 성공해야 사용할 수 있습니다.
@@ -54,7 +55,7 @@ Memoji VDI 폴더/
 
 ### 느린 VDI에서
 
-1. Memoji를 로그인 후 자동 실행하면 LiteRT-LM도 함께 시작됩니다.
+1. 검증된 AI bundle이 있는 경우 Memoji를 로그인 후 실행해 LiteRT-LM 준비를 미리 시도합니다.
 2. 먼저 256 토큰으로 사용하고, 긴 대화가 느리면 64 토큰을 선택합니다.
 3. 불필요하게 긴 페이지 전체를 프롬프트로 보내지 않습니다.
 4. 실제 VDI에서 첫 응답 지연과 생성 시간을 측정합니다.
@@ -69,8 +70,9 @@ Memoji에는 예약 또는 종료 시 자동 백업 기능이 없습니다.
 
 ### 페이지 콘텐츠 내보내기
 
-설정 → 데이터 → 전체 페이지 ZIP 내보내기를 사용합니다. ZIP은 Markdown 페이지와
-manifest를 담으며, 앱 설정을 포함한 완전한 DB 백업은 아닙니다.
+설정 → 데이터 → 전체 페이지 ZIP 내보내기를 사용합니다. ZIP은 Markdown 페이지,
+manifest와 consistent `database/memoji.db` snapshot을 담습니다. manifest에는 app/schema
+version, count, revision, SHA-256과 byte size가 기록됩니다.
 
 ### 전체 DB 백업
 
@@ -92,7 +94,9 @@ Copy-Item $source (Join-Path $backupDir "memoji-$stamp.db")
 ```
 
 복원할 때도 앱을 종료하고 현재 DB를 별도 보관한 뒤 교체합니다. 설정의 기존 DB
-가져오기는 페이지를 병합하고 가져오기 전 백업을 만들지만, 32MB 이하 DB만 지원합니다.
+가져오기는 native path를 Rust가 직접 읽으므로 과거의 32 MB frontend 제한이 없습니다.
+가져오기 전 backup의 path, SHA-256과 byte size를 기록한 뒤 transaction으로 페이지를
+병합합니다.
 
 ## 여러 VDI에서 같은 데이터 사용
 
@@ -118,7 +122,7 @@ Copy-Item $source (Join-Path $backupDir "memoji-$stamp.db")
 
 ### AI가 준비되지 않음
 
-1. 같은 세션에서 `litert-lm serve --host 127.0.0.1 --port 9379`가 실행 중인지 확인합니다.
+1. 설정의 managed runtime process/model/endpoint 상태와 log path를 확인합니다.
 2. 브라우저나 운영 도구로 `http://127.0.0.1:9379/v1/models` 응답을 확인합니다.
 3. 모델 레지스트리에 `gemma4-e2b`가 등록되어 있는지 확인합니다.
 4. 방화벽/EDR의 루프백 차단 여부를 확인합니다.
@@ -138,3 +142,4 @@ DB를 열린 채로 로컬과 네트워크 간 복제하지 마세요. 관리자
 - [ ] 별도 백업 일정과 복원 절차가 있음
 - [ ] LiteRT-LM 서버 연결 상태가 성공임
 - [ ] 느린 VDI에서는 응답 길이를 64/256 토큰으로 제한함
+- [ ] runtime 인증과 signed artifact가 조직의 GA gate를 통과함

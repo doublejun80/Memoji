@@ -200,6 +200,7 @@ fn validate_applied_migrations(applied: &[(i64, String)]) -> Result<(), Migratio
 pub struct BackupArtifact {
     pub path: PathBuf,
     pub sha256: String,
+    pub bytes: u64,
 }
 
 pub fn create_backup(
@@ -219,9 +220,11 @@ pub fn create_backup(
         )
         .map_err(MigrationError::Sqlite)?;
     let bytes = std::fs::read(backup_path)?;
+    let byte_count = bytes.len() as u64;
     let sha256 = format!("{:x}", Sha256::digest(bytes));
     Ok(BackupArtifact {
         path: backup_path.to_path_buf(),
         sha256,
+        bytes: byte_count,
     })
 }

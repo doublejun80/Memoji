@@ -137,6 +137,13 @@ fn vacuum_backup_records_sha256_and_preserves_data() {
     let artifact = create_backup(&connection, &backup_path).expect("backup artifact");
     assert_eq!(artifact.path, backup_path);
     assert_eq!(artifact.sha256.len(), 64);
+    assert_eq!(
+        artifact.bytes,
+        std::fs::metadata(&artifact.path)
+            .expect("backup metadata")
+            .len()
+    );
+    assert!(artifact.bytes > 0);
     assert!(artifact
         .sha256
         .chars()

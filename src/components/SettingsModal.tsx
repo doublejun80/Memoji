@@ -356,7 +356,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       await onDataImported?.();
       const addedCount = summary.imported + summary.duplicated;
       toast.success(`DB 가져오기 완료: ${addedCount}개 추가, ${summary.skipped}개 중복 건너뜀`, {
-        description: `자동 백업: ${summary.backup_path}`,
+        description: `자동 백업: ${summary.backup_path} · ${summary.backup_bytes.toLocaleString('ko-KR')} bytes · SHA-256 ${summary.backup_sha256.slice(0, 12)}…`,
       });
     } catch (error) {
       toast.error('DB 가져오기 실패: ' + String(error));

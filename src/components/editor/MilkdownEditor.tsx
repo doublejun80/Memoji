@@ -983,6 +983,16 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
           button.removeEventListener('keydown', runInlineFormat, true);
         });
       });
+
+      const generatedInputs = Array.from(
+        root.querySelectorAll<HTMLInputElement>('input:not([id]):not([name])')
+      );
+      generatedInputs.forEach((input, index) => {
+        input.name = `memoji-editor-input-${index + 1}`;
+        if (!input.getAttribute('aria-label')) {
+          input.setAttribute('aria-label', input.placeholder || '편집기 입력');
+        }
+      });
     };
 
     const observer = new MutationObserver(attachInlineFormatButtons);

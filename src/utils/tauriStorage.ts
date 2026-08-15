@@ -8,6 +8,8 @@ export interface DatabaseImportSummary {
   duplicated: number;
   skipped: number;
   backup_path: string;
+  backup_sha256: string;
+  backup_bytes: number;
 }
 
 export interface PagesZipExportSummary {
