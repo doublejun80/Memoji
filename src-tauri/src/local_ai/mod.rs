@@ -12,13 +12,14 @@ pub use mtp_client::{
 use sampler::SamplingConfig;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     fmt,
     path::PathBuf,
     sync::{Arc, Mutex},
     thread,
     time::Instant,
 };
+use tokio_util::sync::CancellationToken;
 
 const DEFAULT_CONTEXT_SIZE: usize = 2048;
 const MIN_CONTEXT_SIZE: usize = 512;
@@ -213,6 +214,7 @@ pub enum LocalAiError {
     },
     LoadFailed(String),
     GenerateFailed(String),
+    Cancelled,
 }
 
 impl fmt::Display for LocalAiError {
@@ -244,11 +246,70 @@ impl fmt::Display for LocalAiError {
             Self::GenerateFailed(message) => {
                 write!(f, "Failed to generate with local Gemma model: {message}")
             }
+            Self::Cancelled => write!(f, "Local AI generation cancelled"),
         }
     }
 }
 
 impl std::error::Error for LocalAiError {}
+
+pub type RequestId = String;
+
+#[derive(Debug, Clone, Default)]
+pub struct ActiveRequestRegistry {
+    inner: Arc<Mutex<HashMap<RequestId, CancellationToken>>>,
+}
+
+impl ActiveRequestRegistry {
+    pub fn begin(&self, request_id: RequestId) -> Result<CancellationToken, String> {
+        let mut active = self
+            .inner
+            .lock()
+            .map_err(|_| "Local AI request registry is unavailable".to_string())?;
+        if active.contains_key(&request_id) {
+            return Err(format!("Local AI request '{request_id}' is already active"));
+        }
+        let token = CancellationToken::new();
+        active.insert(request_id, token.clone());
+        Ok(token)
+    }
+
+    pub fn cancel(&self, request_id: &str) -> Result<bool, String> {
+        let active = self
+            .inner
+            .lock()
+            .map_err(|_| "Local AI request registry is unavailable".to_string())?;
+        let Some(token) = active.get(request_id) else {
+            return Ok(false);
+        };
+        token.cancel();
+        Ok(true)
+    }
+
+    pub fn finish(&self, request_id: &str) -> Result<(), String> {
+        self.inner
+            .lock()
+            .map_err(|_| "Local AI request registry is unavailable".to_string())?
+            .remove(request_id);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn contains(&self, request_id: &str) -> bool {
+        self.inner
+            .lock()
+            .expect("request registry")
+            .contains_key(request_id)
+    }
+}
+
+pub fn cancellation_checkpoint(token: &CancellationToken) -> Result<(), LocalAiError> {
+    if token.is_cancelled() {
+        Err(LocalAiError::Cancelled)
+    } else {
+        Ok(())
+    }
+}
 
 #[derive(Debug)]
 struct LocalAiInner {
@@ -737,6 +798,28 @@ mod tests {
         assert!(
             matches!(error, LocalAiError::LoadFailed(message) if message.contains("already in progress"))
         );
+    }
+
+    #[test]
+    fn active_request_registry_cancels_and_releases_requests() {
+        let registry = ActiveRequestRegistry::default();
+        let token = registry
+            .begin("request-1".to_string())
+            .expect("begin request");
+
+        assert!(registry.contains("request-1"));
+        assert!(!token.is_cancelled());
+        assert!(registry.cancel("request-1").expect("cancel request"));
+        assert!(matches!(
+            cancellation_checkpoint(&token),
+            Err(LocalAiError::Cancelled)
+        ));
+
+        registry.finish("request-1").expect("finish request");
+        assert!(!registry.contains("request-1"));
+        assert!(!registry
+            .cancel("request-1")
+            .expect("missing request is idempotent"));
     }
 
     #[test]

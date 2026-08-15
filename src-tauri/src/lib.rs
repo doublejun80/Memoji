@@ -3,9 +3,10 @@ mod local_ai;
 
 use database::{build_page_export_entries, Database, ImportDatabaseSummary, Page};
 use local_ai::{
-    LiteRtManagedStatus, LiteRtManager, LocalAiBenchmarkResult, LocalAiConfig,
-    LocalAiGenerateRequest, LocalAiGenerateResponse, LocalAiGenerateStreamChunk,
-    LocalAiRuntimeKind, LocalAiState, LocalAiStatus, MtpConfig, DEFAULT_MTP_MODEL,
+    cancellation_checkpoint, ActiveRequestRegistry, LiteRtManagedStatus, LiteRtManager,
+    LocalAiBenchmarkResult, LocalAiConfig, LocalAiGenerateRequest, LocalAiGenerateResponse,
+    LocalAiGenerateStreamChunk, LocalAiRuntimeKind, LocalAiState, LocalAiStatus, MtpConfig,
+    DEFAULT_MTP_MODEL,
 };
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
@@ -13,11 +14,13 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, Window};
+use tokio_util::sync::CancellationToken;
 use zip::write::SimpleFileOptions;
 
 struct AppState {
     db: Mutex<Database>,
     local_ai: LocalAiState,
+    active_ai_requests: ActiveRequestRegistry,
     litert_manager: LiteRtManager,
     /// 시작할 때 결정한 경로를 모든 명령이 공유해야 일시적인 권한/네트워크
     /// 변화로 열린 DB와 가져오기·내보내기 경로가 갈라지지 않는다.
@@ -677,6 +680,7 @@ async fn local_ai_test_runtime_config(
             temperature: Some(0.0),
             top_p: Some(1.0),
         },
+        CancellationToken::new(),
         |_chunk| Ok(()),
     )
     .await
@@ -718,12 +722,18 @@ async fn local_ai_generate_stream(
     window: Window,
     state: State<'_, AppState>,
 ) -> Result<LocalAiGenerateResponse, String> {
+    let requests = state.active_ai_requests.clone();
+    let cancellation = requests.begin(request_id.clone())?;
     let local_ai = state.local_ai.clone();
     let stream_window = window.clone();
     let stream_request_id = request_id.clone();
-    let response = tauri::async_runtime::spawn_blocking(move || {
-        local_ai
-            .generate_with_callback(request, |token_text, generated_tokens| {
+    let worker_cancellation = cancellation.clone();
+    let result = async {
+        cancellation_checkpoint(&cancellation).map_err(|error| error.to_string())?;
+        let response = tauri::async_runtime::spawn_blocking(move || {
+            cancellation_checkpoint(&worker_cancellation)?;
+            local_ai.generate_with_callback(request, |token_text, generated_tokens| {
+                cancellation_checkpoint(&worker_cancellation)?;
                 stream_window
                     .emit(
                         "local-ai-generate-chunk",
@@ -738,25 +748,30 @@ async fn local_ai_generate_stream(
                     .map_err(|error| local_ai::LocalAiError::GenerateFailed(error.to_string()))?;
                 Ok(())
             })
-            .map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("Local AI worker failed: {error}"))??;
-
-    window
-        .emit(
-            "local-ai-generate-chunk",
-            LocalAiGenerateStreamChunk {
-                request_id,
-                token_text: String::new(),
-                generated_tokens: response.generated_tokens,
-                done: true,
-                finish_reason: Some(response.finish_reason.clone()),
-            },
-        )
+        })
+        .await
+        .map_err(|error| format!("Local AI worker failed: {error}"))?
         .map_err(|error| error.to_string())?;
 
-    Ok(response)
+        cancellation_checkpoint(&cancellation).map_err(|error| error.to_string())?;
+        window
+            .emit(
+                "local-ai-generate-chunk",
+                LocalAiGenerateStreamChunk {
+                    request_id: request_id.clone(),
+                    token_text: String::new(),
+                    generated_tokens: response.generated_tokens,
+                    done: true,
+                    finish_reason: Some(response.finish_reason.clone()),
+                },
+            )
+            .map_err(|error| error.to_string())?;
+
+        Ok(response)
+    }
+    .await;
+    requests.finish(&request_id)?;
+    result
 }
 
 #[tauri::command]
@@ -766,34 +781,59 @@ async fn local_ai_generate_mtp_stream(
     window: Window,
     state: State<'_, AppState>,
 ) -> Result<LocalAiGenerateResponse, String> {
-    let config = resolve_mtp_config(&state)?
-        .ok_or_else(|| "고속 로컬 서버가 설정되어 있지 않습니다.".to_string())?;
+    let requests = state.active_ai_requests.clone();
+    let cancellation = requests.begin(request_id.clone())?;
     let stream_window = window.clone();
     let stream_request_id = request_id.clone();
+    let stream_cancellation = cancellation.clone();
 
-    let response = local_ai::generate_mtp_stream(config, request_id, request, |chunk| {
-        stream_window
-            .emit("local-ai-generate-chunk", chunk)
-            .map_err(|error| local_ai::LocalAiError::GenerateFailed(error.to_string()))?;
-        Ok(())
-    })
-    .await
-    .map_err(|error| error.to_string())?;
+    let result = async {
+        cancellation_checkpoint(&cancellation).map_err(|error| error.to_string())?;
+        let config = resolve_mtp_config(&state)?
+            .ok_or_else(|| "고속 로컬 서버가 설정되어 있지 않습니다.".to_string())?;
+        cancellation_checkpoint(&cancellation).map_err(|error| error.to_string())?;
 
-    window
-        .emit(
-            "local-ai-generate-chunk",
-            LocalAiGenerateStreamChunk {
-                request_id: stream_request_id,
-                token_text: String::new(),
-                generated_tokens: response.generated_tokens,
-                done: true,
-                finish_reason: Some(response.finish_reason.clone()),
+        let response = local_ai::generate_mtp_stream(
+            config,
+            request_id.clone(),
+            request,
+            cancellation.clone(),
+            |chunk| {
+                cancellation_checkpoint(&stream_cancellation)?;
+                stream_window
+                    .emit("local-ai-generate-chunk", chunk)
+                    .map_err(|error| local_ai::LocalAiError::GenerateFailed(error.to_string()))?;
+                Ok(())
             },
         )
+        .await
         .map_err(|error| error.to_string())?;
 
-    Ok(response)
+        cancellation_checkpoint(&cancellation).map_err(|error| error.to_string())?;
+        window
+            .emit(
+                "local-ai-generate-chunk",
+                LocalAiGenerateStreamChunk {
+                    request_id: stream_request_id,
+                    token_text: String::new(),
+                    generated_tokens: response.generated_tokens,
+                    done: true,
+                    finish_reason: Some(response.finish_reason.clone()),
+                },
+            )
+            .map_err(|error| error.to_string())?;
+
+        Ok(response)
+    }
+    .await;
+    requests.finish(&request_id)?;
+    result
+}
+
+#[tauri::command]
+async fn local_ai_cancel(request_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.active_ai_requests.cancel(&request_id)?;
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -915,6 +955,7 @@ pub fn run() {
             app.manage(AppState {
                 db: Mutex::new(db),
                 local_ai: LocalAiState::new(LocalAiConfig::from_resource_dir(resource_dir)),
+                active_ai_requests: ActiveRequestRegistry::default(),
                 litert_manager,
                 data_dir,
             });
@@ -945,6 +986,7 @@ pub fn run() {
             local_ai_generate,
             local_ai_generate_stream,
             local_ai_generate_mtp_stream,
+            local_ai_cancel,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

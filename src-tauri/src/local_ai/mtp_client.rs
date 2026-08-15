@@ -1,6 +1,6 @@
 use super::{
-    sampler::SamplingConfig, LocalAiError, LocalAiGenerateRequest, LocalAiGenerateResponse,
-    LocalAiGenerateStreamChunk,
+    cancellation_checkpoint, sampler::SamplingConfig, LocalAiError, LocalAiGenerateRequest,
+    LocalAiGenerateResponse, LocalAiGenerateStreamChunk,
 };
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use reqwest::redirect::Policy;
@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::sync::OnceLock;
 use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 pub const DEFAULT_MTP_MODEL: &str = "google/gemma-4-E2B-it";
 const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 600;
@@ -287,11 +288,13 @@ pub async fn generate_mtp_stream<F>(
     config: MtpConfig,
     request_id: String,
     request: LocalAiGenerateRequest,
+    cancellation: CancellationToken,
     mut on_chunk: F,
 ) -> Result<LocalAiGenerateResponse, LocalAiError>
 where
     F: FnMut(LocalAiGenerateStreamChunk) -> Result<(), LocalAiError>,
 {
+    cancellation_checkpoint(&cancellation)?;
     let client = shared_mtp_client()?;
 
     let sampling = SamplingConfig::from_request(&request);
@@ -313,10 +316,13 @@ where
         builder = builder.header(AUTHORIZATION, format!("Bearer {api_key}"));
     }
 
-    let mut response = builder
-        .send()
-        .await
-        .map_err(|error| LocalAiError::GenerateFailed(error.to_string()))?;
+    cancellation_checkpoint(&cancellation)?;
+    let mut response = tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => return Err(LocalAiError::Cancelled),
+        result = builder.send() => result
+            .map_err(|error| LocalAiError::GenerateFailed(error.to_string()))?,
+    };
 
     if !response.status().is_success() {
         let status = response.status();
@@ -334,10 +340,13 @@ where
     let mut received_finish_reason = false;
 
     while !received_done {
-        let bytes = response
-            .chunk()
-            .await
-            .map_err(|error| LocalAiError::GenerateFailed(error.to_string()))?;
+        cancellation_checkpoint(&cancellation)?;
+        let bytes = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(LocalAiError::Cancelled),
+            result = response.chunk() => result
+                .map_err(|error| LocalAiError::GenerateFailed(error.to_string()))?,
+        };
         let reached_eof = bytes.is_none();
         let lines = match bytes {
             Some(bytes) => line_buffer.push(&bytes)?,
@@ -345,6 +354,7 @@ where
         };
 
         for line in lines {
+            cancellation_checkpoint(&cancellation)?;
             let Some(data) = line.strip_prefix("data:").map(str::trim) else {
                 continue;
             };
@@ -357,6 +367,7 @@ where
             }
 
             for event in parse_stream_event(data)? {
+                cancellation_checkpoint(&cancellation)?;
                 if let Some(reason) = event.finish_reason {
                     finish_reason = reason;
                     received_finish_reason = true;
@@ -385,6 +396,7 @@ where
         }
     }
 
+    cancellation_checkpoint(&cancellation)?;
     Ok(LocalAiGenerateResponse {
         text,
         prompt_tokens: 0,
@@ -541,6 +553,63 @@ mod tests {
         let second = shared_mtp_client().expect("shared client should remain available");
 
         assert!(std::ptr::eq(first, second));
+    }
+
+    #[test]
+    fn cancellation_interrupts_a_waiting_loopback_stream() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("stream listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have an address");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("stream connection should arrive");
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request);
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+                )
+                .expect("stream headers should be writable");
+            thread::sleep(Duration::from_millis(800));
+            let _ = stream.write_all(
+                b"50\r\ndata: {\"choices\":[{\"delta\":{\"content\":\"late\"},\"finish_reason\":null}]}\n\n\r\n",
+            );
+        });
+
+        let config = MtpConfig::from_values(
+            format!("http://{address}/v1/chat/completions"),
+            Some("gemma4-e2b".to_string()),
+            None,
+            Some(LocalAiRuntimeKind::LitertLm),
+            None,
+        )
+        .expect("loopback config should be valid");
+        let cancellation = CancellationToken::new();
+        let cancellation_from_ui = cancellation.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            cancellation_from_ui.cancel();
+        });
+
+        let started = std::time::Instant::now();
+        let error = tauri::async_runtime::block_on(generate_mtp_stream(
+            config,
+            "cancel-loopback".to_string(),
+            LocalAiGenerateRequest {
+                prompt: "취소 테스트".to_string(),
+                page_context: None,
+                max_new_tokens: Some(8),
+                temperature: Some(0.0),
+                top_p: Some(1.0),
+            },
+            cancellation,
+            |_chunk| Ok(()),
+        ))
+        .expect_err("cancelled stream should not complete");
+
+        assert!(matches!(error, LocalAiError::Cancelled));
+        assert!(started.elapsed() < Duration::from_millis(500));
+        server.join().expect("stream server should finish");
     }
 
     #[test]

@@ -1,0 +1,89 @@
+.memoji-ai-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.memoji-ai-header {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--sidebar-border);
+}
+
+.memoji-ai-title-row,
+.memoji-ai-runtime-row,
+.memoji-ai-token-presets,
+.memoji-ai-quick-actions,
+.memoji-ai-composer,
+.memoji-ai-message-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.memoji-ai-title-row label { font-size: 11px; font-weight: 700; letter-spacing: .04em; }
+.memoji-ai-title-row select {
+  min-width: 0; flex: 1; height: 28px; padding: 0 8px;
+  border: 1px solid var(--sidebar-border); border-radius: 6px;
+  background: var(--background); font-size: 11px;
+}
+.memoji-ai-spinner { width: 14px; height: 14px; animation: spin 1s linear infinite; }
+.memoji-ai-clear { color: var(--muted-foreground); font-size: 10px; }
+.memoji-ai-status-card {
+  display: grid; gap: 4px; padding: 8px;
+  border: 1px solid var(--sidebar-border); border-radius: 7px;
+  background: color-mix(in srgb, var(--muted) 72%, transparent); font-size: 10px;
+}
+.memoji-ai-status-card span { color: var(--muted-foreground); line-height: 1.4; }
+.memoji-ai-status-card button,
+.memoji-ai-token-presets button,
+.memoji-ai-quick-actions button,
+.memoji-ai-message-actions button {
+  min-height: 24px; padding: 0 8px; border: 1px solid var(--sidebar-border);
+  border-radius: 6px; background: var(--background); font-size: 10px;
+}
+.memoji-ai-runtime-row { color: var(--muted-foreground); font-size: 10px; }
+.memoji-ai-runtime-badge {
+  padding: 2px 6px; border-radius: 999px; background: var(--muted);
+  color: var(--foreground); font-weight: 600;
+}
+.memoji-ai-token-presets button[data-active="true"] {
+  border-color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, var(--background));
+  color: var(--primary);
+}
+.memoji-ai-quick-actions button { flex: 1; }
+.memoji-ai-conversation {
+  min-height: 0; overflow-y: auto; display: flex; flex-direction: column;
+  gap: 10px; padding: 12px;
+}
+.memoji-ai-empty {
+  display: grid; gap: 5px; place-content: center; min-height: 160px;
+  padding: 18px; color: var(--muted-foreground); text-align: center; font-size: 11px;
+}
+.memoji-ai-message {
+  max-width: 88%; padding: 8px 9px; border-radius: 10px;
+  background: var(--muted); font-size: 11px; line-height: 1.55;
+}
+.memoji-ai-message[data-role="user"] { align-self: flex-end; background: var(--primary); color: var(--primary-foreground); }
+.memoji-ai-message p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.memoji-ai-message-actions { justify-content: flex-end; margin-top: 6px; }
+.memoji-ai-message-actions button { min-height: 20px; padding: 0 5px; }
+.memoji-ai-composer {
+  position: sticky; bottom: 0; align-items: end; padding: 10px;
+  border-top: 1px solid var(--sidebar-border); background: var(--background);
+}
+.memoji-ai-composer textarea {
+  min-width: 0; flex: 1; min-height: 64px; resize: vertical; padding: 8px 10px;
+  border: 1px solid var(--sidebar-border); border-radius: 8px;
+  background: var(--background); color: var(--foreground); font: inherit;
+  font-size: 11px; line-height: 1.45;
+}
+.memoji-ai-composer > button {
+  display: grid; place-items: center; width: 32px; height: 32px;
+  border-radius: 8px; background: var(--primary); color: var(--primary-foreground);
+}
+.memoji-ai-composer > button svg { width: 14px; height: 14px; }
