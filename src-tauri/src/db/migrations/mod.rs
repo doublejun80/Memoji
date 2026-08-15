@@ -1,5 +1,6 @@
 mod v001_baseline;
 mod v002_nodes_revisions;
+mod v003_tags_links_fts;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
@@ -16,7 +17,11 @@ pub struct Migration {
     pub apply: fn(&Connection) -> rusqlite::Result<()>,
 }
 
-pub const MIGRATIONS: &[Migration] = &[v001_baseline::MIGRATION, v002_nodes_revisions::MIGRATION];
+pub const MIGRATIONS: &[Migration] = &[
+    v001_baseline::MIGRATION,
+    v002_nodes_revisions::MIGRATION,
+    v003_tags_links_fts::MIGRATION,
+];
 
 #[derive(Debug)]
 pub enum MigrationError {

@@ -5,6 +5,7 @@ use crate::domain::node::NodeRecord;
 use crate::domain::page::{
     PageBody, PageRevision, PageSummary, SavePageV2Request, SavePageV2Response,
 };
+use crate::indexing::worker::IndexWorker;
 use rusqlite::Connection;
 use std::fmt;
 
@@ -79,6 +80,13 @@ impl PageService {
         };
         NodeRepository::upsert(&transaction, &node)?;
         PageRepository::upsert(&transaction, &request, next_revision)?;
+        IndexWorker::replace_page_index(
+            &transaction,
+            &request.id,
+            &request.title,
+            &request.body_markdown,
+            &request.tags,
+        )?;
         RevisionRepository::insert(
             &transaction,
             &request.id,
@@ -132,6 +140,12 @@ impl PageService {
             });
         }
         let body = RevisionRepository::get_body(&transaction, page_id, revision)?;
+        let (title, tags_json): (String, String) = transaction.query_row(
+            "SELECT title, tags FROM pages WHERE id=?1",
+            [page_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
         let next_revision = actual_revision + 1;
         let created_at = chrono::Utc::now().to_rfc3339();
         transaction.execute(
@@ -146,6 +160,7 @@ impl PageService {
             &created_at,
             "revision_restore",
         )?;
+        IndexWorker::replace_page_index(&transaction, page_id, &title, &body, &tags)?;
         transaction.commit()?;
         Ok(PageRepository::get_body(connection, page_id)?)
     }

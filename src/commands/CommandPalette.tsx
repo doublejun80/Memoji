@@ -1,7 +1,12 @@
 import { Command } from 'cmdk';
 import { Search } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { SearchPageSummary, SearchTaskSummary } from '../shared/api/searchApi';
+import {
+  tauriIndexedSearchApi,
+  type IndexedSearchApi,
+  type SearchPageSummary,
+  type SearchTaskSummary,
+} from '../shared/api/searchApi';
 import { searchWorkspace, type CommandSearchResult } from './commandSearch';
 import type { AppCommand, CommandContext } from './types';
 
@@ -15,6 +20,7 @@ interface CommandPaletteProps {
   recentPageIds?: string[];
   onPageSelect: (page: SearchPageSummary) => void;
   onTaskSelect: (task: SearchTaskSummary) => void;
+  searchApi?: IndexedSearchApi;
 }
 
 const GROUP_LABELS = {
@@ -37,8 +43,10 @@ export function CommandPalette({
   recentPageIds,
   onPageSelect,
   onTaskSelect,
+  searchApi = tauriIndexedSearchApi,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
+  const [indexedPages, setIndexedPages] = useState<SearchPageSummary[] | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -65,15 +73,42 @@ export function CommandPalette({
     return () => cancelAnimationFrame(frame);
   }, [open]);
 
+  useEffect(() => {
+    const term = query.trim();
+    if (!open || !term || /^(title|tag):/i.test(term)) {
+      setIndexedPages(null);
+      return;
+    }
+    let disposed = false;
+    const timer = window.setTimeout(() => {
+      void searchApi.search(term, {}, 30).then((matches) => {
+        if (disposed) return;
+        setIndexedPages(matches.map((match) => ({
+          id: match.pageId,
+          title: match.title,
+          excerpt: match.snippet,
+          tags: match.tags,
+          updatedAt: match.updatedAt,
+        })));
+      }).catch(() => {
+        if (!disposed) setIndexedPages(null);
+      });
+    }, 80);
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+    };
+  }, [open, query, searchApi]);
+
   const results = useMemo(() => searchWorkspace({
     query,
     commands,
     context,
-    pages,
+    pages: indexedPages ?? pages,
     tasks,
     recentPageIds,
     limit: 30,
-  }), [commands, context, pages, query, recentPageIds, tasks]);
+  }), [commands, context, indexedPages, pages, query, recentPageIds, tasks]);
 
   if (!open) return null;
 

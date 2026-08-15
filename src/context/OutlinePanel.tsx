@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react';
 import type { Page } from '../types';
+import { tauriIndexedSearchApi } from '../shared/api/searchApi';
 
 export interface OutlineHeading {
   id: string;
@@ -34,7 +36,22 @@ export function parseOutline(markdown: string): OutlineHeading[] {
 }
 
 export function OutlinePanel({ page }: { page: Page | null }) {
-  const headings = parseOutline(page?.content ?? '');
+  const [indexedHeadings, setIndexedHeadings] = useState<OutlineHeading[] | null>(null);
+  useEffect(() => {
+    setIndexedHeadings(null);
+    if (!page || !(window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) return;
+    let disposed = false;
+    void tauriIndexedSearchApi.getPageAnchors(page.id).then((headings) => {
+      if (!disposed) setIndexedHeadings(headings.map((heading) => ({
+        id: heading.slug,
+        level: heading.level,
+        text: heading.heading,
+        line: heading.line,
+      })));
+    }).catch(() => undefined);
+    return () => { disposed = true; };
+  }, [page]);
+  const headings = indexedHeadings ?? parseOutline(page?.content ?? '');
   if (!page) return <div className="context-empty" role="status">선택한 문서가 없습니다.</div>;
   if (headings.length === 0) return <div className="context-empty" role="status">이 문서에는 제목이 없습니다.</div>;
 
