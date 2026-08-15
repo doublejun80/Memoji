@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import type { AiMessage } from './aiTypes';
 
 interface AiConversationProps {
@@ -6,7 +6,7 @@ interface AiConversationProps {
   isGenerating: boolean;
   onInsertText?: (text: string) => void;
   onInsertBlock?: (text: string) => void;
-  onReplaceText?: (target: string, replacement: string) => void;
+  children?: ReactNode;
 }
 
 export function AiConversation({
@@ -14,7 +14,7 @@ export function AiConversation({
   isGenerating,
   onInsertText,
   onInsertBlock,
-  onReplaceText,
+  children,
 }: AiConversationProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -33,18 +33,13 @@ export function AiConversation({
           <p>{message.content || (message.role === 'assistant' && isGenerating ? '생성 중…' : '')}</p>
           {message.role === 'assistant' && message.content && (
             <div className="memoji-ai-message-actions">
-              {message.replaceTarget && onReplaceText && (
-                <button type="button" onClick={() => onReplaceText(message.replaceTarget!, message.content)}>
-                  치환
-                </button>
-              )}
               {onInsertBlock && <button type="button" onClick={() => onInsertBlock(message.content)}>블록</button>}
               {onInsertText && <button type="button" onClick={() => onInsertText(message.content)}>삽입</button>}
             </div>
           )}
         </article>
       ))}
+      {children}
     </div>
   );
 }
-

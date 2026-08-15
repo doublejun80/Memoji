@@ -24,6 +24,10 @@ import { bindCommandKeyboard } from './app/keyboardBindings';
 import { CommandPalette } from './commands/CommandPalette';
 import { WorkspaceSidebar } from './workspace/WorkspaceSidebar';
 import { WorkspaceCanvas } from './workspace/WorkspaceCanvas';
+import {
+  applyProposalToDocument,
+  type AiProposal,
+} from './features/ai/aiProposalReducer';
 
 interface CreatePageOptions {
   title: string;
@@ -218,21 +222,19 @@ function AppContent() {
     }
   };
 
-  const handleReplaceText = (targetText: string, replacementText: string): boolean => {
-    if (!currentPage || !targetText.trim()) return false;
-
-    const index = currentPage.content.indexOf(targetText);
-    if (index === -1) return false;
-
-    const nextContent = [
-      currentPage.content.slice(0, index),
-      replacementText,
-      currentPage.content.slice(index + targetText.length)
-    ].join('');
-    const updatedPage = pageWithMarkdownMetadata(currentPage, nextContent);
-    handlePageUpdate(updatedPage);
+  const handleApplyAiProposal = async (proposal: AiProposal): Promise<boolean> => {
+    if (!currentPage || proposal.pageId !== currentPage.id) return false;
+    const result = applyProposalToDocument(currentPage.content, 0, proposal);
+    if (!result.ok) return false;
+    await handlePageUpdate(pageWithMarkdownMetadata(currentPage, result.content));
     return true;
   };
+
+  useEffect(() => {
+    const showAiReview = () => setContextTab('ai');
+    window.addEventListener('memoji:selection-ai', showAiReview);
+    return () => window.removeEventListener('memoji:selection-ai', showAiReview);
+  }, [setContextTab]);
 
 
 
@@ -785,7 +787,7 @@ function AppContent() {
               datesWithPages={getDatesWithPages()}
               currentPage={currentPage}
               onInsertText={handleInsertText}
-              onReplaceText={handleReplaceText}
+              onApplyProposal={handleApplyAiProposal}
               activeTab={workspaceUi.contextTab}
               onTabChange={setContextTab}
             />

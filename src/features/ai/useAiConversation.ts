@@ -18,13 +18,12 @@ export function useAiConversation() {
     return message.id;
   }, []);
 
-  const appendAssistant = useCallback((replaceTarget?: string) => {
+  const appendAssistant = useCallback(() => {
     const message: AiMessage = {
       id: messageId(),
       role: 'assistant',
       content: '',
       timestamp: new Date(),
-      replaceTarget,
     };
     setMessages((current) => [...current, message]);
     return message.id;
@@ -48,4 +47,3 @@ export function useAiConversation() {
     clear,
   };
 }
-

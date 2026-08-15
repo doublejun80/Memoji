@@ -1,8 +1,11 @@
 import { AiAssistantPanel } from '../features/ai/AiAssistantPanel';
+import type { AiProposal } from '../features/ai/aiProposalReducer';
 
 interface AIChatAssistantProps {
   onInsertText?: (text: string) => void;
-  onReplaceText?: (targetText: string, replacementText: string) => boolean;
+  onApplyProposal?: (proposal: AiProposal) => boolean | Promise<boolean>;
+  currentPageId?: string;
+  currentPageRevision?: number;
   currentPageContent?: string;
 }
 

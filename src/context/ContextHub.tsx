@@ -8,6 +8,7 @@ import { LinksPanel } from './LinksPanel';
 import { OutlinePanel } from './OutlinePanel';
 import { PropertiesPanel } from './PropertiesPanel';
 import { SearchPinPanel } from './SearchPinPanel';
+import type { AiProposal } from '../features/ai/aiProposalReducer';
 
 interface ContextHubProps {
   activeTab: ContextHubTab;
@@ -17,7 +18,7 @@ interface ContextHubProps {
   searchPinned?: boolean;
   onPageSelect?: (page: Page) => void;
   onInsertText?: (text: string) => void;
-  onReplaceText?: (targetText: string, replacementText: string) => boolean;
+  onApplyProposal?: (proposal: AiProposal) => boolean | Promise<boolean>;
 }
 
 const TAB_ITEMS = [
@@ -36,7 +37,7 @@ export function ContextHub({
   searchPinned = false,
   onPageSelect,
   onInsertText,
-  onReplaceText,
+  onApplyProposal,
 }: ContextHubProps) {
   const resolvedTab = activeTab === 'search' && !searchPinned ? 'ai' : activeTab;
   const taskCount = parseMarkdownTasks(currentPage?.content ?? '').filter((task) => !task.done).length;
@@ -66,7 +67,9 @@ export function ContextHub({
       <Tabs.Content value="ai" className="context-hub-panel" data-context-panel data-fill-height="true">
         <AIChatAssistant
           onInsertText={onInsertText}
-          onReplaceText={onReplaceText}
+          onApplyProposal={onApplyProposal}
+          currentPageId={currentPage?.id}
+          currentPageRevision={0}
           currentPageContent={currentPage?.content}
         />
       </Tabs.Content>

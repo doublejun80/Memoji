@@ -7,6 +7,7 @@ import { WorkspaceStatusBar } from '../workspace/WorkspaceStatusBar';
 import { DocumentBar } from './DocumentBar';
 import { MetadataStrip } from './MetadataStrip';
 import { SelectionAiToolbar, type EditorSelection } from './SelectionAiToolbar';
+import { hashTextAnchor } from '../features/ai/aiProposalReducer';
 
 export interface DocumentWorkspaceProps {
   currentPage: Page | null;
@@ -15,15 +16,6 @@ export interface DocumentWorkspaceProps {
 
 export interface DocumentWorkspaceHandle {
   flushUnsaved: () => Promise<void>;
-}
-
-function hashText(value: string): string {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
 export const DocumentWorkspace = forwardRef<DocumentWorkspaceHandle, DocumentWorkspaceProps>(({
@@ -77,7 +69,7 @@ export const DocumentWorkspace = forwardRef<DocumentWorkspaceHandle, DocumentWor
       text,
       start,
       end,
-      textHash: hashText(text),
+      textHash: hashTextAnchor(text),
     });
   };
 

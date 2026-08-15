@@ -1,6 +1,7 @@
 import type { ContextHubTab } from '../app/workspaceState';
 import { ContextHub } from '../context/ContextHub';
 import type { Page } from '../types';
+import type { AiProposal } from '../features/ai/aiProposalReducer';
 
 interface RightPanelProps {
   pages: Page[];
@@ -12,7 +13,7 @@ interface RightPanelProps {
   datesWithPages: string[];
   currentPage?: Page | null;
   onInsertText?: (text: string) => void;
-  onReplaceText?: (targetText: string, replacementText: string) => boolean;
+  onApplyProposal?: (proposal: AiProposal) => boolean | Promise<boolean>;
   activeTab?: ContextHubTab;
   onTabChange?: (tab: ContextHubTab) => void;
   searchPinned?: boolean;
@@ -25,7 +26,7 @@ export function RightPanel({
   isOpen,
   currentPage = null,
   onInsertText,
-  onReplaceText,
+  onApplyProposal,
   activeTab = 'ai',
   onTabChange = () => undefined,
   searchPinned = false,
@@ -39,7 +40,7 @@ export function RightPanel({
       pages={pages}
       onPageSelect={onPageSelect}
       onInsertText={onInsertText}
-      onReplaceText={onReplaceText}
+      onApplyProposal={onApplyProposal}
       searchPinned={searchPinned}
     />
   );

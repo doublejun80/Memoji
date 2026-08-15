@@ -4,6 +4,7 @@ import { renderWithProviders, screen, userEvent, waitFor } from '../../test/rend
 import type { LocalAiStatus } from '../../types/localAi';
 import type { AiApi } from '../../shared/api/aiApi';
 import { AiAssistantPanel } from './AiAssistantPanel';
+import { hashTextAnchor, type AiProposal } from './aiProposalReducer';
 
 const readyStatus: LocalAiStatus = {
   state: 'loaded',
@@ -124,5 +125,53 @@ describe('AiAssistantPanel', () => {
     act(() => frameCallbacks[0](0));
     expect(screen.getByText('첫째둘째')).toBeVisible();
     requestFrame.mockRestore();
+  });
+
+  it('turns an anchored editor selection into a reviewable proposal before applying', async () => {
+    const fixture = createApi();
+    const onApplyProposal = vi.fn().mockResolvedValue(true);
+    const proposalApi = {
+      list: vi.fn().mockResolvedValue([]),
+      create: vi.fn(async (proposal: AiProposal) => proposal),
+      updateStatus: vi.fn().mockResolvedValue(undefined),
+    };
+    renderWithProviders(
+      <AiAssistantPanel
+        api={fixture.api}
+        proposalApi={proposalApi}
+        currentPageId="page-1"
+        currentPageContent="앞 기존 문장 뒤"
+        onApplyProposal={onApplyProposal}
+      />,
+    );
+    await waitFor(() => expect(screen.getByLabelText('AI 메시지')).toBeEnabled());
+
+    act(() => window.dispatchEvent(new CustomEvent('memoji:selection-ai', {
+      detail: {
+        action: 'rewrite',
+        selection: {
+          pageId: 'page-1',
+          baseRevision: 0,
+          text: '기존 문장',
+          start: 2,
+          end: 7,
+          textHash: hashTextAnchor('기존 문장'),
+        },
+      },
+    })));
+    await waitFor(() => expect(fixture.api.generate).toHaveBeenCalledTimes(1));
+    await act(async () => fixture.generation.resolve({
+      text: '개선 문장',
+      promptTokens: 5,
+      generatedTokens: 2,
+      finishReason: 'stop',
+    }));
+
+    expect(await screen.findByText('선택 영역 다듬기')).toBeVisible();
+    expect(proposalApi.create).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole('button', { name: '변경 비교' }));
+    await userEvent.click(screen.getByRole('button', { name: '변경 적용' }));
+    expect(onApplyProposal).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByText('적용됨')).toBeVisible());
   });
 });

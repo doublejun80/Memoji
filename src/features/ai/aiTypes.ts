@@ -9,7 +9,6 @@ export interface AiMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
-  replaceTarget?: string;
 }
 
 export interface AiGenerateOptions {
@@ -43,4 +42,3 @@ export interface AiQuickAction {
 export interface AiRuntimeSelection {
   runtimeKind: LocalAiRuntimeKind;
 }
-

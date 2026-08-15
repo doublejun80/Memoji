@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { AiApi } from '../../shared/api/aiApi';
 import { tauriAiApi } from '../../shared/api/aiApi';
@@ -20,7 +20,15 @@ import {
 } from '../../types/localAi';
 import { AiComposer } from './AiComposer';
 import { AiConversation } from './AiConversation';
+import { AiProposalCard } from './AiProposalCard';
+import {
+  aiProposalReducer,
+  initialAiProposalState,
+  type AiProposal,
+} from './aiProposalReducer';
 import type { AiQuickAction } from './aiTypes';
+import type { EditorSelection } from '../../editor/SelectionAiToolbar';
+import { memoryProposalApi, type ProposalApi } from '../../shared/api/proposalApi';
 import { useAiConversation } from './useAiConversation';
 import { useAiRuntimeStatus } from './useAiRuntimeStatus';
 import { useAiStream } from './useAiStream';
@@ -28,9 +36,18 @@ import './ai.css';
 
 interface AiAssistantPanelProps {
   api?: AiApi;
+  proposalApi?: ProposalApi;
   onInsertText?: (text: string) => void;
-  onReplaceText?: (targetText: string, replacementText: string) => boolean;
+  onApplyProposal?: (proposal: AiProposal) => boolean | Promise<boolean>;
+  currentPageId?: string;
+  currentPageRevision?: number;
   currentPageContent?: string;
+}
+
+interface ProposalIntent {
+  selection: EditorSelection;
+  type: AiProposal['type'];
+  title: string;
 }
 
 const PAGE_CONTEXT_CHAR_LIMIT = 2_000;
@@ -70,13 +87,18 @@ const newRequestId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}
 
 export function AiAssistantPanel({
   api = tauriAiApi,
+  proposalApi = memoryProposalApi,
   onInsertText,
-  onReplaceText,
+  onApplyProposal,
+  currentPageId,
+  currentPageRevision = 0,
   currentPageContent,
 }: AiAssistantPanelProps) {
   const conversation = useAiConversation();
   const assistantByRequestRef = useRef(new Map<string, string>());
+  const proposalIntentByRequestRef = useRef(new Map<string, ProposalIntent>());
   const statusRef = useRef<LocalAiStatus | null>(null);
+  const [proposalState, dispatchProposal] = useReducer(aiProposalReducer, initialAiProposalState);
 
   const stream = useAiStream(api, {
     onStreamText: (requestId, text) => {
@@ -85,8 +107,44 @@ export function AiAssistantPanel({
     },
     onComplete: (requestId, response, streamedText) => {
       const messageId = assistantByRequestRef.current.get(requestId);
-      if (messageId) conversation.updateMessage(messageId, response.text || streamedText);
+      const generatedText = response.text || streamedText;
+      if (messageId) conversation.updateMessage(messageId, generatedText);
+      const intent = proposalIntentByRequestRef.current.get(requestId);
+      if (intent && generatedText) {
+        const { selection } = intent;
+        const proposal: AiProposal = {
+          id: `proposal-${requestId}`,
+          requestId,
+          pageId: selection.pageId,
+          baseRevision: selection.baseRevision,
+          type: intent.type,
+          title: intent.title,
+          summary: 'AI가 선택 영역을 바꾸는 검토 가능한 제안을 만들었습니다.',
+          patch: {
+            kind: 'text',
+            before: selection.text,
+            after: generatedText,
+            anchor: {
+              start: selection.start,
+              end: selection.end,
+              textHash: selection.textHash,
+            },
+            contextBefore: currentPageContent?.slice(Math.max(0, selection.start - 60), selection.start) || '',
+            contextAfter: currentPageContent?.slice(selection.end, selection.end + 60) || '',
+          },
+          sources: [{
+            pageId: selection.pageId,
+            start: selection.start,
+            end: selection.end,
+            textHash: selection.textHash,
+          }],
+          status: 'pending',
+        };
+        dispatchProposal({ type: 'queue', proposal });
+        void proposalApi.create(proposal);
+      }
       assistantByRequestRef.current.delete(requestId);
+      proposalIntentByRequestRef.current.delete(requestId);
     },
     onError: (requestId, error) => {
       const messageId = assistantByRequestRef.current.get(requestId);
@@ -95,11 +153,13 @@ export function AiAssistantPanel({
         formatLocalAiGenerateError(error, statusRef.current),
       );
       assistantByRequestRef.current.delete(requestId);
+      proposalIntentByRequestRef.current.delete(requestId);
     },
     onCancel: (requestId) => {
       const messageId = assistantByRequestRef.current.get(requestId);
       if (messageId) conversation.updateMessage(messageId, '생성이 취소되었습니다.');
       assistantByRequestRef.current.delete(requestId);
+      proposalIntentByRequestRef.current.delete(requestId);
     },
   });
   const runtime = useAiRuntimeStatus(api, stream.isGenerating);
@@ -108,14 +168,15 @@ export function AiAssistantPanel({
 
   const sendMessage = useCallback((rawPrompt = conversation.input, options: {
     includePageContext?: boolean;
-    replaceTarget?: string;
+    proposalIntent?: ProposalIntent;
   } = {}) => {
     const prompt = rawPrompt.trim();
     if (!prompt || !isLocalAiReady(runtime.status) || stream.isGenerating) return;
     const requestId = newRequestId();
     conversation.appendUser(prompt);
-    const assistantId = conversation.appendAssistant(options.replaceTarget);
+    const assistantId = conversation.appendAssistant();
     assistantByRequestRef.current.set(requestId, assistantId);
+    if (options.proposalIntent) proposalIntentByRequestRef.current.set(requestId, options.proposalIntent);
     conversation.setInput('');
     void stream.generate({
       requestId,
@@ -132,20 +193,59 @@ export function AiAssistantPanel({
     });
   }, [conversation, currentPageContent, maxNewTokens, runtime.status, stream]);
 
+  useEffect(() => {
+    const handleSelectionAction = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        action: 'rewrite' | 'summarize' | 'tasks';
+        selection: EditorSelection;
+      }>).detail;
+      if (!detail || detail.selection.pageId !== currentPageId) return;
+      const action = {
+        rewrite: {
+          type: 'replace' as const,
+          title: '선택 영역 다듬기',
+          prompt: '아래 선택 영역만 더 명확한 한국어 Markdown 문장으로 다듬어줘. 설명 없이 치환할 본문만 출력해줘.',
+        },
+        summarize: {
+          type: 'replace' as const,
+          title: '선택 영역 요약',
+          prompt: '아래 선택 영역을 핵심 의미가 유지되는 짧은 한국어 Markdown으로 요약해줘. 요약 본문만 출력해줘.',
+        },
+        tasks: {
+          type: 'tasks' as const,
+          title: '작업 목록 추출',
+          prompt: '아래 선택 영역에서 실행 가능한 작업을 Markdown task list로 추출해줘. 목록만 출력해줘.',
+        },
+      }[detail.action];
+      const selection = {
+        ...detail.selection,
+        baseRevision: currentPageRevision,
+      };
+      sendMessage(`${action.prompt}\n\n${selection.text}`, {
+        proposalIntent: { selection, type: action.type, title: action.title },
+      });
+    };
+    window.addEventListener('memoji:selection-ai', handleSelectionAction);
+    return () => window.removeEventListener('memoji:selection-ai', handleSelectionAction);
+  }, [currentPageId, currentPageRevision, sendMessage]);
+
   const runQuickAction = (action: AiQuickAction) => {
     if (action.requiresPage && !currentPageContent?.trim()) return;
     const selection = action.requiresSelection
       ? window.getSelection()?.toString().trim() || ''
       : '';
     if (action.requiresSelection && !selection) {
-      runtime.setStatusError('편집기에서 바꿀 문장을 선택한 뒤 다시 시도해주세요.');
+      runtime.setStatusError('문서를 원문 모드로 전환해 범위를 선택한 뒤 나타나는 AI 도구를 사용해주세요.');
+      return;
+    }
+    if (action.requiresSelection) {
+      runtime.setStatusError('정확한 범위와 리비전을 보존하려면 원문 선택 도구의 다듬기를 사용해주세요.');
       return;
     }
     sendMessage(
       selection ? `${action.prompt}\n\n${selection}` : action.prompt,
       {
         includePageContext: action.includePageContext,
-        replaceTarget: selection || undefined,
       },
     );
   };
@@ -155,10 +255,18 @@ export function AiAssistantPanel({
     ...text.split('\n').map((line) => line.trim() ? `> ${line}` : '>'),
   ].join('\n'));
 
-  const replaceText = (target: string, replacement: string) => {
-    if (!onReplaceText?.(target, replacement)) {
-      runtime.setStatusError('선택한 원문을 현재 문서에서 찾지 못했습니다. 같은 범위를 다시 선택해주세요.');
-    }
+  const applyProposal = async (id: string) => {
+    const proposal = proposalState.items.find((item) => item.id === id);
+    if (!proposal || !onApplyProposal) return;
+    const applied = await onApplyProposal(proposal);
+    const nextStatus = applied ? 'applied' : 'conflicted';
+    dispatchProposal({ type: applied ? 'mark-applied' : 'mark-conflict', id });
+    await proposalApi.updateStatus(id, nextStatus);
+  };
+
+  const rejectProposal = async (id: string) => {
+    dispatchProposal({ type: 'reject', id });
+    await proposalApi.updateStatus(id, 'rejected');
   };
 
   const status = runtime.status;
@@ -246,8 +354,19 @@ export function AiAssistantPanel({
         isGenerating={stream.isGenerating}
         onInsertText={onInsertText}
         onInsertBlock={onInsertText ? insertBlock : undefined}
-        onReplaceText={onReplaceText ? replaceText : undefined}
-      />
+      >
+        {proposalState.items.map((proposal) => (
+          <AiProposalCard
+            key={proposal.id}
+            proposal={proposal}
+            diffOpen={proposalState.openDiffId === proposal.id}
+            onOpenDiff={(id) => dispatchProposal({ type: 'open-diff', id })}
+            onCloseDiff={() => dispatchProposal({ type: 'close-diff' })}
+            onApply={(id) => void applyProposal(id)}
+            onReject={(id) => void rejectProposal(id)}
+          />
+        ))}
+      </AiConversation>
       <AiComposer
         value={conversation.input}
         onChange={conversation.setInput}
@@ -259,4 +378,3 @@ export function AiAssistantPanel({
     </section>
   );
 }
-
