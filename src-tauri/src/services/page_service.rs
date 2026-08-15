@@ -6,6 +6,8 @@ use crate::domain::page::{
     PageBody, PageRevision, PageSummary, SavePageV2Request, SavePageV2Response,
 };
 use crate::indexing::worker::IndexWorker;
+use crate::tasks::parser::ensure_task_markers;
+use crate::tasks::service::TaskService;
 use rusqlite::Connection;
 use std::fmt;
 
@@ -48,8 +50,9 @@ impl PageService {
 
     pub fn save(
         connection: &mut Connection,
-        request: SavePageV2Request,
+        mut request: SavePageV2Request,
     ) -> Result<SavePageV2Response, PageServiceError> {
+        request.body_markdown = ensure_task_markers(&request.body_markdown, &request.id);
         let transaction = connection.transaction()?;
         let actual_revision =
             PageRepository::current_revision(&transaction, &request.id)?.unwrap_or(0);
@@ -87,6 +90,16 @@ impl PageService {
             &request.body_markdown,
             &request.tags,
         )?;
+        TaskService::replace_page_tasks(
+            &transaction,
+            &request.id,
+            &request.body_markdown,
+            request.project_parent_id.as_deref(),
+            &request.updated_at,
+        )
+        .map_err(|error| {
+            PageServiceError::Sqlite(rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
+        })?;
         RevisionRepository::insert(
             &transaction,
             &request.id,
@@ -139,7 +152,10 @@ impl PageService {
                 actual: actual_revision,
             });
         }
-        let body = RevisionRepository::get_body(&transaction, page_id, revision)?;
+        let body = ensure_task_markers(
+            &RevisionRepository::get_body(&transaction, page_id, revision)?,
+            page_id,
+        );
         let (title, tags_json): (String, String) = transaction.query_row(
             "SELECT title, tags FROM pages WHERE id=?1",
             [page_id],
@@ -161,6 +177,21 @@ impl PageService {
             "revision_restore",
         )?;
         IndexWorker::replace_page_index(&transaction, page_id, &title, &body, &tags)?;
+        let project_id: Option<String> = transaction.query_row(
+            "SELECT project_parent_id FROM pages WHERE id=?1",
+            [page_id],
+            |row| row.get(0),
+        )?;
+        TaskService::replace_page_tasks(
+            &transaction,
+            page_id,
+            &body,
+            project_id.as_deref(),
+            &created_at,
+        )
+        .map_err(|error| {
+            PageServiceError::Sqlite(rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
+        })?;
         transaction.commit()?;
         Ok(PageRepository::get_body(connection, page_id)?)
     }

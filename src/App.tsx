@@ -28,6 +28,7 @@ import {
   applyProposalToDocument,
   type AiProposal,
 } from './features/ai/aiProposalReducer';
+import { TasksWorkspace } from './features/tasks/TasksWorkspace';
 
 interface CreatePageOptions {
   title: string;
@@ -797,6 +798,14 @@ function AppContent() {
                   pages={pages}
                   onPageSelect={handlePageSelect}
                   onPageCreate={handlePageCreate}
+                />
+              )}
+              tasks={(
+                <TasksWorkspace
+                  pages={pages}
+                  onPageSelect={handlePageSelect}
+                  onPageUpdate={handlePageUpdate}
+                  onTasksUpdated={reloadPagesFromStorage}
                 />
               )}
             />

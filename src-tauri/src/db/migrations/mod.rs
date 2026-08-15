@@ -1,6 +1,7 @@
 mod v001_baseline;
 mod v002_nodes_revisions;
 mod v003_tags_links_fts;
+mod v004_tasks_events;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
@@ -21,6 +22,7 @@ pub const MIGRATIONS: &[Migration] = &[
     v001_baseline::MIGRATION,
     v002_nodes_revisions::MIGRATION,
     v003_tags_links_fts::MIGRATION,
+    v004_tasks_events::MIGRATION,
 ];
 
 #[derive(Debug)]

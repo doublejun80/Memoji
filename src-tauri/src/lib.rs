@@ -6,12 +6,14 @@ mod indexing;
 mod local_ai;
 mod search;
 mod services;
+mod tasks;
 
 use commands::pages::{
     get_page_body, list_page_revisions, list_page_summaries, restore_page, restore_page_revision,
     save_page_v2, trash_page,
 };
 use commands::search::{get_page_anchors, get_page_links, search_workspace};
+use commands::tasks::{list_tasks, update_task};
 use database::{build_page_export_entries, Database, ImportDatabaseSummary, Page};
 use local_ai::{
     cancellation_checkpoint, ActiveRequestRegistry, LiteRtManagedStatus, LiteRtManager,
@@ -1008,6 +1010,8 @@ pub fn run() {
             search_workspace,
             get_page_anchors,
             get_page_links,
+            list_tasks,
+            update_task,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
