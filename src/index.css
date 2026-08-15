@@ -2,6 +2,7 @@
 @import './styles/shell.css';
 @import './styles/commands.css';
 @import './styles/sidebar.css';
+@import './styles/editor.css';
 
 /*! tailwindcss v4.1.3 | MIT License | https://tailwindcss.com */
 @layer properties {

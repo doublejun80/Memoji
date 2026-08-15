@@ -1,0 +1,307 @@
+.document-workspace {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--memoji-surface-canvas);
+  color: var(--memoji-text-primary);
+}
+
+.document-bar {
+  display: flex;
+  min-height: 76px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--memoji-border);
+}
+
+.document-bar-copy {
+  min-width: 0;
+}
+
+.document-breadcrumb {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
+  color: var(--memoji-text-tertiary);
+  font-size: var(--memoji-text-xs);
+}
+
+.document-breadcrumb svg {
+  width: 12px;
+  height: 12px;
+}
+
+.document-breadcrumb span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.document-title-row h1 {
+  overflow: hidden;
+  color: var(--memoji-text-primary);
+  font-size: 19px;
+  font-weight: 680;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-save-state {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  color: var(--memoji-text-tertiary);
+  font-size: var(--memoji-text-xs);
+}
+
+.document-save-state[data-dirty='true'] {
+  color: #b45309;
+}
+
+.document-save-state svg {
+  width: 12px;
+  height: 12px;
+}
+
+.document-mode-switch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  border: 1px solid var(--memoji-border);
+  border-radius: 7px;
+  padding: 2px;
+  background: var(--memoji-surface-subtle);
+}
+
+.document-mode-switch button {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 5px;
+  border-radius: 5px;
+  padding: 0 8px;
+  color: var(--memoji-text-secondary);
+  font-size: var(--memoji-text-xs);
+}
+
+.document-mode-switch button:hover,
+.document-mode-switch button:focus-visible {
+  color: var(--memoji-text-primary);
+}
+
+.document-mode-switch button[data-active='true'] {
+  background: var(--memoji-surface-raised);
+  color: var(--memoji-text-primary);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 6%);
+}
+
+.document-mode-switch svg {
+  width: 13px;
+  height: 13px;
+}
+
+.metadata-strip {
+  display: flex;
+  min-height: 38px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  overflow-x: auto;
+  padding: 5px 24px;
+  border-bottom: 1px solid var(--memoji-border);
+  background: var(--memoji-surface-subtle);
+}
+
+.metadata-chip,
+.metadata-add {
+  display: inline-flex;
+  height: 25px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--memoji-border);
+  border-radius: 5px;
+  padding: 0 7px;
+  background: var(--memoji-surface-raised);
+  color: var(--memoji-text-secondary);
+  font-size: var(--memoji-text-xs);
+}
+
+.metadata-chip svg,
+.metadata-add svg {
+  width: 11px;
+  height: 11px;
+}
+
+.metadata-add {
+  border-color: transparent;
+  background: transparent;
+  color: var(--memoji-text-tertiary);
+}
+
+.metadata-add:hover,
+.metadata-add:focus-visible {
+  border-color: var(--memoji-border);
+  background: var(--memoji-surface-raised);
+}
+
+.document-body {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.document-source-editor {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: 0;
+  outline: 0;
+  padding: 34px max(28px, calc((100% - 760px) / 2));
+  background: transparent;
+  color: var(--memoji-text-primary);
+  font: 14px/1.75 var(--memoji-font-mono);
+  tab-size: 2;
+}
+
+.selection-ai-toolbar {
+  position: absolute;
+  z-index: 20;
+  right: 20px;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid var(--memoji-border-strong);
+  border-radius: 8px;
+  padding: 4px;
+  background: var(--memoji-surface-raised);
+  box-shadow: var(--memoji-shadow-float);
+}
+
+.selection-ai-toolbar > span {
+  padding: 0 7px;
+  color: var(--memoji-text-tertiary);
+  font-size: var(--memoji-text-xs);
+}
+
+.selection-ai-toolbar button {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 4px;
+  border-radius: 5px;
+  padding: 0 7px;
+  color: var(--memoji-text-secondary);
+  font-size: var(--memoji-text-xs);
+}
+
+.selection-ai-toolbar button:hover,
+.selection-ai-toolbar button:focus-visible {
+  background: var(--memoji-surface-subtle);
+  color: var(--memoji-text-primary);
+}
+
+.selection-ai-toolbar svg {
+  width: 12px;
+  height: 12px;
+}
+
+.workspace-status-bar {
+  display: flex;
+  min-height: var(--memoji-statusbar-height);
+  flex: 0 0 var(--memoji-statusbar-height);
+  align-items: center;
+  gap: 12px;
+  padding: 0 10px;
+  border-top: 1px solid var(--memoji-border);
+  background: var(--memoji-surface-subtle);
+  color: var(--memoji-text-tertiary);
+  font-size: var(--memoji-text-xs);
+  line-height: 1;
+}
+
+.workspace-status-spacer {
+  flex: 1;
+}
+
+.document-empty-state,
+.workspace-canvas-empty {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 300px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 10px;
+  padding: 40px;
+  background: var(--memoji-surface-canvas);
+  color: var(--memoji-text-secondary);
+  text-align: center;
+}
+
+.document-empty-state > svg,
+.workspace-canvas-empty > svg {
+  width: 28px;
+  height: 28px;
+  color: var(--memoji-text-tertiary);
+}
+
+.document-empty-state h2,
+.workspace-canvas-empty h2 {
+  color: var(--memoji-text-primary);
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.document-empty-state p,
+.workspace-canvas-empty p {
+  max-width: 460px;
+  color: var(--memoji-text-tertiary);
+  font-size: var(--memoji-text-sm);
+  line-height: 1.55;
+}
+
+.workspace-canvas-empty kbd {
+  border: 1px solid var(--memoji-border);
+  border-radius: 5px;
+  padding: 3px 7px;
+  background: var(--memoji-surface-subtle);
+  color: var(--memoji-text-secondary);
+  font-size: var(--memoji-text-xs);
+}
+
+@media (max-width: 760px) {
+  .document-bar {
+    min-height: 68px;
+    padding-inline: 14px;
+  }
+
+  .metadata-strip {
+    padding-inline: 14px;
+  }
+
+  .document-title-row h1 {
+    font-size: 17px;
+  }
+}

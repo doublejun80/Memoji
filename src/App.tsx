@@ -23,6 +23,7 @@ import type { CommandContext } from './commands/types';
 import { bindCommandKeyboard } from './app/keyboardBindings';
 import { CommandPalette } from './commands/CommandPalette';
 import { WorkspaceSidebar } from './workspace/WorkspaceSidebar';
+import { WorkspaceCanvas } from './workspace/WorkspaceCanvas';
 
 interface CreatePageOptions {
   title: string;
@@ -303,12 +304,13 @@ function AppContent() {
     const dailyPages = getPagesForDate(pagesRef.current, selectedDateKey);
 
     setCurrentPageIndex('daily');
+    setWorkspaceView('editor');
     setCurrentPage(previousPage => (
       previousPage && dailyPages.some(page => page.id === previousPage.id)
         ? previousPage
         : dailyPages[0] || null
     ));
-  }, [selectedDateKey]);
+  }, [selectedDateKey, setWorkspaceView]);
 
   const handlePageSelect = async (page: Page, source: PageSelectionSource = 'global') => {
     if (currentPage?.id !== page.id) {
@@ -329,6 +331,7 @@ function AppContent() {
 
     setCurrentPage(page);
     setCurrentPageIndex(nextSelectionState.activeIndex);
+    setWorkspaceView('editor');
 
     if (selectedDateKey !== nextSelectionState.selectedDateKey) {
       setSelectedDate(parseDateKey(nextSelectionState.selectedDateKey));
@@ -742,17 +745,33 @@ function AppContent() {
               onClose={() => setPanelOpen('left', false)}
               onInsertText={handleInsertText}
               activeView={workspaceUi.leftView}
-              onViewChange={setLeftView}
+              onViewChange={(view) => {
+                setLeftView(view);
+                setWorkspaceView(
+                  view === 'tasks'
+                    ? 'tasks'
+                    : view === 'calendar'
+                      ? 'calendar'
+                      : view === 'knowledge'
+                        ? 'knowledge'
+                        : 'editor',
+                );
+              }}
             />
           )}
           center={(
-            <MarkdownEditor
-              ref={editorRef}
-              currentPage={currentPage}
-              onPageUpdate={handlePageUpdate}
-              pages={pages}
-              onPageSelect={handlePageSelect}
-              onPageCreate={handlePageCreate}
+            <WorkspaceCanvas
+              view={workspaceUi.workspaceView}
+              editor={(
+                <MarkdownEditor
+                  ref={editorRef}
+                  currentPage={currentPage}
+                  onPageUpdate={handlePageUpdate}
+                  pages={pages}
+                  onPageSelect={handlePageSelect}
+                  onPageCreate={handlePageCreate}
+                />
+              )}
             />
           )}
           right={(
