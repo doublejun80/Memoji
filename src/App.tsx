@@ -17,6 +17,7 @@ import { getPageDateKey, getPagesForDate, getProjectParentId, isProjectIndexPage
 import { resolvePageSelectionState } from './utils/navigationState';
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner';
+import { WorkspaceControllerProvider } from './app/useWorkspaceController';
 
 interface CreatePageOptions {
   title: string;
@@ -795,7 +796,9 @@ export default function App() {
   return (
     <ThemeProvider>
       <FocusModeProvider>
-        <AppContent />
+        <WorkspaceControllerProvider>
+          <AppContent />
+        </WorkspaceControllerProvider>
       </FocusModeProvider>
     </ThemeProvider>
   );
