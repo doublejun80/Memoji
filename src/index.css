@@ -5,6 +5,7 @@
 @import './styles/editor.css';
 @import './styles/context-hub.css';
 @import './styles/tasks.css';
+@import './styles/calendar.css';
 
 /*! tailwindcss v4.1.3 | MIT License | https://tailwindcss.com */
 @layer properties {

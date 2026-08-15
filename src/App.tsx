@@ -29,6 +29,7 @@ import {
   type AiProposal,
 } from './features/ai/aiProposalReducer';
 import { TasksWorkspace } from './features/tasks/TasksWorkspace';
+import { CalendarWorkspace } from './features/calendar/CalendarWorkspace';
 
 interface CreatePageOptions {
   title: string;
@@ -208,6 +209,10 @@ function AppContent() {
     setSelectedDate(date);
     setCurrentPageIndex('daily');
     setCurrentPage(null); // Clear current page when changing dates
+  };
+
+  const handleCalendarDateSelect = (date: Date) => {
+    setSelectedDate(date);
   };
 
   const handleAppTitleChange = async (newTitle: string) => {
@@ -767,7 +772,7 @@ function AppContent() {
               onPageDelete={handlePageDelete}
               onPageMove={handlePageMove}
               onPageParentChange={handlePageParentChange}
-              onDateSelect={handleDateSelect}
+              onDateSelect={workspaceUi.workspaceView === 'calendar' ? handleCalendarDateSelect : handleDateSelect}
               selectedDate={selectedDate}
               datesWithPages={getDatesWithPages()}
               onClose={() => setPanelOpen('left', false)}
@@ -806,6 +811,14 @@ function AppContent() {
                   onPageSelect={handlePageSelect}
                   onPageUpdate={handlePageUpdate}
                   onTasksUpdated={reloadPagesFromStorage}
+                />
+              )}
+              calendar={(
+                <CalendarWorkspace
+                  pages={pages}
+                  selectedDate={selectedDate}
+                  onDateSelect={handleCalendarDateSelect}
+                  onPageOpen={handlePageSelect}
                 />
               )}
             />

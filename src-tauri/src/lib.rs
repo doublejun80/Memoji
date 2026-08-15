@@ -1,3 +1,4 @@
+mod calendar;
 mod commands;
 mod database;
 mod db;
@@ -8,6 +9,10 @@ mod search;
 mod services;
 mod tasks;
 
+use commands::calendar::{
+    delete_calendar_event, export_calendar_ics, import_calendar_ics, list_calendar_items,
+    save_calendar_event,
+};
 use commands::pages::{
     get_page_body, list_page_revisions, list_page_summaries, restore_page, restore_page_revision,
     save_page_v2, trash_page,
@@ -1012,6 +1017,11 @@ pub fn run() {
             get_page_links,
             list_tasks,
             update_task,
+            list_calendar_items,
+            save_calendar_event,
+            delete_calendar_event,
+            export_calendar_ics,
+            import_calendar_ics,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

@@ -16,7 +16,7 @@
   gap: 16px;
   padding: 14px 24px;
   border-bottom: 1px solid var(--memoji-border);
-  background: var(--memoji-surface-primary);
+  background: var(--memoji-surface-raised);
 }
 
 .tasks-workspace-header span {
@@ -60,7 +60,7 @@
   gap: 8px;
   padding: 7px 24px;
   border-bottom: 1px solid var(--memoji-border);
-  background: var(--memoji-surface-primary);
+  background: var(--memoji-surface-raised);
 }
 
 .tasks-toolbar label {
@@ -123,7 +123,7 @@
   overflow: hidden;
   border: 1px solid var(--memoji-border);
   border-radius: 8px;
-  background: var(--memoji-surface-primary);
+  background: var(--memoji-surface-raised);
 }
 
 .task-row {
@@ -155,7 +155,7 @@
 }
 
 .task-toggle:hover {
-  background: var(--memoji-primary-soft);
+  background: var(--memoji-primary-tint);
 }
 
 .task-toggle svg {
@@ -263,7 +263,7 @@
 
 .task-sidebar-filters button:hover,
 .task-sidebar-filters button[data-active='true'] {
-  background: var(--memoji-primary-soft);
+  background: var(--memoji-primary-tint);
   color: var(--memoji-primary);
 }
 

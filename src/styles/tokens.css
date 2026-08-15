@@ -28,6 +28,10 @@
   --memoji-primary: #2563eb;
   --memoji-primary-hover: #1d4ed8;
   --memoji-primary-tint: #eff6ff;
+  --memoji-success: #15803d;
+  --memoji-success-tint: #f0fdf4;
+  --memoji-danger: #b91c1c;
+  --memoji-danger-tint: #fef2f2;
   --memoji-focus-ring: #2563eb;
   --memoji-overlay-scrim: rgb(10 10 10 / 0.28);
   --memoji-shadow-float: 0 14px 40px rgb(10 10 10 / 0.16);
@@ -46,6 +50,10 @@
   --memoji-primary: #60a5fa;
   --memoji-primary-hover: #3b82f6;
   --memoji-primary-tint: rgb(59 130 246 / 0.16);
+  --memoji-success: #4ade80;
+  --memoji-success-tint: rgb(34 197 94 / 0.14);
+  --memoji-danger: #f87171;
+  --memoji-danger-tint: rgb(239 68 68 / 0.14);
   --memoji-focus-ring: #60a5fa;
   --memoji-overlay-scrim: rgb(0 0 0 / 0.52);
   --memoji-shadow-float: 0 18px 48px rgb(0 0 0 / 0.42);
