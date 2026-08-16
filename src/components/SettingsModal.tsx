@@ -74,7 +74,7 @@ interface SettingsModalProps {
 
 interface DataPathStatus {
   databasePath: string;
-  source: 'policy_env' | 'portable' | 'os_local_fallback';
+  source: 'policy_env' | 'portable' | 'os_local' | 'os_local_fallback';
   writable: boolean;
   persistenceWarning?: string | null;
 }
@@ -955,7 +955,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       ? '관리자 정책(MEMOJI_DATA_PATH)으로 지정된 저장소입니다.'
                       : dataPathStatus?.source === 'portable'
                         ? '실행 파일 옆 portable data 저장소입니다.'
-                        : '비영구 VDI에서는 관리자가 지정한 영구 드라이브 경로인지 반드시 확인하세요.'}
+                        : dataPathStatus?.source === 'os_local'
+                          ? 'macOS 사용자 데이터 폴더에 안전하게 저장됩니다.'
+                          : '비영구 VDI에서는 관리자가 지정한 영구 드라이브 경로인지 반드시 확인하세요.'}
                   </p>
                   {dataPathStatus && !dataPathStatus.writable && (
                     <p className="memoji-settings-help text-destructive" role="alert">

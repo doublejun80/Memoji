@@ -437,8 +437,39 @@ mod runtime_config_tests {
     #[test]
     fn os_local_fallback_reports_a_vdi_persistence_warning() {
         assert!(data_path_persistence_warning("os_local_fallback").is_some());
+        assert!(data_path_persistence_warning("os_local").is_none());
         assert!(data_path_persistence_warning("policy_env").is_none());
         assert!(data_path_persistence_warning("portable").is_none());
+    }
+
+    #[test]
+    fn macos_default_data_directory_stays_outside_the_signed_app_bundle() {
+        let executable_directory = Path::new("/Applications/Memoji.app/Contents/MacOS");
+        let local_data_directory = Path::new("/Users/test/Library/Application Support");
+
+        let selected = choose_default_data_directory(
+            executable_directory,
+            Some(local_data_directory),
+            true,
+            true,
+        );
+
+        assert_eq!(selected, local_data_directory.join("Memoji").join("data"));
+    }
+
+    #[test]
+    fn windows_vdi_default_keeps_writable_portable_storage() {
+        let executable_directory = Path::new(r"C:\Memoji");
+        let local_data_directory = Path::new(r"C:\Users\test\AppData\Local");
+
+        let selected = choose_default_data_directory(
+            executable_directory,
+            Some(local_data_directory),
+            false,
+            true,
+        );
+
+        assert_eq!(selected, executable_directory.join("data"));
     }
 
     #[test]
@@ -498,24 +529,48 @@ fn get_data_directory() -> Result<PathBuf, String> {
         return Ok(path);
     }
 
-    // 2. 기본값: 실행 파일과 같은 폴더의 data 디렉토리
+    // 2. 플랫폼 기본값 결정
     let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
 
     let exe_dir = exe_path.parent().ok_or("Failed to get exe directory")?;
-
     let portable_data_dir = exe_dir.join("data");
-    if directory_is_writable(&portable_data_dir) {
+    let prefer_os_local = cfg!(target_os = "macos");
+    let portable_writable = !prefer_os_local && directory_is_writable(&portable_data_dir);
+    let selected = choose_default_data_directory(
+        exe_dir,
+        dirs::data_local_dir().as_deref(),
+        prefer_os_local,
+        portable_writable,
+    );
+
+    if selected == portable_data_dir {
         log::info!("Using the portable data directory");
-        return Ok(portable_data_dir);
-    }
-
-    if let Some(local_data_dir) = dirs::data_local_dir() {
-        let fallback_data_dir = local_data_dir.join("Memoji").join("data");
+    } else if prefer_os_local {
+        log::info!("Using the macOS application data directory");
+    } else {
         log::warn!("Portable data directory is not writable; using the OS-local fallback. Verify VDI profile persistence in Settings.");
-        return Ok(fallback_data_dir);
     }
+    Ok(selected)
+}
 
-    Ok(portable_data_dir)
+fn choose_default_data_directory(
+    executable_directory: &Path,
+    local_data_directory: Option<&Path>,
+    prefer_os_local: bool,
+    portable_writable: bool,
+) -> PathBuf {
+    let portable_data_directory = executable_directory.join("data");
+    if prefer_os_local {
+        if let Some(local_data_directory) = local_data_directory {
+            return local_data_directory.join("Memoji").join("data");
+        }
+    }
+    if portable_writable {
+        return portable_data_directory;
+    }
+    local_data_directory
+        .map(|directory| directory.join("Memoji").join("data"))
+        .unwrap_or(portable_data_directory)
 }
 
 fn data_path_source(data_dir: &Path) -> &'static str {
@@ -531,6 +586,13 @@ fn data_path_source(data_dir: &Path) -> &'static str {
         .is_some_and(|portable| portable == data_dir)
     {
         return "portable";
+    }
+    if cfg!(target_os = "macos")
+        && dirs::data_local_dir()
+            .map(|directory| directory.join("Memoji").join("data"))
+            .is_some_and(|os_local| os_local == data_dir)
+    {
+        return "os_local";
     }
     "os_local_fallback"
 }
