@@ -23,6 +23,14 @@ src-tauri/resources/models/tokenizer.json
 release/
 src-tauri/resources/litert-lm/
 
+# Generated QA and media evidence is archived outside the product repository.
+artifacts/
+
+# Windows VDI payloads and signing material never enter Git history.
+*.litertlm
+*.pfx
+*.p12
+
 # Logs and local env
 logs/
 *.log
