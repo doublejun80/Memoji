@@ -1,6 +1,11 @@
 # Memoji 2.0 GA 구현 및 검증 보고서
 
-작성일: 2026-08-16 (Asia/Seoul)
+작성일: 2026-08-16, Windows VDI 전환 갱신 2026-08-17 (Asia/Seoul)
+
+> 2026-08-17 구버전 보관, GitHub `main`의 Memoji 2.0 전환, macOS 현행 앱 설치,
+> Windows x64 unsigned VDI RC 빌드 기록은
+> `docs/implementation/memoji-2-windows-vdi-rc-release.md`를 우선한다. 정식 Windows GA는
+> Authenticode 서명과 대상 VDI 검증 전까지 계속 NO-GO다.
 
 > 2026-08-16 후속 코드 리뷰와 추가 개발의 최신 판정은
 > `docs/implementation/memoji-ga-hardening-status-2026-08-16.md`를 우선한다. 특히 canonical
