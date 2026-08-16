@@ -2,10 +2,6 @@ name: Windows Dist
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - master
 
 concurrency:
   group: windows-dist-${{ github.ref }}
@@ -54,6 +50,39 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri:build -- --target x86_64-pc-windows-msvc
 
+      - name: Sign and verify Windows binaries
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            throw "Authenticode certificate secrets are required for Windows GA artifacts."
+          }
+          $releaseRoot = "src-tauri/target/x86_64-pc-windows-msvc/release"
+          $appCandidates = @("$releaseRoot/Memoji.exe", "$releaseRoot/app.exe")
+          $appPath = $appCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          $setupPath = Get-ChildItem "$releaseRoot/bundle/nsis" -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $appPath -or -not $setupPath) { throw "Application or NSIS setup was not produced." }
+          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -File -Filter "signtool.exe" |
+            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signTool) { throw "signtool.exe was not found on the runner." }
+          $certificatePath = Join-Path $env:RUNNER_TEMP "memoji-authenticode.pfx"
+          try {
+            [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+            foreach ($binary in @($appPath, $setupPath.FullName)) {
+              & $signTool.FullName sign /f $certificatePath /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $binary
+              if ($LASTEXITCODE -ne 0) { throw "Signing failed: $binary" }
+              & $signTool.FullName verify /pa /all $binary
+              if ($LASTEXITCODE -ne 0) { throw "Signature verification failed: $binary" }
+            }
+          } finally {
+            Remove-Item $certificatePath -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Read application version
         id: version
         shell: pwsh
@@ -73,10 +102,10 @@ jobs:
           $appCandidates = @("$releaseRoot/Memoji.exe", "$releaseRoot/app.exe")
           $appPath = $appCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
           $setupPath = Get-ChildItem "$releaseRoot/bundle/nsis" -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $appPath) { throw "Windows executable was not found after tauri build." }
+          if (-not $appPath -or -not $setupPath) { throw "Windows application or NSIS setup was not found after tauri build." }
 
           Copy-Item $appPath "$output/Memoji_${version}_x64.exe" -Force
-          if ($setupPath) { Copy-Item $setupPath.FullName "$output/Memoji_${version}_x64-setup.exe" -Force }
+          Copy-Item $setupPath.FullName "$output/Memoji_${version}_x64-setup.exe" -Force
           Copy-Item NOTICE.md "$output/NOTICE.md" -Force
           pwsh -File scripts/generate-sbom.ps1 -OutputPath "$output/sbom.cdx.json"
           node scripts/generate-checksums.mjs --input $output --output "$output/SHA256SUMS"

@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   release:
+    if: ${{ github.event_name == 'workflow_dispatch' || !contains(github.ref_name, '-rc.') }}
     name: Release ${{ matrix.platform.label }}
     environment: release
     permissions:

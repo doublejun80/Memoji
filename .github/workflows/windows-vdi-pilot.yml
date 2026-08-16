@@ -1,0 +1,122 @@
+name: Windows VDI Pilot
+
+on:
+  push:
+    tags:
+      - "v*-rc.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing RC tag matching the 2.0.0 application version
+        required: true
+        default: v2.0.0-rc.1
+        type: string
+
+concurrency:
+  group: windows-vdi-pilot-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-vdi-pilot:
+    name: Build unsigned Windows VDI pilot
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Checkout RC source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust MSVC
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Verify RC version
+        shell: pwsh
+        run: |
+          node scripts/verify-release-version.mjs --tag $env:RELEASE_TAG
+          if ($LASTEXITCODE -ne 0) { throw "Release tag does not match the Memoji application version." }
+          $releaseVersion = $env:RELEASE_TAG.TrimStart("v")
+          "RELEASE_VERSION=$releaseVersion" >> $env:GITHUB_ENV
+
+      - name: Frontend quality gate
+        run: npm run check
+
+      - name: Rust quality gate
+        shell: pwsh
+        run: |
+          cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check
+          if ($LASTEXITCODE -ne 0) { throw "cargo fmt failed." }
+          cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+          if ($LASTEXITCODE -ne 0) { throw "cargo clippy failed." }
+          cargo test --manifest-path src-tauri/Cargo.toml --locked
+          if ($LASTEXITCODE -ne 0) { throw "cargo test failed." }
+
+      - name: Build unsigned offline VDI bundle
+        shell: pwsh
+        run: pwsh -File scripts/build-windows-vdi.ps1 -ModelPreset e2b -DownloadModel -AllowUnsigned
+
+      - name: Run real Windows native generation smoke
+        shell: pwsh
+        run: |
+          node scripts/verify-litert-runtime.mjs --bundle release/memoji-vdi/ai --smoke --strict --output release/memoji-vdi/windows-runtime-verification.json
+          if ($LASTEXITCODE -ne 0) { throw "Windows LiteRT-LM generation smoke failed." }
+          if (-not (Test-Path release/memoji-vdi/memoji-vdi-benchmark.exe)) { throw "memoji-vdi-benchmark.exe is missing." }
+
+      - name: Package release-safe core and model parts
+        shell: pwsh
+        run: |
+          pwsh -File scripts/package-windows-vdi-pilot.ps1 -BundleRoot release/memoji-vdi -OutputRoot release/windows-vdi-pilot -Version $env:RELEASE_VERSION
+          if ($LASTEXITCODE -ne 0) { throw "Windows VDI release packaging failed." }
+          if (-not (Test-Path release/windows-vdi-pilot/SHA256SUMS)) { throw "SHA256SUMS is missing." }
+
+      - name: Upload complete VDI folder for test transfer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Memoji-${{ env.RELEASE_VERSION }}-windows-x64-vdi-complete
+          path: release/memoji-vdi/**
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Publish unsigned VDI prerelease
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Memoji ${{ env.RELEASE_TAG }} — Unsigned VDI Pilot
+          draft: false
+          prerelease: true
+          fail_on_unmatched_files: true
+          body: |
+            ## Memoji 2.0 Windows VDI 시험판
+
+            이 릴리즈는 Authenticode 코드서명이 없는 시험판입니다. 대상 VDI의 EDR 허용과 성능 검증 전에는 조직 배포에 사용하지 마십시오.
+
+            1. core zip과 모든 Gemma 모델 `.partNNN` 파일을 내려받습니다.
+            2. core zip을 압축 해제합니다.
+            3. 포함된 `Assemble-Memoji-VDI.ps1`로 모델을 조립하고 SHA-256을 검증합니다.
+            4. `memoji-vdi-benchmark.exe`를 먼저 실행한 뒤 `Memoji.exe`를 실행합니다.
+            5. 모든 자산은 `SHA256SUMS`와 SBOM으로 확인할 수 있습니다.
+          files: release/windows-vdi-pilot/*
