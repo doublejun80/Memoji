@@ -2,6 +2,11 @@
 
 작성일: 2026-08-16 (Asia/Seoul)
 
+> 2026-08-16 후속 코드 리뷰와 추가 개발의 최신 판정은
+> `docs/implementation/memoji-ga-hardening-status-2026-08-16.md`를 우선한다. 특히 canonical
+> 저장과 파생 index transaction 분리, LiteRT FFI 수명주기, 반복 VDI benchmark, 데이터 경로
+> 경고, fail-closed Authenticode gate와 남은 부분 구현이 그 문서에 갱신돼 있다.
+
 구현 브랜치: `codex/memoji-2-ga-uiux`
 
 GitHub 기준선: PR #1, `258ae442a069c15e312687923aebaef48fd3bdda`
@@ -18,16 +23,19 @@ Memoji 2.0의 코드·데이터·UI 업그레이드는 독립 worktree에서 구
 - 고정 패널에서 크기 조절·상태 복원·반응형 overlay가 있는 작업공간 shell로 전환
 - 중복 검색 UI를 `Ctrl+K` 명령 팔레트와 SQLite FTS 검색으로 통합
 - 우측 검색/AI 스택을 AI·목차·링크·할 일·속성 Context Hub로 교체
-- 단일 `pages` 저장에서 스키마 v5, revision, tag/link/task/event/AI 파생 인덱스로 확장
+- 단일 `pages` 저장에서 스키마 v6, revision, tag/link/task/event/AI 파생 인덱스로 확장
 - AI 직접 치환을 근거·diff·base revision·명시적 승인 흐름으로 교체
 - JS byte array DB 가져오기를 네이티브 경로 기반 검증·백업·transaction 방식으로 교체
 - 동적 버전, 체크섬, SBOM 생성, CI gate, provenance와 롤백 절차를 릴리스 파이프라인에 추가
+- LiteRT-LM 0.16.0 C API를 Tauri 프로세스에 직접 로드하고 Gemma 4 E2B/E4B를 선택 가능한
+  인프로세스 런타임으로 승격
 
-그러나 **서명된 Windows VDI GA 출시는 현재 NO-GO**다. P0인 FR-078(Runtime Auth)은
-현재 승인된 LiteRT-LM 0.13.1과 검토 후보 0.16.0 모두 서버 인증 옵션을 제공하지 않아
-충족할 수 없고, FR-090(Signed Release)은 Windows 코드 서명 인증서·키와 실제 Windows
-릴리스 실행 환경이 없어 검증되지 않았다. 코어 앱 코드는 조건부 GA 후보이지만 이 두
-항목을 해결하기 전에는 “인증·서명된 Windows VDI GA”라고 배포하면 안 된다.
+코어 앱과 실제 Gemma 4 E2B 생성 경로는 구현·검증됐다. 기존 Python/HTTP sidecar를 제거해
+포트와 외부 요청 표면이 없는 인프로세스 구조로 바뀌었으므로 FR-078(Runtime Auth)은 더
+이상 서버 인증 기능에 의존하지 않는다. 그러나 **서명된 Windows VDI GA 출시는 현재
+NO-GO**다. FR-090(Signed Release)은 Windows 코드 서명 인증서·키와 실제 Windows 릴리스
+환경이 없어 검증되지 않았다. 또한 target VDI의 EDR·peak RSS·성능 수용 증빙은 별도 외부
+gate다. 사용자의 지시대로 이 단계에서는 Windows 배포물을 만들지 않았다.
 
 ## 2. GitHub 기준선과 업그레이드 패키지의 차이
 
@@ -42,10 +50,10 @@ GitHub 기준선은 실제 실행 코드와 PR #1의 저장/VDI 안정화가 중
 | 탐색 | 페이지 트리·분리 검색 | 업무별 left view, 통합 command palette | Today/Daily/Projects/Tasks/Calendar/Knowledge와 `Ctrl+K` |
 | 우측 패널 | 검색과 AI의 고정 세로 점유 | 탭형 Context Hub | AI/Outline/Links/Tasks/Properties 탭 |
 | 문서 | 편집기 중심 | Document/Metadata/Status 계층 | 문서 bar, metadata strip, selection AI, status bar |
-| 데이터 | legacy `pages`, JSON tag 중심 | versioned migration, revision, normalized indexes | schema v1→v5, revisions, tags, links, FTS, tasks/events, AI runs |
+| 데이터 | legacy `pages`, JSON tag 중심 | versioned migration, revision, normalized indexes | schema v1→v6, revisions, tags, links, FTS, tasks/events, AI runs |
 | AI 변경 | 생성문 삽입 중심 | proposal→diff→승인→revision guard | 영속 proposal, conflict 차단, citation navigation |
-| 런타임 | 관리형 LiteRT 기반 | 실제 capability와 MTP 검증 | capability 기반 UI, 취소/metrics, 0.13.1 기본 유지 |
-| 릴리스 | 하드코딩된 파일명과 느슨한 gate | 동적 버전, SBOM, signing, rollback | CI/workflow/scripts/runbook 구현, 실제 서명은 차단 |
+| 런타임 | 관리형 LiteRT sidecar | 실제 capability와 MTP 검증 | 0.16.0 C API 인프로세스, E2B/E4B, 취소/metrics/3회 복구 |
+| 릴리스 | 하드코딩된 파일명과 느슨한 gate | 동적 버전, SBOM, signing, rollback | CI/scripts/runbook/SBOM 구현, 실제 Windows 서명은 차단 |
 
 패키지의 분석 문서는 `docs/memoji-ga/`, 실행 계획은 `docs/superpowers/`, 기계 판독 요구사항은
 `requirements/`, 프로토타입과 체크리스트는 각각 `prototype/`, `checklists/`에 보존했다.
@@ -54,8 +62,8 @@ GitHub 기준선은 실제 실행 코드와 PR #1의 저장/VDI 안정화가 중
 
 ## 3. 구현 이력
 
-기준선 이후 기능 커밋은 다음 순서로 축적했다. 마지막 문서·증빙 커밋은 이 보고서를
-포함해 `docs: finalize Memoji 2.0 GA implementation evidence` 메시지로 남긴다.
+기준선 이후 기능 커밋은 다음 순서로 축적했다. 2026-08-16의 LiteRT-LM 0.16 네이티브
+승격과 gap closure는 현재 이 독립 worktree의 검증 대상 변경으로 포함돼 있다.
 
 | Commit | 내용 |
 |---|---|
@@ -77,10 +85,11 @@ GitHub 기준선은 실제 실행 코드와 PR #1의 저장/VDI 안정화가 중
 | `06ed32f` | 오프라인 task/event calendar |
 | `c5b5ca1` | 검증 capability 기반 AI runtime 모델 |
 | `81fecab` | AI run·citation·proposal 영속화 |
-| `07a13b4` | LiteRT-LM 0.16 호환성 검토 |
-| `577618a` | 검증된 0.13.1 GA 기본값 유지 결정 병합 |
+| `07a13b4` | LiteRT-LM 0.16 초기 호환성 검토 |
+| `577618a` | 당시 증빙 기준의 0.13.1 유지 결정(이후 네이티브 C API 실검증으로 대체) |
 | `91eb7ba` | VDI 규모 성능·접근성·code split 보강 |
 | `59d3ba0` | 경로 기반 import, export provenance, CI/release gate |
+| 현재 변경 | LiteRT-LM 0.16 C API 인프로세스 승격, E2B 실생성/벤치마크, GA gap closure |
 
 기준선부터 마지막 기능 커밋까지 268개 파일, 35,561줄 추가, 2,360줄 삭제가 기록되었다.
 대형 Lighthouse HTML/JSON과 설계 패키지 문서도 이 통계에 포함되므로 순수 제품 코드량으로
@@ -95,7 +104,7 @@ GitHub 기준선은 실제 실행 코드와 PR #1의 저장/VDI 안정화가 중
 - **차단**: 현재 호스트·외부 자격증명·상위 런타임 없이는 검증 또는 구현 완료가 불가능하다.
 - **미구현**: 구현 가능한 범위지만 이번 후보에 들어가지 않았다.
 
-### P0 — 31 완료 / 2 차단
+### P0 — 32 완료 / 1 차단
 
 | ID | 상태 | 근거 또는 남은 조건 |
 |---|---|---|
@@ -110,7 +119,7 @@ GitHub 기준선은 실제 실행 코드와 PR #1의 저장/VDI 안정화가 중
 | FR-016 | 완료 | Rust SQLite FTS5 backend와 lazy body API |
 | FR-021 | 완료 | Milkdown/Crepe와 GFM table 유지, build/test 통과 |
 | FR-022 | 완료 | WYSIWYG/source 전환과 Markdown 보존 |
-| FR-031 | 완료 | page/revision/index가 하나의 transaction에서 저장 |
+| FR-031 | 완료 | page/revision/job을 canonical transaction으로 저장하고 replaceable index는 commit 뒤 처리 |
 | FR-032 | 완료 | revision service, Tauri API, 조회 테스트 |
 | FR-034 | 완료 | base revision 불일치 시 conflict 반환 |
 | FR-040 | 완료 | migration/import 전 DB backup과 실패 보존 테스트 |
@@ -121,63 +130,63 @@ GitHub 기준선은 실제 실행 코드와 PR #1의 저장/VDI 안정화가 중
 | FR-070 | 완료 | request별 cancellation token과 UI 취소 |
 | FR-073 | 완료 | capability가 없는 MTP/Candle 기능은 표시하지 않음 |
 | FR-074 | 완료 | target/assistant/acceptance가 모두 있을 때만 MTP 표시 |
-| FR-076 | 완료 | child process discover/start/status/stop 관리 |
-| FR-077 | 완료 | localhost, `127.0.0.0/8`, `::1` 외 endpoint 거부 |
-| FR-078 | **차단** | LiteRT-LM 0.13.1/0.16.0에 server auth flag 없음. 임의 local process 차단 불가 |
-| FR-079 | 완료 | process/endpoint/model 상태를 분리 보고 |
+| FR-076 | 완료 | 인프로세스 engine start/status/stop과 conversation 수명주기 관리 |
+| FR-077 | 완료 | GA 경로는 listener/endpoint 없음. legacy endpoint는 loopback 외 주소 거부 |
+| FR-078 | 완료 | 외부 요청 표면이 없는 C API 직접 호출로 비인가 local HTTP 접근 경로 제거 |
+| FR-079 | 완료 | runtime/library/model/engine 상태와 오류를 분리 보고 |
 | FR-081 | 완료 | runtime/model/tokenizer hash·size·license manifest |
 | FR-086 | 완료 | native dialog path를 Rust가 직접 read-only 검증; 32 MB 제한 제거 |
-| FR-089 | 완료 | legacy v1→v5 count/hash/backup/duration evidence |
+| FR-089 | 완료 | legacy v1→v6 count/hash/backup/duration evidence |
 | FR-090 | **차단** | Windows 인증서·키·실제 signed MSI/NSIS/EXE와 VDI 검증 없음 |
 | FR-092 | 완료 | DB/app/local-AI rollback runbook |
 | FR-094 | 완료 | typecheck, unit, build, fmt, clippy, cargo test gate |
 | FR-095 | 완료 | 본 보고서가 구현·부분·차단·미구현을 구분 |
 
-### P1 — 25 완료 / 15 부분 / 1 차단 / 1 미구현
+### P1 — 41 완료 / 1 부분
 
 | ID | 상태 | 근거 또는 남은 범위 |
 |---|---|---|
-| FR-005 | 부분 | Editor/Tasks/Calendar는 중앙 view, Knowledge/Search는 sidebar/palette 경로만 있음 |
+| FR-005 | 완료 | Editor/Tasks/Calendar/Knowledge/Search 중앙 view |
 | FR-006 | 완료 | Today/Daily/Projects/Tasks/Calendar/Knowledge 전환 |
 | FR-008 | 완료 | 마지막 Context tab을 device storage에 저장 |
 | FR-009 | 완료 | focus mode에서 panel/chrome 숨김, editor/selection AI 유지 |
-| FR-013 | 부분 | page/task/command group은 있음. project 독립 group 없음 |
-| FR-014 | 부분 | `title:`, `tag:` 지원. `type:`, `due:`, `project:`, `is:` 미지원 |
+| FR-013 | 완료 | page/project/task/command 독립 group |
+| FR-014 | 완료 | `title:`, `tag:`, `type:`, `due:`, `project:`, `is:` query DSL |
 | FR-017 | 완료 | FTS title/body snippet에 match marker 표시 |
 | FR-018 | 완료 | 빈 query에 최근 page와 command 표시 |
 | FR-019 | 완료 | 한글 1–2자 title/tag fallback |
 | FR-023 | 완료 | breadcrumb/title/save/mode/menu document bar |
-| FR-024 | 부분 | type/project/date/tag 표시. due/status metadata 미연결 |
-| FR-026 | 부분 | 다듬기/요약/task 추출 지원. 번역 미지원 |
-| FR-028 | 부분 | heading 추출과 click event는 있음. editor scroll 동기화·현재 heading highlight 미연결 |
-| FR-030 | 부분 | 저장 상태·수정일은 있음. revision 번호 표시 없음 |
+| FR-024 | 완료 | type/project/date/tag/due/status metadata 표시 |
+| FR-026 | 완료 | 다듬기/요약/task 추출/번역 selection action |
+| FR-028 | 완료 | heading click→editor 이동과 현재 heading highlight |
+| FR-030 | 완료 | 저장 상태·수정일·revision 번호 표시 |
 | FR-033 | 완료 | 과거 revision restore가 새 revision을 만드는 service/API/test |
-| FR-035 | 부분 | soft delete/restore backend는 있음. 휴지통 복원 UI 없음 |
+| FR-035 | 완료 | soft delete/restore backend와 중앙 휴지통 복원 UI |
 | FR-036 | 완료 | normalized `tags`, `node_tags`/page tag relation |
 | FR-037 | 완료 | incoming/outgoing/unresolved wiki-link index |
 | FR-038 | 완료 | heading/task/text hash anchor |
-| FR-039 | 부분 | 저장 시 해당 page 파생 index 재생성. 전체 reindex command 없음 |
+| FR-039 | 완료 | durable job 기반 증분 색인과 transaction 기반 전체 재색인 command/UI |
 | FR-041 | 완료 | Markdown checkbox parser/index |
 | FR-042 | 완료 | marker/hash 기반 stable task identity |
 | FR-043 | 완료 | task view 변경이 새 revision의 Markdown에 반영 |
 | FR-044 | 완료 | Inbox/Today/Upcoming/Overdue/Completed |
-| FR-045 | 부분 | priority/due/project 지원. start/assignee 미지원 |
+| FR-045 | 완료 | priority/start/due/assignee/project Markdown annotation과 task UI |
 | FR-047 | 완료 | month/week/day calendar |
 | FR-048 | 완료 | due task와 event 통합 조회 |
-| FR-062 | 부분 | selection/current page/project/linked retrieval은 있음. 명시적 selector UI 없음 |
-| FR-063 | 부분 | summary/organize/task/rewrite 지원. decision/risk/translate 미지원 |
+| FR-062 | 완료 | none/page/project/linked/workspace 명시적 context selector |
+| FR-063 | 완료 | summary/organize/task/rewrite/decision/risk/translate action |
 | FR-068 | 완료 | page/heading/rank citation 영속·표시 |
 | FR-069 | 완료 | source page 전환과 matching heading scroll/focus |
 | FR-071 | 완료 | TTFT/token/TPS/runtime mode 기록 |
-| FR-072 | 부분 | 검증된 E2B LiteRT 선택과 optional legacy runtime만 있음. E4B preset 없음 |
-| FR-080 | 부분 | 비정상 child 감지 후 다음 status/start에서 복구. 최대 재시작 횟수 정책 없음 |
+| FR-072 | 완료 | E2B VDI 기본값과 E4B quality preset 선택/전환 |
+| FR-080 | 완료 | native engine 오류 상태와 최대 3회 bounded restart policy |
 | FR-082 | 완료 | version lock과 CLI/API/start/stream/restart 검증 harness |
 | FR-083 | 완료 | server/model 부재 시 명확한 오류와 optional Candle 경로 |
-| FR-084 | **차단** | macOS arm64에서 harness만 검증. target Windows VDI/model/EDR 없음 |
-| FR-085 | **미구현** | 설정 진단 표시는 있으나 본문 제외 diagnostic ZIP exporter 없음 |
+| FR-084 | **부분** | 실제 E2B cold/warm 네이티브 생성 통과. target Windows VDI/peak RSS/EDR 증빙 필요 |
+| FR-085 | 완료 | 본문·prompt·환경변수·자격증명·절대경로 제외 diagnostic ZIP exporter |
 | FR-087 | 완료 | Markdown, DB snapshot, version/count/hash/attachment manifest ZIP |
 | FR-088 | 완료 | migration/import backup SHA-256와 byte size 기록·표시 |
-| FR-091 | 부분 | SBOM generator와 release upload 구현. Windows release artifact 실행 증빙 없음 |
+| FR-091 | 완료 | npm/Cargo/LiteRT/model을 포함한 CycloneDX SBOM 1,073 component 생성 |
 | FR-093 | 완료 | workflow/build script가 package/tauri version을 동적으로 사용 |
 
 P2/P3는 GA 패키지 정의대로 후속 범위이며, 이 보고서가 구현을 주장하지 않는다.
@@ -196,37 +205,40 @@ Rust application services
   ├─ FTS/tag/link/anchor index worker
   ├─ Task/event services
   ├─ AI retrieval/proposal/metrics services
-  └─ Path import / snapshot export / runtime manager
+  ├─ Path import / snapshot export / diagnostics
+  └─ LiteRT-LM 0.16 native engine manager
             │
-SQLite schema v5 + local files
+SQLite schema v6 + local files + in-process C API
   ├─ pages/nodes/page_revisions
   ├─ tags/links/anchors/FTS/tasks/events
   ├─ ai_runs/ai_sources/ai_proposals
   └─ backups/exports/logs
 ```
 
-Markdown은 계속 canonical source다. tag/link/task/FTS는 page save transaction에서 교체 가능한
-파생 데이터로 갱신된다. AI proposal은 `baseRevision`과 source anchor를 저장하며, 적용 시
-현재 revision을 다시 비교한다. 대규모 workspace에서는 page summary와 body를 분리해
-모든 본문을 React에 올리지 않는다.
+Markdown은 계속 canonical source다. page/revision과 durable index job을 먼저 commit하고,
+tag/link/task/FTS는 post-commit worker의 별도 transaction에서 교체한다. 파생 처리 실패는
+job에 기록되며 원본과 revision을 되돌리지 않는다. AI proposal은 `baseRevision`과 source
+anchor를 저장하며, 적용 시 현재 revision을 다시 비교한다. 대규모 workspace에서는 page
+summary와 body를 분리해 모든 본문을 React에 올리지 않는다.
 
 ## 6. 데이터 마이그레이션·백업·내보내기
 
-스키마는 checksum이 있는 append-only migration v1~v5로 관리된다. legacy `pages`와
+스키마는 checksum이 있는 append-only migration v1~v6로 관리된다. legacy `pages`와
 `settings` 충돌은 transaction 안에서 보존 테이블로 옮긴 뒤 새 구조로 복사한다. 기존 DB가
 있으면 migration 전에 `VACUUM INTO` 백업을 만들고 SHA-256·byte size를 기록한다.
 
-실제 legacy fixture 마이그레이션 결과는 `artifacts/migration/legacy-v1-to-v5.json`에 있다.
+실제 legacy fixture 마이그레이션 결과는 `artifacts/migration/legacy-v1-to-v6.json`에 있다.
+v6는 task의 `start_date`와 `assignee`를 append-only로 추가한다.
 
 | 항목 | 결과 |
 |---|---:|
-| schema | legacy → v5 |
-| duration | 2.03 ms |
+| schema | legacy → v6 |
+| duration | 4.37 ms |
 | `PRAGMA quick_check` | `ok` |
 | page count | 1 → 1 |
 | tag/link/task count | 0/0/0 → 0/0/0 |
 | logical content SHA-256 | 전·후·backup 동일 |
-| source / migrated / backup bytes | 20,480 / 208,896 / 20,480 |
+| source / migrated / backup bytes | 20,480 / 217,088 / 20,480 |
 
 DB import는 native file chooser가 넘긴 path를 Rust가 직접 canonicalize하고 read-only로 연다.
 SQLite header와 source schema를 확인하기 전에는 live DB를 바꾸지 않으며, 가져오기 직전에
@@ -249,9 +261,11 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked
 ```
 
-최종 실행에서 프런트엔드 19개 test file, 76 tests와 Rust 89 passed, 0 failed,
-2 ignored가 통과했다. ignored 두 건은 실제 다운로드 모델이 필요한 생성 smoke test이며
-일반 unit gate에서 의도적으로 제외한다.
+후속 hardening 최종 실행에서 프런트엔드 Vitest 27개 test file, 98 tests와 별도 TypeScript
+unit scripts, Rust lib 103 passed와 benchmark bin 1 passed, 0 failed, 3 ignored가 통과했다.
+ignored 중 official LiteRT-LM C API/E2B
+실모델 test는 다운로드 bundle 경로를 명시해 별도로 실행했고 `Hello!`를 실제 stream하며
+1 passed로 끝났다. 나머지 ignored 두 건은 legacy GGUF fixture가 필요한 Candle smoke다.
 
 추가 gate:
 
@@ -260,7 +274,7 @@ cargo test --locked
 - `git diff --check`
 - checksum generation smoke
 - `cargo audit`: 이 호스트에 subcommand가 없어 미실행
-- PowerShell SBOM script: macOS에 `pwsh`가 없어 Windows release job에서만 실행 가능
+- cross-platform Node SBOM: 1,073 components 생성, PowerShell wrapper는 동일 generator 호출
 
 ## 8. UI/UX 검증
 
@@ -288,6 +302,13 @@ keyboard-first palette, diff-before-apply 흐름과 비교해 시각적 drift가
 다만 이는 Chromium browser preview이며 native Tauri IPC나 Windows window chrome 검증을
 대체하지 않는다.
 
+별도 `tauri.dev.conf.json`으로 production data/identifier와 분리된 `Memoji Dev` native
+process도 실행했다. 로그에서 schema v6 migration, official E2B bundle discovery,
+`LiteRT-LM 0.16.0 C API 0.1.0 in-process`, CPU/XNNPACK 4 threads, application start를 확인했다.
+최종 화면 캡처 시점에는 Mac이 잠겨 자동 UI 접근이 불가능했으므로 새 native screenshot은
+증빙으로 주장하지 않는다. 개발 process는 사용자가 잠금 해제해 바로 볼 수 있도록 종료하지
+않고 유지했다.
+
 ## 9. 성능과 용량
 
 10,000 page, 10,000 task, 1,428 link의 83,369,984-byte 합성 DB에서 측정했다.
@@ -303,7 +324,7 @@ keyboard-first palette, diff-before-apply 흐름과 비교해 시각적 drift가
 측정 process RSS는 51.17 MiB다. 이는 Apple M4 macOS의 local SQLite/Node 및 Chromium
 측정이며 Windows VDI end-to-end 지연이 아니다.
 
-최신 production build의 initial shell entry는 491,198 bytes raw / 152,794 bytes gzip이다.
+최신 production build의 initial shell entry는 499,800 bytes raw / 155,150 bytes gzip이다.
 기준선 약 2,063 KB raw / 644 KB gzip 대비 약 76% 감소했다. Milkdown runtime
 909,826 bytes raw / 287,531 bytes gzip은 문서를 열 때 지연 로드된다. 전체 JS asset 합계나
 이 수치를 설치 프로그램 크기로 해석하면 안 된다.
@@ -315,33 +336,42 @@ manifest byte count가 유일한 릴리스 크기 근거다.
 
 ## 10. Local AI와 Windows VDI
 
-기본은 LiteRT-LM 0.13.1 + `gemma4-e2b`다. 0.16.0의 공식 wheel·asset 계약과 SHA-256을
-검토했지만 Windows VDI 실행 matrix가 없으므로 default를 바꾸지 않았다. 런타임은 loopback만
-허용하고 session port를 고르며 child process 상태, model 존재, endpoint reachability를 분리해
-보고한다.
+기본은 LiteRT-LM 0.16.0 C API 0.1.0 + `gemma4-e2b`다. 선택형 `gemma4-e4b`도 동일한 해시
+lock과 UI preset을 가진다. Rust가 공식 동적 라이브러리를 Tauri 프로세스 안에서 로드하므로
+Python, child server, HTTP, loopback port가 없다. 기본 실행은 CPU/XNNPACK 4 thread이고,
+streaming/cancel/model 전환/최대 3회 복구를 같은 native manager가 담당한다.
 
-현재 호스트에는 `litert-lm` 실행 파일과 model이 없다. 따라서
-`artifacts/benchmark/litert-runtime-host.json`과 `local-ai-host.json`은 결과를 꾸미지 않고
-각각 `ENOENT`, `fetch failed`, `status: blocked`를 기록한다. cold/warm, 256/1024 prompt,
-64/256 output, thread 조합, restart, Korean UTF-8, memory, EDR은 target Windows VDI에서
-반드시 다시 실행해야 한다.
+실제 2,588,147,712-byte E2B 모델과 68,444,752-byte C API library의 크기와 SHA-256을 검증한
+뒤, 실모델 Rust 통합 테스트에서 생성문을 stream했다. 최신 standalone smoke는 fresh engine
+load 204 ms, TTFT 552 ms, total 689 ms, warm TTFT 283 ms, total 421 ms를 기록했다. OS file
+cache가 warm일 수 있으므로 이 수치를 물리 디스크 cold-start로 해석하지 않는다. 원본 JSON은
+`docs/implementation/litert-native-bundle-verification.json`과
+`docs/implementation/vdi-benchmark-macos-native-smoke.json`에 있다.
 
-0.13.1과 0.16.0 모두 확인된 server auth flag가 없다. 무작위 token은 향후 runtime이 auth를
-지원한다고 명시할 때만 전달되며 현재 `authEnforced`는 false다. loopback과 random port는 공격
-표면을 줄이지만 같은 사용자 세션의 임의 local process를 인증 차단하는 수용 기준과 같지 않다.
+실행 중 `app` process에는 TCP socket이 없었고 LiteRT 기본 server port 9379 listener도
+존재하지 않았다. Vite의 `[::1]:1420` listener는 Tauri 개발 UI hot reload 전용이며 배포
+runtime의 AI transport가 아니다.
+
+target Windows VDI에서는 checked-in benchmark executable로 thread/prompt/output matrix,
+peak RSS, EDR, 재시작을 다시 측정해야 한다. Windows bundle script는 runtime DLL과 model을
+offline staging하고 인증서가 제공되면 app/benchmark/DLL을 SignTool로 서명·검증하도록
+작성됐지만, 이번 단계에서는 Windows 배포물을 생성하지 않았다.
 
 ## 11. 보안·릴리스·롤백
 
 CI는 프런트엔드 check와 Rust fmt/clippy/test를 통과해야 bundle 단계로 진행한다. tag와
 `package.json`, Cargo, Tauri 버전 일치 여부를 검사하고 파일명은 동적 version을 사용한다.
-릴리스 자산에는 SHA256SUMS, CycloneDX SBOM, NOTICE를 함께 올리도록 구성했다. workflow는
-Tauri artifact-signing 변수와 Apple signing/notarization 변수를 받을 수 있지만 Windows
-Authenticode certificate import·서명·검증 단계는 아직 완성되지 않았다. 따라서 signing은
-구현 완료가 아니라 P0 차단으로 판정했다.
+릴리스 자산에는 SHA256SUMS, CycloneDX SBOM, NOTICE를 함께 올리도록 구성했다. 실제
+CycloneDX 문서는 npm/Cargo/LiteRT C API/Gemma E2B·E4B를 포함한 1,073 components로
+생성했다. Windows scripts는 서명 입력이 없으면 기본 실패하고 명시적 비-GA
+`AllowUnsigned`만 예외로 허용한다. CI도 PFX secret으로 app/NSIS를 Authenticode 서명·검증한
+뒤에만 업로드한다. 실제 인증서와 Windows artifact가 없으므로 FR-090은 P0 차단으로 판정했다.
 
 소스 기본 동작은 cloud LLM endpoint를 사용하지 않으며 외부 host 저장을 거부한다. DB는
 import/migration 전에 backup하고, export snapshot에도 hash와 schema provenance를 남긴다.
-현재 알려진 핵심 보안 잔여 위험은 runtime auth 부재와 실제 signed artifact 부재다.
+GA AI 경로는 network listener가 없어 runtime auth 부재가 노출되는 서버 표면 자체가 없다.
+현재 알려진 핵심 릴리스 잔여 위험은 실제 signed Windows artifact와 target VDI/EDR 증빙의
+부재다.
 
 복구 절차는 `docs/implementation/rollback-runbook.md`에 있다. 핵심 불변 조건은 앱 종료,
 실패 상태 보존, DB/hash/count 기록, 새 schema DB를 이전 binary로 직접 열지 않기,
@@ -351,29 +381,20 @@ pre-upgrade DB와 이전 signed bundle을 함께 복원하기다.
 
 ### GA를 막는 필수 작업
 
-1. 인증을 실제 강제하는 LiteRT server 버전 또는 인증 proxy+격리 backend 구조를 선택하고,
-   동일 세션의 비인가 local process 요청이 실패하는 시험으로 FR-078을 닫는다.
-2. Windows signing certificate/secret을 release environment에 제공하고 exact MSI/NSIS/EXE와
+1. Windows signing certificate/secret을 release environment에 제공하고 exact MSI/NSIS/EXE와
    runtime binary의 서명을 검증해 FR-090을 닫는다.
-3. target Windows VDI에서 `verify-litert-runtime.mjs --strict`와 AI benchmark matrix,
-   memory/EDR/cold-warm/restart/rollback을 실행해 FR-084과 0.16 승격 여부를 판정한다.
-
-### P1 잔여 작업
-
-- Knowledge/Search 독립 center view, project search group, 전체 query DSL
-- due/status/revision metadata, outline scroll sync, trash/revision 사용자 UI, full reindex
-- task start/assignee, explicit AI context selector, decision/risk/translate, E4B preset
-- bounded runtime restart policy, 본문 제외 diagnostic ZIP
-- Windows job에서 실제 SBOM artifact 생성·내용 검증
+2. target Windows VDI에서 native benchmark matrix와 memory/EDR/cold-warm/restart/rollback을
+   실행해 FR-084의 남은 platform 수용 기준을 닫는다.
 
 ### 최종 판정
 
-- **코어 앱 구현 후보:** 조건부 통과
-- **로컬 macOS 코드·브라우저 검증:** 통과
+- **코어 앱 구현 후보:** 통과
+- **로컬 macOS 코드·네이티브 모델 검증:** 통과
 - **기존 DB migration 증빙:** 통과
-- **Windows VDI Local AI:** 차단
+- **LiteRT-LM 0.16 + Gemma 4 E2B native 경로:** 통과
+- **target Windows VDI 수용 증빙:** 부분
 - **signed Windows GA 배포:** 차단
-- **전체 Memoji 2.0 GA:** **NO-GO — FR-078, FR-090 해소 후 재판정**
+- **전체 Memoji 2.0 Windows GA:** **NO-GO — FR-090과 target VDI 수용 gate 후 재판정**
 
 이 판정은 구현 성과를 축소하지 않으면서도, 실행하지 않은 Windows/VDI/서명 결과를 완료로
 표현하지 않기 위한 release truth다.

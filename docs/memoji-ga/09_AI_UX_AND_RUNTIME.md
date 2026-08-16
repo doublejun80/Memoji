@@ -1,6 +1,14 @@
 # 09. AI UX와 Local Runtime
 
-## 1. 현재 구현 판단
+> **2026-08-16 구현 갱신:** 아래의 loopback/sidecar 내용은 초기 감사 시점의 기준선이다.
+> 최종 구현은 LiteRT-LM 0.16.0 C API 0.1.0을 Rust/Tauri 프로세스에 직접 로드하는
+> `in_process` 경로로 승격됐다. Python, HTTP server, port는 GA 경로에서 제거됐고,
+> 공식 Gemma 4 E2B bundle의 실제 streaming 생성과 cold/warm benchmark가 통과했다.
+> E2B는 VDI 기본값, E4B는 16 GiB급 quality option이며 0.13.1은 rollback 역할만 가진다.
+> 실행 근거와 남은 Windows VDI 수용 경계는
+> `docs/implementation/litert-lm-0.16-compatibility.md`에 기록한다.
+
+## 1. 초기 구현 판단
 
 현재 `src-tauri/src/local_ai/mtp_client.rs`는 Loopback OpenAI-compatible Server에 요청하고 SSE Stream을 읽는다. `draft_model` 값을 설정에 보관하지만 Request Payload에는 Assistant Model이나 Draft 검증 설정이 전달되지 않는다.
 
@@ -17,7 +25,7 @@
 - Acceptance Rate
 - Target Verification
 
-## 2. 최신 Runtime 기준
+## 2. 초기 Runtime 검토 기준
 
 검토 기준일 2026-08-14에 LiteRT-LM 공식 최신 Release는 **v0.16.0**이며 2026-08-11 공개됐다. PR #1의 VDI Bundle은 `0.13.1` 기준이므로 단순 Version 변경이 아니라 Compatibility Track이 필요하다.
 

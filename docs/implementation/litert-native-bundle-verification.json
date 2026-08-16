@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 2,
+  "capturedAt": "2026-08-15T19:23:43.743Z",
+  "platform": "darwin",
+  "arch": "arm64",
+  "bundle": "/Volumes/mac_dock/tmp/memoji-litert-ai",
+  "transport": "in_process",
+  "runtimeVersion": "0.16.0",
+  "model": "gemma4-e2b",
+  "gates": {
+    "inProcess": true,
+    "noLoopbackEndpoint": true,
+    "noPython": true,
+    "runtimeHash": true,
+    "modelHash": true
+  },
+  "status": "passed-non-vdi",
+  "limitations": [
+    "This host is not Windows VDI acceptance evidence."
+  ]
+}

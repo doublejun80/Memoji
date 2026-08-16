@@ -84,3 +84,65 @@ required at 1024×768 and 800×600, in both light and dark themes where supporte
 collapsed, overlay, command palette, AI streaming, diff, conflict, empty, error, and offline
 states are checked. P0–P2 findings must be fixed before handoff unless an external VDI or
 signing dependency is explicitly recorded as blocked.
+
+## 2026-08-16 gap-closure reference extension
+
+Scope: central Knowledge/Search views, revision/trash recovery, and explicit AI context/model
+controls. This is a direct extension of the existing shell, not a visual redesign.
+
+### Research summary
+
+- Style foundation: Refero `Ui` / shadcn monochromatic architectural blueprint
+  (`c14c0a94-1037-449e-bf5b-4cb972656ac7`).
+- Bounded style details: Readwise list/knowledge hierarchy
+  (`c848b5d7-c7e8-4c76-85d3-6c91cbaa1c42`) and Perplexity compact utility input
+  (`b95e58ce-d00e-4de1-ad6b-6f1c7d7a5593`).
+- Product screens: Cursor three-column documentation/context layout
+  (`55b7b14c-c7aa-4b14-b101-624a5fd4380b`), Tango trash list
+  (`66d59495-3b30-4477-ba60-51a71149fb9a`), and Spyglass history feedback
+  (`693f627e-7df2-44e3-beff-cf94fa56e30b`).
+- Recovery journey: Spyglass delete flow `13473`; Memoji adapts the list/action/feedback
+  sequence but keeps deletion recoverable through Trash rather than permanently destructive.
+
+### Reference lock
+
+- Primary: keep the existing white/neutral canvas, 12–14px system UI, hairline dividers,
+  compact 8px rhythm, flat panes, and rare blue active/commit accent.
+- Borrow only: Readwise's list-first knowledge scanning, Perplexity's contained search field,
+  Cursor's narrow contextual control row, and the archive screens' lightweight row actions.
+- Role rules: blue means active selection or primary commit; yellow may only mark a matched
+  search fragment; red is reserved for irreversible/destructive states; recovery uses neutral
+  or blue treatment.
+- Media: Lucide line icons and native product data only; no decorative cards, gradients,
+  photography, or generated imagery.
+- Responsive: central views stay one-column and scrollable; existing side panes continue to
+  become non-modal overlays at their locked breakpoints.
+- Reject: dashboard card grids, a second persistent search sidebar, ornamental headings,
+  oversized empty-state art, and hidden recovery actions.
+
+### Decision ledger
+
+| Decision | Source | Source role | Implementation reason |
+|---|---|---|---|
+| Knowledge/Search use compact rows under one toolbar | Readwise + Spyglass | Scannable archive/list | Handles large local workspaces without card-grid noise |
+| Trash is a filtered central list with explicit Restore | Tango trash + user requirement | Recovery surface | Makes soft deletion operational and auditable |
+| Revision number stays in document chrome | Existing shadcn lock | Status metadata | Exposes concurrency state without taking editor space |
+| AI context is a small segmented/select control above composer | Cursor right context + Perplexity input | Context scope only | Makes retrieval scope explicit without creating another panel |
+| E2B/E4B is a model-quality choice, not a runtime choice | Runtime contract + compact control pattern | Performance/quality selector | Keeps VDI default fast while allowing an honest high-memory preset |
+
+## 2026-08-16 implementation closure
+
+The extension was implemented without changing the locked visual language. Knowledge and
+Search are now center workspaces; Trash has an explicit Restore action; outline navigation
+moves the editor and tracks the active heading; document chrome exposes revision, status, and
+due date; AI exposes context and E2B/E4B selectors in the existing Context Hub hierarchy.
+
+The runtime decision also changed after execution evidence became available. LiteRT-LM 0.16.0
+C API 0.1.0 is the GA default and is loaded in-process. The official E2B bundle generated real
+output in both the Rust integration path and the standalone benchmark. Because the native path
+opens no HTTP listener, no visual language or user-facing authentication fiction was added to
+the UI. Runtime state is shown as library/model/engine readiness instead.
+
+Rendered validation must continue to compare against the same neutral, compact, row-first
+reference lock. The remaining target-specific work is Windows VDI performance/EDR/signing
+acceptance, not another product redesign.

@@ -1,68 +1,78 @@
-# LiteRT-LM 0.16.0 Compatibility Decision
+# LiteRT-LM 0.16.0 native promotion record
 
 Date: 2026-08-16  
-Decision: retain LiteRT-LM 0.13.1 as the GA default; keep 0.16.0 as a pinned upgrade candidate.
+Decision: promote LiteRT-LM 0.16.0 C API 0.1.0 to the Memoji GA default.
 
-## Why the default did not change
+## What changed
 
-The official v0.16.0 release and Python packages exist and their published sizes and SHA-256 digests were verified. The current host, however, is an Apple Silicon macOS machine without `uv`, a LiteRT-LM executable, a registered Gemma 4 E2B `.litertlm` model, Windows VDI, or the target EDR policy. It therefore cannot produce the required Windows VDI start/stop, memory, performance, signing, or EDR evidence.
+Memoji no longer starts the LiteRT-LM Python/HTTP server for its GA path. Rust loads the
+official `litert_lm_c_api-0.1.0` dynamic library in the Tauri process and sends prompts through
+the conversation streaming API. The transport is therefore `in_process`: there is no Python
+runtime, child server, loopback port, HTTP request surface, or bearer-token claim.
 
-Changing the default under those conditions would turn an unverified candidate into a GA dependency. The bundle continues to default to 0.13.1. `scripts/prepare-vdi-ai-bundle.mjs --litert-version 0.16.0` is available for an explicit compatibility build, but only for versions and platform wheels pinned in `runtime-compatibility.json`.
+This is a real runtime upgrade, not a version-label change. The native path implements engine
+creation, CPU/XNNPACK thread configuration, conversation creation, streaming callbacks,
+cancellation, model switching, status reporting, and a bounded three-attempt recovery policy.
 
-## Release and asset lock
+## Locked runtime and models
 
-Primary sources:
+The machine-readable lock is
+`src-tauri/resources/local_ai/runtime-compatibility.json`.
 
-- [LiteRT-LM v0.16.0 release](https://github.com/google-ai-edge/LiteRT-LM/releases/tag/v0.16.0), published 2026-08-11T18:25:33Z.
-- [litert-lm 0.16.0 on PyPI](https://pypi.org/project/litert-lm/0.16.0/).
-- [LiteRT-LM v0.13.1 release](https://github.com/google-ai-edge/LiteRT-LM/releases/tag/v0.13.1).
-
-The complete machine-readable lock is in `src-tauri/resources/local_ai/runtime-compatibility.json`. The principal CLI wheels independently downloaded and hashed on this host were:
-
-| Version | File | Bytes | SHA-256 |
-|---|---|---:|---|
-| 0.13.1 | `litert_lm-0.13.1-py3-none-any.whl` | 60,408 | `2390a09693f3d728ecfad56119b326a9f9e302d2901392ff75b025040ca365b9` |
-| 0.16.0 | `litert_lm-0.16.0-py3-none-any.whl` | 79,203 | `ae9a14fcbb5c8f3e53652b89624bf4473df0f858257fa70a31425ded14d90d8b` |
-
-The lock also pins the platform API wheels, builder wheels, and every GitHub release asset published for v0.16.0. The bundle script downloads the locked CLI, builder, and matching platform API wheels, verifies byte size and SHA-256, then installs those local artifacts. General Python transitive packages still resolve through the configured package index; an air-gapped release mirror must snapshot those dependencies before production packaging.
-
-## CLI/API snapshot
-
-Because the runtime could not be executed, this comparison was extracted from the two verified CLI wheels. It is source-contract evidence, not execution evidence.
-
-| Contract | 0.13.1 | 0.16.0 | Result |
-|---|---|---|---|
-| console entry | `litert-lm = litert_lm_cli.main:main` | same | compatible |
-| `serve` | present | present | compatible |
-| `--host` | present, default `0.0.0.0` | present, default `0.0.0.0` | app must continue forcing `127.0.0.1` |
-| `--port` | present, default 9379 | present, default 9379 | compatible |
-| `/v1/models` | declared | declared | requires runtime test |
-| `/v1/chat/completions` | declared | declared | requires runtime test |
-| `--cors-origin` | absent | added | non-breaking |
-| CLI config option | absent | added | non-breaking candidate |
-| server auth flag | absent | absent | residual risk remains |
-| new commands | none | `pack`, `unpack` | additive |
-
-Memoji therefore keeps loopback-only binding, a random per-session port, child-process ownership checks, and an optional per-session token only when a future server explicitly exposes an auth capability. The UI must not claim authentication or MTP from version alone.
-
-## Compatibility matrix
-
-| Gate | Result on this host | Required before default promotion |
+| Component | Role | Exact lock |
 |---|---|---|
-| exact tag, asset size and SHA-256 | pass | repeat in release CI |
-| CLI source contract comparison | pass | run `--version`, `--help`, `serve --help` on Windows |
-| start/stop and three load cycles | blocked: runtime/model unavailable | pass on target Windows VDI |
-| `/v1/models` and chat streaming | blocked | pass |
-| Korean UTF-8 | blocked | pass |
-| 2K/4K context | blocked | pass with server token counts |
-| cancellation and restart | blocked | pass |
-| missing model and port collision | blocked | pass |
-| E2B 256/1024 by 64/256 cold/warm benchmark | blocked | record TTFT, total time, tokens/s and peak RSS |
-| EDR scan and process policy | blocked: no target VDI/EDR | pass |
-| rollback to 0.13.1 | design pass | rehearse with signed candidate package |
+| LiteRT-LM | GA runtime | 0.16.0 |
+| LiteRT-LM C API | in-process ABI | 0.1.0 |
+| Gemma 4 E2B IT | VDI default | 2,588,147,712 bytes, SHA-256 `181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c` |
+| Gemma 4 E4B IT | quality option | 3,659,530,240 bytes, SHA-256 `0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0` |
+| LiteRT-LM 0.13.1 | rollback only | legacy fallback, not the default |
 
-The executable harness is `scripts/verify-litert-runtime.mjs`; the benchmark harness is `scripts/benchmark-local-ai.mjs`. Both emit explicit `blocked` evidence when prerequisites are absent and accept `--strict` for release gates.
+The prepared local E2B bundle independently passed byte-size and SHA-256 checks for both the
+model and native runtime. The verification record is
+`docs/implementation/litert-native-bundle-verification.json`.
 
-## Promotion rule
+Primary upstream sources:
 
-Promote 0.16.0 only after the exact Windows assets in the compatibility lock complete every required gate on the target VDI image. Store the JSON harness outputs, peak-RSS capture, EDR result, bundle checksum, and rollback rehearsal with the release artifacts. A macOS or non-VDI result may supplement that record but cannot replace it.
+- [LiteRT-LM v0.16.0 release](https://github.com/google-ai-edge/LiteRT-LM/releases/tag/v0.16.0)
+- [Gemma 4 E2B LiteRT-LM model](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm)
+- [Gemma 4 E4B LiteRT-LM model](https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm)
+
+## Execution evidence
+
+The ignored real-model Rust integration test loaded the official C API and E2B bundle in the
+Memoji process and streamed generated text. The standalone native benchmark then executed a
+cold engine load and a warm conversation against the same bundle.
+
+Latest reproducible macOS smoke (`4` CPU threads, 128 prompt characters, 16 maximum output
+tokens):
+
+| State | Load | TTFT | Total | Generated | Decode rate |
+|---|---:|---:|---:|---:|---:|
+| fresh engine | 204 ms | 552 ms | 689 ms | 4 tokens | 5.81 tok/s |
+| warm engine | 0 ms | 283 ms | 421 ms | 4 tokens | 9.50 tok/s |
+
+“Fresh engine” means a new native engine in a new benchmark process; the operating-system file
+cache may still be warm. The complete JSON is
+`docs/implementation/vdi-benchmark-macos-native-smoke.json`.
+
+## VDI operating profile
+
+- E2B is the default for Windows VDI and advertises an 8 GiB recommended-RAM floor.
+- E4B is opt-in and advertises a 16 GiB recommended-RAM floor.
+- Default inference uses CPU/XNNPACK with four threads; the benchmark accepts a thread matrix
+  so the target VDI image can tune contention rather than assuming more threads are faster.
+- Model and runtime files are prepared once with exact hashes. No package installation or
+  model download is required at application startup.
+- The Windows bundle script stages the app, native DLL, model, benchmark executable, notices,
+  manifest, and CycloneDX SBOM. When a certificate is provided it signs and verifies the EXE,
+  benchmark EXE, and DLL.
+
+## Remaining acceptance boundary
+
+The native promotion is implemented and verified on this Apple Silicon host. It does not prove
+the target Windows VDI image, EDR policy, peak RSS, Authenticode chain, or installer behavior.
+Before a Windows GA artifact is released, run the checked-in benchmark matrix on the exact VDI
+image, capture peak RSS with the host monitor, verify EDR allow-list behavior, and sign every
+executable component. The user explicitly requested that no Windows distribution be built in
+this phase, so those external acceptance gates remain open without reverting the runtime
+promotion.

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "capturedAt": "2026-08-15T19:23:48.870469+00:00",
+  "platform": "macos",
+  "arch": "aarch64",
+  "model": "gemma4-e2b",
+  "transport": "in_process",
+  "runtimeVersion": "0.16.0",
+  "cApiVersion": "0.1.0",
+  "matrix": [
+    {
+      "threads": 4,
+      "promptChars": 128,
+      "maxOutputTokens": 16,
+      "state": "cold",
+      "loadMs": 204,
+      "ttftMs": 552,
+      "totalMs": 689,
+      "promptTokens": 0,
+      "generatedTokens": 4,
+      "decodeTokensPerSecond": 5.805515239477504,
+      "outputChars": 23,
+      "ok": true,
+      "error": null
+    },
+    {
+      "threads": 4,
+      "promptChars": 128,
+      "maxOutputTokens": 16,
+      "state": "warm",
+      "loadMs": 0,
+      "ttftMs": 283,
+      "totalMs": 421,
+      "promptTokens": 0,
+      "generatedTokens": 4,
+      "decodeTokensPerSecond": 9.501187648456057,
+      "outputChars": 23,
+      "ok": true,
+      "error": null
+    }
+  ],
+  "limitations": [
+    "This host result is not Windows VDI acceptance evidence.",
+    "Peak RSS must be captured by the VDI host monitor or Task Manager during this matrix."
+  ]
+}
