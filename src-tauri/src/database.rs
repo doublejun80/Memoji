@@ -31,6 +31,17 @@ pub struct ImportDatabaseSummary {
     pub imported: usize,
     pub duplicated: usize,
     pub skipped: usize,
+    pub revisions_imported: usize,
+    pub source_schema_version: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+struct ImportedPageRevision {
+    page_id: String,
+    revision: i64,
+    body_markdown: String,
+    created_at: String,
+    source: String,
 }
 
 impl Database {
@@ -62,6 +73,7 @@ impl Database {
         self.ensure_column("pages", "project_parent_id", "TEXT")?;
         self.ensure_column("pages", "project_index", "INTEGER")?;
         self.ensure_column("pages", "date_key", "TEXT")?;
+        self.ensure_column("pages", "revision", "INTEGER NOT NULL DEFAULT 0")?;
 
         self.conn.execute(
             "UPDATE pages
@@ -108,6 +120,19 @@ impl Database {
             "CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            )",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS page_revisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+                revision INTEGER NOT NULL,
+                body_markdown TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'user',
+                UNIQUE(page_id, revision)
             )",
             [],
         )?;
@@ -261,6 +286,7 @@ impl Database {
         validate_source_database(source)?;
 
         let source_pages = read_source_pages(source)?;
+        let source_revisions = read_source_revisions(source)?;
         let existing_pages = self
             .get_pages()
             .map_err(|error| format!("Failed to read current pages: {}", error))?;
@@ -272,7 +298,10 @@ impl Database {
         let import_stamp = chrono::Local::now().format("%Y%m%d%H%M%S").to_string();
         let mut id_map: HashMap<String, String> = HashMap::new();
         let mut pages_to_import: Vec<Page> = Vec::new();
-        let mut summary = ImportDatabaseSummary::default();
+        let mut summary = ImportDatabaseSummary {
+            source_schema_version: read_source_schema_version(source)?,
+            ..ImportDatabaseSummary::default()
+        };
 
         for (index, source_page) in source_pages.iter().enumerate() {
             if let Some(existing_page) = existing_by_id.get(&source_page.id) {
@@ -297,7 +326,7 @@ impl Database {
             pages_to_import.push(next_page);
         }
 
-        if pages_to_import.is_empty() {
+        if pages_to_import.is_empty() && source_revisions.is_empty() {
             return Ok(summary);
         }
 
@@ -318,6 +347,14 @@ impl Database {
                 self.save_page(page).map_err(|error| {
                     format!("Failed to import page '{}': {}", page.title, error)
                 })?;
+            }
+            for revision in &source_revisions {
+                let Some(target_page_id) = id_map.get(&revision.page_id) else {
+                    continue;
+                };
+                if import_page_revision(&self.conn, target_page_id, revision)? {
+                    summary.revisions_imported += 1;
+                }
             }
             Ok(())
         })();
@@ -712,6 +749,119 @@ fn read_source_pages(source: &Connection) -> std::result::Result<Vec<Page>, Stri
     Ok(pages)
 }
 
+fn read_source_revisions(
+    source: &Connection,
+) -> std::result::Result<Vec<ImportedPageRevision>, String> {
+    if !table_exists(source, "page_revisions")? {
+        return Ok(Vec::new());
+    }
+    let columns = table_columns(source, "page_revisions")?;
+    for required_column in ["page_id", "revision", "body_markdown"] {
+        if !columns.contains(required_column) {
+            return Err(format!(
+                "선택한 DB의 page_revisions 테이블에 '{}' 컬럼이 없습니다.",
+                required_column
+            ));
+        }
+    }
+    let query = format!(
+        "SELECT page_id, revision, body_markdown, {}, {} FROM page_revisions ORDER BY page_id, revision",
+        column_expr(&columns, "created_at", "''"),
+        column_expr(&columns, "source", "'import'"),
+    );
+    let mut statement = source
+        .prepare(&query)
+        .map_err(|error| format!("Failed to prepare imported revision query: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ImportedPageRevision {
+                page_id: row.get(0)?,
+                revision: row.get(1)?,
+                body_markdown: row.get(2)?,
+                created_at: row.get(3)?,
+                source: row.get(4)?,
+            })
+        })
+        .map_err(|error| format!("Failed to read imported revisions: {error}"))?;
+    rows.collect::<Result<Vec<_>>>()
+        .map_err(|error| format!("Failed to decode imported revision: {error}"))
+}
+
+fn import_page_revision(
+    target: &Connection,
+    target_page_id: &str,
+    revision: &ImportedPageRevision,
+) -> std::result::Result<bool, String> {
+    let existing_body: Option<String> = target
+        .query_row(
+            "SELECT body_markdown FROM page_revisions WHERE page_id=?1 AND revision=?2",
+            params![target_page_id, revision.revision],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| format!("Failed to inspect imported revision: {error}"))?;
+    if existing_body.as_deref() == Some(revision.body_markdown.as_str()) {
+        return Ok(false);
+    }
+    let target_revision = if existing_body.is_some() {
+        target
+            .query_row(
+                "SELECT COALESCE(MAX(revision), 0) + 1 FROM page_revisions WHERE page_id=?1",
+                [target_page_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| format!("Failed to allocate imported revision: {error}"))?
+    } else {
+        revision.revision
+    };
+    let created_at = if revision.created_at.trim().is_empty() {
+        chrono::Utc::now().to_rfc3339()
+    } else {
+        revision.created_at.clone()
+    };
+    target
+        .execute(
+            "INSERT INTO page_revisions(page_id, revision, body_markdown, created_at, source)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                target_page_id,
+                target_revision,
+                revision.body_markdown,
+                created_at,
+                format!("import:{}", revision.source),
+            ],
+        )
+        .map_err(|error| format!("Failed to import page revision: {error}"))?;
+    target
+        .execute(
+            "UPDATE pages SET revision=MAX(revision, ?2) WHERE id=?1",
+            params![target_page_id, target_revision],
+        )
+        .map_err(|error| format!("Failed to update imported page revision: {error}"))?;
+    Ok(true)
+}
+
+fn table_exists(source: &Connection, table: &str) -> std::result::Result<bool, String> {
+    source
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+            [table],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("Failed to inspect table '{table}': {error}"))
+}
+
+fn read_source_schema_version(source: &Connection) -> std::result::Result<Option<i64>, String> {
+    if !table_exists(source, "schema_migrations")? {
+        return Ok(None);
+    }
+    source
+        .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+            row.get(0)
+        })
+        .map_err(|error| format!("Failed to read imported schema version: {error}"))
+}
+
 fn table_columns(source: &Connection, table: &str) -> std::result::Result<HashSet<String>, String> {
     let mut stmt = source
         .prepare(&format!("PRAGMA table_info({})", table))
@@ -994,6 +1144,83 @@ mod tests {
         assert_eq!(pages[0].id, "daily-1");
         assert_eq!(pages[0].date_key.as_deref(), Some("2026-05-01"));
         assert_eq!(pages[0].project_index, Some(false));
+    }
+
+    #[test]
+    fn imports_all_page_revisions_from_a_newer_database_without_hiding_history() {
+        let target = in_memory_database();
+        target.init().unwrap();
+
+        let source = Connection::open_in_memory().unwrap();
+        source
+            .execute_batch(
+                "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY);
+                 INSERT INTO schema_migrations(version) VALUES (1), (2), (3), (4), (5), (6);
+                 CREATE TABLE pages (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    icon TEXT NOT NULL,
+                    parent_id TEXT,
+                    project_parent_id TEXT,
+                    project_index INTEGER,
+                    date_key TEXT,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    tags TEXT NOT NULL,
+                    page_order INTEGER NOT NULL,
+                    revision INTEGER NOT NULL DEFAULT 0
+                 );
+                 CREATE TABLE page_revisions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    page_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    body_markdown TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'user',
+                    UNIQUE(page_id, revision)
+                 );
+                 INSERT INTO pages
+                    (id, title, icon, parent_id, project_parent_id, project_index, date_key, content, created_at, updated_at, type, tags, page_order, revision)
+                 VALUES
+                    ('history-1', '이력 메모', '📄', NULL, NULL, 0, '2026-08-16', '세 번째 내용', '2026-08-16T09:00:00Z', '2026-08-16T12:00:00Z', 'page', '[]', 0, 3);
+                 INSERT INTO page_revisions(page_id, revision, body_markdown, created_at, source) VALUES
+                    ('history-1', 1, '첫 번째 내용', '2026-08-16T10:00:00Z', 'user'),
+                    ('history-1', 2, '두 번째 내용', '2026-08-16T11:00:00Z', 'user'),
+                    ('history-1', 3, '세 번째 내용', '2026-08-16T12:00:00Z', 'user');",
+            )
+            .unwrap();
+
+        let summary = target.import_pages_from_connection(&source).unwrap();
+        let revisions: Vec<(i64, String)> = target
+            .connection()
+            .prepare("SELECT revision, body_markdown FROM page_revisions WHERE page_id='history-1' ORDER BY revision")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        let current_revision: i64 = target
+            .connection()
+            .query_row(
+                "SELECT revision FROM pages WHERE id='history-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(summary.source_schema_version, Some(6));
+        assert_eq!(summary.revisions_imported, 3);
+        assert_eq!(
+            revisions,
+            vec![
+                (1, "첫 번째 내용".to_string()),
+                (2, "두 번째 내용".to_string()),
+                (3, "세 번째 내용".to_string()),
+            ]
+        );
+        assert_eq!(current_revision, 3);
     }
 
     #[test]

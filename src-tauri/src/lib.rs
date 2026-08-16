@@ -3,6 +3,7 @@ mod calendar;
 mod commands;
 mod database;
 mod db;
+mod diagnostics;
 mod domain;
 mod indexing;
 pub mod local_ai;
@@ -21,12 +22,17 @@ use commands::calendar::{
     save_calendar_event,
 };
 use commands::pages::{
-    get_page_body, list_page_revisions, list_page_summaries, restore_page, restore_page_revision,
-    save_page_v2, trash_page,
+    get_page_body, list_page_revisions, list_page_summaries, list_trashed_page_summaries,
+    restore_page, restore_page_revision, save_page_v2, trash_page,
 };
-use commands::search::{get_page_anchors, get_page_links, search_workspace};
+use commands::search::{get_page_anchors, get_page_links, reindex_workspace, search_workspace};
 use commands::tasks::{list_tasks, update_task};
 use database::{build_page_export_entries, Database, ImportDatabaseSummary, Page};
+use diagnostics::{
+    diagnostic_error_code, write_diagnostic_zip, DiagnosticAiRuntime, DiagnosticCounts,
+    DiagnosticReport, DiagnosticRuntimeMetrics,
+};
+use indexing::worker::IndexWorker;
 use local_ai::{
     cancellation_checkpoint, ActiveRequestRegistry, LiteRtManagedStatus, LiteRtManager,
     LocalAiBenchmarkResult, LocalAiConfig, LocalAiGenerateRequest, LocalAiGenerateResponse,
@@ -99,6 +105,8 @@ struct ImportDatabaseResult {
     imported: usize,
     duplicated: usize,
     skipped: usize,
+    revisions_imported: usize,
+    source_schema_version: Option<i64>,
     backup_path: String,
     backup_sha256: String,
     backup_bytes: u64,
@@ -108,6 +116,23 @@ struct ImportDatabaseResult {
 struct PagesZipExportResult {
     exported: usize,
     zip_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticZipResult {
+    zip_path: String,
+    sha256: String,
+    bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DataPathStatus {
+    database_path: String,
+    source: String,
+    writable: bool,
+    persistence_warning: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -171,6 +196,8 @@ impl ImportDatabaseResult {
             imported: summary.imported,
             duplicated: summary.duplicated,
             skipped: summary.skipped,
+            revisions_imported: summary.revisions_imported,
+            source_schema_version: summary.source_schema_version,
             backup_path: backup_path.to_string_lossy().to_string(),
             backup_sha256,
             backup_bytes,
@@ -311,7 +338,7 @@ fn resolve_mtp_config(state: &State<AppState>) -> Result<Option<MtpConfig>, Stri
 fn should_manage_litert(config: &MtpConfig) -> bool {
     config.runtime_kind == LocalAiRuntimeKind::LitertLm
         && config.endpoint == DEFAULT_LITERT_LM_ENDPOINT
-        && config.model == DEFAULT_LITERT_LM_MODEL
+        && matches!(config.model.as_str(), "gemma4-e2b" | "gemma4-e4b")
 }
 
 #[cfg(test)]
@@ -344,6 +371,20 @@ mod runtime_config_tests {
         assert_eq!(mtp_config.endpoint, DEFAULT_LITERT_LM_ENDPOINT);
         assert_eq!(mtp_config.model, DEFAULT_LITERT_LM_MODEL);
         assert_eq!(mtp_config.runtime_kind, LocalAiRuntimeKind::LitertLm);
+    }
+
+    #[test]
+    fn managed_litert_accepts_the_e4b_quality_preset() {
+        let config = MtpConfig::from_values(
+            DEFAULT_LITERT_LM_ENDPOINT.to_string(),
+            Some("gemma4-e4b".to_string()),
+            None,
+            Some(LocalAiRuntimeKind::LitertLm),
+            None,
+        )
+        .expect("E4B preset should be valid");
+
+        assert!(should_manage_litert(&config));
     }
 
     #[test]
@@ -391,6 +432,13 @@ mod runtime_config_tests {
 
         assert!(config.migrate_legacy_litert_endpoint());
         assert_eq!(config.endpoint, DEFAULT_LITERT_LM_ENDPOINT);
+    }
+
+    #[test]
+    fn os_local_fallback_reports_a_vdi_persistence_warning() {
+        assert!(data_path_persistence_warning("os_local_fallback").is_some());
+        assert!(data_path_persistence_warning("policy_env").is_none());
+        assert!(data_path_persistence_warning("portable").is_none());
     }
 
     #[test]
@@ -446,7 +494,7 @@ fn get_data_directory() -> Result<PathBuf, String> {
     // 1. 환경 변수 확인 (고급 사용자용 - 선택사항)
     if let Ok(custom_path) = std::env::var("MEMOJI_DATA_PATH") {
         let path = PathBuf::from(custom_path);
-        log::info!("Using custom data path: {:?}", path);
+        log::info!("Using the administrator-configured data directory");
         return Ok(path);
     }
 
@@ -457,20 +505,41 @@ fn get_data_directory() -> Result<PathBuf, String> {
 
     let portable_data_dir = exe_dir.join("data");
     if directory_is_writable(&portable_data_dir) {
-        log::info!("Using portable data directory: {:?}", portable_data_dir);
+        log::info!("Using the portable data directory");
         return Ok(portable_data_dir);
     }
 
     if let Some(local_data_dir) = dirs::data_local_dir() {
         let fallback_data_dir = local_data_dir.join("Memoji").join("data");
-        log::warn!(
-            "Portable data directory is not writable. Falling back to the OS-local data directory; verify that this path is persistent in your VDI profile: {:?}",
-            fallback_data_dir
-        );
+        log::warn!("Portable data directory is not writable; using the OS-local fallback. Verify VDI profile persistence in Settings.");
         return Ok(fallback_data_dir);
     }
 
     Ok(portable_data_dir)
+}
+
+fn data_path_source(data_dir: &Path) -> &'static str {
+    if std::env::var_os("MEMOJI_DATA_PATH")
+        .map(PathBuf::from)
+        .is_some_and(|configured| configured == data_dir)
+    {
+        return "policy_env";
+    }
+    if std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.join("data")))
+        .is_some_and(|portable| portable == data_dir)
+    {
+        return "portable";
+    }
+    "os_local_fallback"
+}
+
+fn data_path_persistence_warning(source: &str) -> Option<String> {
+    (source == "os_local_fallback").then(|| {
+        "OS 로컬 저장소를 사용 중입니다. 비영구 VDI 프로필에서는 로그아웃 후 데이터가 삭제될 수 있으므로 MEMOJI_DATA_PATH를 영구 드라이브로 지정하세요."
+            .to_string()
+    })
 }
 
 fn directory_is_writable(path: &Path) -> bool {
@@ -541,6 +610,21 @@ fn get_data_path(state: State<AppState>) -> String {
         .join("memoji.db")
         .to_string_lossy()
         .to_string()
+}
+
+#[tauri::command]
+fn get_data_path_status(state: State<AppState>) -> DataPathStatus {
+    let source = data_path_source(&state.data_dir);
+    DataPathStatus {
+        database_path: state
+            .data_dir
+            .join("memoji.db")
+            .to_string_lossy()
+            .to_string(),
+        source: source.to_string(),
+        writable: directory_is_writable(&state.data_dir),
+        persistence_warning: data_path_persistence_warning(source),
+    }
 }
 
 #[tauri::command]
@@ -780,6 +864,106 @@ fn export_pages_zip(state: State<AppState>) -> Result<PagesZipExportResult, Stri
     export_result
 }
 
+#[tauri::command]
+fn export_diagnostic_zip(state: State<AppState>) -> Result<DiagnosticZipResult, String> {
+    let export_dir = state.data_dir.join("diagnostics");
+    std::fs::create_dir_all(&export_dir)
+        .map_err(|error| format!("Failed to create diagnostics directory: {error}"))?;
+    let now = chrono::Local::now();
+    let stamp = format!(
+        "{}-{:03}",
+        now.format("%Y%m%d-%H%M%S"),
+        now.timestamp_subsec_millis()
+    );
+    let zip_path = export_dir.join(format!("memoji-vdi-diagnostics-{stamp}.zip"));
+
+    let (schema_version, database_quick_check, counts) = {
+        let db = state.db.lock().map_err(|error| error.to_string())?;
+        let connection = db.connection();
+        let scalar = |sql: &str| -> Result<i64, String> {
+            connection
+                .query_row(sql, [], |row| row.get(0))
+                .map_err(|error| error.to_string())
+        };
+        (
+            scalar("SELECT COALESCE(MAX(version), 0) FROM schema_migrations")?,
+            connection
+                .query_row("PRAGMA quick_check", [], |row| row.get::<_, String>(0))
+                .map_err(|error| error.to_string())?,
+            DiagnosticCounts {
+                active_pages: scalar("SELECT COUNT(*) FROM pages WHERE deleted_at IS NULL")?,
+                trashed_pages: scalar("SELECT COUNT(*) FROM pages WHERE deleted_at IS NOT NULL")?,
+                revisions: scalar("SELECT COUNT(*) FROM page_revisions")?,
+                tasks: scalar("SELECT COUNT(*) FROM tasks")?,
+                events: scalar("SELECT COUNT(*) FROM events")?,
+                ai_runs: scalar("SELECT COUNT(*) FROM ai_runs")?,
+            },
+        )
+    };
+    let runtime = state.litert_manager.status();
+    let runtime_metrics = state
+        .ai_runtime_metrics
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let report = DiagnosticReport {
+        format_version: 1,
+        generated_at: now.to_rfc3339(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        cpu_threads: std::thread::available_parallelism()
+            .map(|value| value.get())
+            .unwrap_or(1),
+        schema_version,
+        database_quick_check,
+        counts,
+        ai_runtime: DiagnosticAiRuntime {
+            available: runtime.available,
+            bundled: runtime.bundled,
+            transport: runtime.transport,
+            runtime_version: runtime.runtime_version,
+            c_api_version: runtime.c_api_version,
+            active_model_id: runtime.active_model_id,
+            available_model_ids: runtime.available_model_ids,
+            backend: runtime.backend,
+            threads: runtime.threads,
+            restart_attempts: runtime.restart_attempts,
+            restart_limit: runtime.restart_limit,
+            error_present: runtime.last_error.is_some(),
+            last_error_code: diagnostic_error_code(runtime.last_error.as_deref()),
+        },
+        runtime_metrics: DiagnosticRuntimeMetrics {
+            runtime_version: runtime_metrics.runtime_version,
+            load_ms: runtime_metrics.load_ms,
+            ttft_ms: runtime_metrics.ttft_ms,
+            prefill_tokens: runtime_metrics.prefill_tokens,
+            prefill_ms: runtime_metrics.prefill_ms,
+            decode_tokens: runtime_metrics.decode_tokens,
+            decode_ms: runtime_metrics.decode_ms,
+            peak_rss_bytes: runtime_metrics.peak_rss_bytes,
+        },
+        privacy: vec![
+            "document bodies excluded".to_string(),
+            "AI prompts and responses excluded".to_string(),
+            "credentials and environment variables excluded".to_string(),
+            "absolute filesystem paths excluded".to_string(),
+        ],
+    };
+    if let Err(error) = write_diagnostic_zip(&zip_path, &report) {
+        let _ = std::fs::remove_file(&zip_path);
+        return Err(error);
+    }
+    Ok(DiagnosticZipResult {
+        sha256: sha256_file(&zip_path)?,
+        bytes: zip_path
+            .metadata()
+            .map_err(|error| error.to_string())?
+            .len(),
+        zip_path: zip_path.to_string_lossy().to_string(),
+    })
+}
+
 fn sha256_bytes(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -808,13 +992,14 @@ fn sha256_file(path: &Path) -> Result<String, String> {
 
 #[tauri::command]
 async fn local_ai_status(state: State<'_, AppState>) -> Result<LocalAiStatus, String> {
-    let mut mtp_config = resolve_mtp_config(&state)?;
-    if let Some(config) = mtp_config.as_mut() {
+    let mtp_config = resolve_mtp_config(&state)?;
+    if let Some(config) = mtp_config.as_ref() {
         if should_manage_litert(config) {
-            if let Err(error) = state.litert_manager.ensure_started() {
-                log::warn!("Managed LiteRT-LM start skipped: {error}");
-            } else {
-                *config = state.litert_manager.apply_session_config(config.clone());
+            if let Err(error) = state.litert_manager.ensure_started_for(&config.model) {
+                log::warn!(
+                    "Managed LiteRT-LM start skipped: code={}",
+                    diagnostic_error_code(Some(&error)).unwrap_or_else(|| "runtime_error".into())
+                );
             }
         }
     }
@@ -833,15 +1018,24 @@ async fn local_ai_status(state: State<'_, AppState>) -> Result<LocalAiStatus, St
                 LocalAiRuntimeKind::BuiltinCandle => "candle".to_string(),
             });
         }
+        if should_manage_litert(&config) {
+            let managed = state.litert_manager.status();
+            status.mtp_reachable = Some(managed.process_running);
+            status.mtp_probe_error = managed.last_error.clone();
+            status.runtime_capabilities =
+                RuntimeCapabilities::litert_native(managed.model_available);
+            status.runtime_metrics.runtime_version = Some(format!(
+                "LiteRT-LM {} / C API {}",
+                managed.runtime_version, managed.c_api_version
+            ));
+            return Ok(status);
+        }
+
         match local_ai::probe_openai_compatible_endpoint(&config).await {
             Ok(probe) => {
                 status.mtp_reachable = Some(true);
                 status.runtime_capabilities =
                     RuntimeCapabilities::for_loopback(&config, &probe.models);
-                if should_manage_litert(&config) {
-                    status.runtime_capabilities.auth_enforced =
-                        state.litert_manager.status().auth_enforced;
-                }
                 if probe.runtime_version.is_some() {
                     status.runtime_metrics.runtime_version = probe.runtime_version;
                 }
@@ -865,21 +1059,12 @@ fn local_ai_managed_runtime_status(state: State<AppState>) -> LiteRtManagedStatu
 async fn local_ai_start_managed_runtime(
     state: State<'_, AppState>,
 ) -> Result<LiteRtManagedStatus, String> {
-    state.litert_manager.ensure_started()?;
-
-    for _ in 0..16 {
-        let status = state.litert_manager.status();
-        if status.endpoint_reachable {
-            return Ok(status);
-        }
-        std::thread::sleep(std::time::Duration::from_millis(250));
-    }
-
-    let status = state.litert_manager.status();
-    if let Some(error) = status.last_error.clone() {
-        return Err(error);
-    }
-    Ok(status)
+    let model_id = resolve_mtp_config(&state)?
+        .filter(should_manage_litert)
+        .map(|config| config.model)
+        .unwrap_or_else(|| DEFAULT_LITERT_LM_MODEL.to_string());
+    state.litert_manager.ensure_started_for(&model_id)?;
+    Ok(state.litert_manager.status())
 }
 
 #[tauri::command]
@@ -939,28 +1124,40 @@ async fn local_ai_test_runtime_config(
     let mtp_config = config
         .to_mtp_config()?
         .ok_or_else(|| "고속 로컬 서버를 먼저 켜세요.".to_string())?;
-    let mtp_config = if should_manage_litert(&mtp_config) {
-        state.litert_manager.ensure_started()?;
-        state.litert_manager.apply_session_config(mtp_config)
-    } else {
-        mtp_config
-    };
     let started = std::time::Instant::now();
-    let response = local_ai::generate_mtp_stream(
-        mtp_config,
-        "runtime-config-test".to_string(),
-        LocalAiGenerateRequest {
-            prompt: "한국어로 한 문장만 짧게 인사해줘.".to_string(),
-            page_context: None,
-            max_new_tokens: Some(8),
-            temperature: Some(0.0),
-            top_p: Some(1.0),
-        },
-        CancellationToken::new(),
-        |_chunk| Ok(()),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
+    let request = LocalAiGenerateRequest {
+        prompt: "한국어로 한 문장만 짧게 인사해줘.".to_string(),
+        page_context: None,
+        max_new_tokens: Some(8),
+        temperature: Some(0.0),
+        top_p: Some(1.0),
+    };
+    let response = if should_manage_litert(&mtp_config) {
+        let manager = state.litert_manager.clone();
+        let model_id = mtp_config.model.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            manager.generate_stream(
+                &model_id,
+                "runtime-config-test".to_string(),
+                request,
+                CancellationToken::new(),
+                |_chunk| Ok(()),
+            )
+        })
+        .await
+        .map_err(|error| format!("LiteRT-LM worker failed: {error}"))?
+        .map_err(|error| error.to_string())?
+    } else {
+        local_ai::generate_mtp_stream(
+            mtp_config,
+            "runtime-config-test".to_string(),
+            request,
+            CancellationToken::new(),
+            |_chunk| Ok(()),
+        )
+        .await
+        .map_err(|error| error.to_string())?
+    };
     let elapsed_ms = started.elapsed().as_millis().max(1);
     let tokens_per_second = response.generated_tokens as f64 / (elapsed_ms as f64 / 1000.0);
 
@@ -1059,60 +1256,96 @@ async fn local_ai_generate_mtp_stream(
 ) -> Result<LocalAiGenerateResponse, String> {
     let requests = state.active_ai_requests.clone();
     let cancellation = requests.begin(request_id.clone())?;
-    let stream_window = window.clone();
-    let stream_request_id = request_id.clone();
-    let stream_cancellation = cancellation.clone();
 
     let result = async {
         cancellation_checkpoint(&cancellation).map_err(|error| error.to_string())?;
-        let mut config = resolve_mtp_config(&state)?
-            .ok_or_else(|| "고속 로컬 서버가 설정되어 있지 않습니다.".to_string())?;
-        if should_manage_litert(&config) {
-            state.litert_manager.ensure_started()?;
-            config = state.litert_manager.apply_session_config(config);
-        }
+        let config = resolve_mtp_config(&state)?
+            .ok_or_else(|| "로컬 AI 런타임이 설정되어 있지 않습니다.".to_string())?;
         cancellation_checkpoint(&cancellation).map_err(|error| error.to_string())?;
 
-        let probe = local_ai::probe_openai_compatible_endpoint(&config)
-            .await
-            .ok();
-        let capabilities = RuntimeCapabilities::for_loopback(
-            &config,
-            &probe
-                .as_ref()
-                .map(|value| value.models.clone())
-                .unwrap_or_default(),
-        );
         let started = std::time::Instant::now();
-        let mut ttft_ms = None;
-
-        let response = local_ai::generate_mtp_stream(
-            config.clone(),
-            request_id.clone(),
-            request,
-            cancellation.clone(),
-            |chunk| {
-                cancellation_checkpoint(&stream_cancellation)?;
-                ttft_ms.get_or_insert(started.elapsed().as_millis());
-                stream_window
-                    .emit("local-ai-generate-chunk", chunk)
-                    .map_err(|error| local_ai::LocalAiError::GenerateFailed(error.to_string()))?;
-                Ok(())
-            },
-        )
-        .await
-        .map_err(|error| error.to_string())?;
+        let (response, ttft_ms, capabilities, runtime_version) = if should_manage_litert(&config) {
+            let manager = state.litert_manager.clone();
+            let model_id = config.model.clone();
+            let worker_request_id = request_id.clone();
+            let worker_cancellation = cancellation.clone();
+            let worker_window = window.clone();
+            let worker_started = started;
+            let (response, ttft_ms) = tauri::async_runtime::spawn_blocking(move || {
+                let mut ttft_ms = None;
+                let response = manager.generate_stream(
+                    &model_id,
+                    worker_request_id,
+                    request,
+                    worker_cancellation.clone(),
+                    |chunk| {
+                        cancellation_checkpoint(&worker_cancellation)?;
+                        ttft_ms.get_or_insert(worker_started.elapsed().as_millis());
+                        worker_window
+                            .emit("local-ai-generate-chunk", chunk)
+                            .map_err(|error| {
+                                local_ai::LocalAiError::GenerateFailed(error.to_string())
+                            })?;
+                        Ok(())
+                    },
+                )?;
+                Ok::<_, local_ai::LocalAiError>((response, ttft_ms))
+            })
+            .await
+            .map_err(|error| format!("LiteRT-LM worker failed: {error}"))?
+            .map_err(|error| error.to_string())?;
+            (
+                response,
+                ttft_ms,
+                RuntimeCapabilities::litert_native(true),
+                format!("LiteRT-LM {} / C API {}", "0.16.0", "0.1.0"),
+            )
+        } else {
+            let probe = local_ai::probe_openai_compatible_endpoint(&config)
+                .await
+                .ok();
+            let capabilities = RuntimeCapabilities::for_loopback(
+                &config,
+                &probe
+                    .as_ref()
+                    .map(|value| value.models.clone())
+                    .unwrap_or_default(),
+            );
+            let stream_window = window.clone();
+            let stream_cancellation = cancellation.clone();
+            let mut ttft_ms = None;
+            let response = local_ai::generate_mtp_stream(
+                config.clone(),
+                request_id.clone(),
+                request,
+                cancellation.clone(),
+                |chunk| {
+                    cancellation_checkpoint(&stream_cancellation)?;
+                    ttft_ms.get_or_insert(started.elapsed().as_millis());
+                    stream_window
+                        .emit("local-ai-generate-chunk", chunk)
+                        .map_err(|error| {
+                            local_ai::LocalAiError::GenerateFailed(error.to_string())
+                        })?;
+                    Ok(())
+                },
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            (
+                response,
+                ttft_ms,
+                capabilities,
+                probe
+                    .and_then(|value| value.runtime_version)
+                    .unwrap_or_else(|| "openai-compatible-v1".to_string()),
+            )
+        };
 
         let elapsed_ms = started.elapsed().as_millis();
         if let Ok(mut metrics) = state.ai_runtime_metrics.lock() {
             *metrics = RuntimeMetrics {
-                runtime_version: probe.and_then(|value| value.runtime_version).or_else(|| {
-                    Some(match config.runtime_kind {
-                        LocalAiRuntimeKind::LitertLm => "litert-lm".to_string(),
-                        LocalAiRuntimeKind::LlamaCpp => "openai-compatible-v1".to_string(),
-                        LocalAiRuntimeKind::BuiltinCandle => "candle".to_string(),
-                    })
-                }),
+                runtime_version: Some(runtime_version),
                 ttft_ms,
                 prefill_tokens: Some(response.prompt_tokens),
                 decode_tokens: Some(response.generated_tokens),
@@ -1132,7 +1365,7 @@ async fn local_ai_generate_mtp_stream(
             .emit(
                 "local-ai-generate-chunk",
                 LocalAiGenerateStreamChunk {
-                    request_id: stream_request_id,
+                    request_id: request_id.clone(),
                     token_text: String::new(),
                     generated_tokens: response.generated_tokens,
                     done: true,
@@ -1198,41 +1431,48 @@ pub fn run() {
             // Portable 모드: 실행 파일과 같은 폴더에 data 디렉토리 생성
             // VDI 환경에서 %APPDATA% 삭제 문제 해결
             let data_dir = match get_data_directory() {
-                Ok(dir) => {
-                    log::info!("✅ Data directory: {:?}", dir);
-                    dir
-                }
+                Ok(dir) => dir,
                 Err(e) => {
-                    log::error!("❌ Failed to get data directory: {}", e);
+                    log::error!("❌ Failed to resolve the data directory");
                     return Err(e.into());
                 }
             };
 
             if let Err(e) = std::fs::create_dir_all(&data_dir) {
-                log::error!("❌ Failed to create data directory: {}", e);
+                log::error!("❌ Failed to create the data directory");
                 return Err(format!("Failed to create data dir: {}", e).into());
             }
             log::info!("✅ Data directory created/verified");
 
             let db_path = data_dir.join("memoji.db");
-            log::info!("📁 Database path: {:?}", db_path);
-
-            let db = match Database::new(db_path.clone()) {
+            let mut db = match Database::new(db_path.clone()) {
                 Ok(database) => {
                     log::info!("✅ Database created");
                     database
                 }
                 Err(e) => {
-                    log::error!("❌ Failed to create database: {}", e);
+                    log::error!("❌ Failed to create the database");
                     return Err(format!("Failed to create database: {}", e).into());
                 }
             };
 
             if let Err(e) = db.init() {
-                log::error!("❌ Failed to initialize database: {}", e);
+                log::error!("❌ Failed to initialize the database");
                 return Err(format!("Failed to initialize database: {}", e).into());
             }
             log::info!("✅ Database initialized");
+
+            match IndexWorker::drain_page_jobs(db.connection_mut(), None) {
+                Ok(report) if report.completed > 0 || report.failed > 0 => log::info!(
+                    "Derived page jobs drained at startup: completed={}, failed={}",
+                    report.completed,
+                    report.failed
+                ),
+                Ok(_) => {}
+                Err(error) => {
+                    log::warn!("Derived page jobs could not be drained at startup: {error}")
+                }
+            }
 
             let resource_dir = app.path().resource_dir().unwrap_or_else(|_| {
                 std::env::current_exe()
@@ -1241,11 +1481,9 @@ pub fn run() {
                     .unwrap_or_else(|| PathBuf::from("."))
                     .join("resources")
             });
-            log::info!("Local AI resource directory: {:?}", resource_dir);
-
             let litert_manager = LiteRtManager::discover(&resource_dir, &data_dir);
             let litert_status = litert_manager.status();
-            let should_auto_start_litert = MtpConfig::from_env_result()
+            let auto_start_litert_model = MtpConfig::from_env_result()
                 .ok()
                 .flatten()
                 .or_else(|| {
@@ -1253,17 +1491,20 @@ pub fn run() {
                         .ok()
                         .and_then(|config| config.to_mtp_config().ok().flatten())
                 })
-                .is_some_and(|config| should_manage_litert(&config));
+                .filter(should_manage_litert)
+                .map(|config| config.model);
             if litert_status.available {
                 log::info!(
-                    "LiteRT-LM runtime discovered: source={:?}, bundled={}, model={:?}",
-                    litert_status.source,
-                    litert_status.bundled,
-                    litert_status.model_path
+                    "LiteRT-LM runtime discovered: bundled={}",
+                    litert_status.bundled
                 );
-                if should_auto_start_litert {
-                    if let Err(error) = litert_manager.ensure_started() {
-                        log::warn!("LiteRT-LM auto start failed: {error}");
+                if let Some(model) = auto_start_litert_model.as_deref() {
+                    if let Err(error) = litert_manager.ensure_started_for(model) {
+                        log::warn!(
+                            "LiteRT-LM auto start failed: code={}",
+                            diagnostic_error_code(Some(&error))
+                                .unwrap_or_else(|| "runtime_error".into())
+                        );
                     }
                 }
             } else {
@@ -1291,9 +1532,11 @@ pub fn run() {
             get_app_title,
             get_app_data_dir,
             get_data_path,
+            get_data_path_status,
             open_data_folder,
             import_memoji_database,
             export_pages_zip,
+            export_diagnostic_zip,
             local_ai_status,
             local_ai_managed_runtime_status,
             local_ai_start_managed_runtime,
@@ -1314,6 +1557,7 @@ pub fn run() {
             apply_ai_proposal,
             reject_ai_proposal,
             list_page_summaries,
+            list_trashed_page_summaries,
             get_page_body,
             save_page_v2,
             trash_page,
@@ -1321,6 +1565,7 @@ pub fn run() {
             list_page_revisions,
             restore_page_revision,
             search_workspace,
+            reindex_workspace,
             get_page_anchors,
             get_page_links,
             list_tasks,

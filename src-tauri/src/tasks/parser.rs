@@ -10,6 +10,8 @@ pub struct ParsedTask {
     pub text: String,
     pub completed: bool,
     pub due_date: Option<String>,
+    pub start_date: Option<String>,
+    pub assignee: Option<String>,
     pub priority: Option<u8>,
     pub line: usize,
     pub source_start: usize,
@@ -37,12 +39,16 @@ pub fn parse_tasks(markdown: &str) -> Vec<ParsedTask> {
         if let Some(parsed) = parse_task_line(line) {
             let id = marker_id(parsed.content);
             let due_date = due_date(parsed.content);
+            let start_date = start_date(parsed.content);
+            let assignee = annotation_value(parsed.content, "@assignee(", valid_task_assignee);
             let priority = priority(parsed.content);
             tasks.push(ParsedTask {
                 id,
                 text: display_text(parsed.content),
                 completed: parsed.completed,
                 due_date,
+                start_date,
+                assignee,
                 priority,
                 line: line_index + 1,
                 source_start: offset,
@@ -87,20 +93,42 @@ pub fn render_task_line(
     original: &str,
     completed: bool,
     due_date_value: Option<&str>,
+    start_date_value: Option<&str>,
+    assignee_value: Option<&str>,
     priority_value: Option<u8>,
 ) -> Option<String> {
+    if due_date_value.is_some_and(|value| !valid_task_date(value))
+        || start_date_value.is_some_and(|value| !valid_task_date(value))
+        || assignee_value.is_some_and(|value| !valid_task_assignee(value))
+        || priority_value.is_some_and(|value| !(1..=3).contains(&value))
+    {
+        return None;
+    }
     let parsed = parse_task_line(original)?;
     let marker = marker_id(parsed.content)?;
     let mut rendered = format!("{}{}", parsed.prefix, if completed { "x] " } else { " ] " });
     rendered.push_str(&display_text(parsed.content));
-    if let Some(due) = due_date_value.filter(|value| valid_date(value)) {
+    if let Some(start) = start_date_value {
+        rendered.push_str(" @start(");
+        rendered.push_str(start);
+        rendered.push(')');
+    }
+    if let Some(due) = due_date_value {
         rendered.push_str(" @due(");
         rendered.push_str(due);
         rendered.push(')');
     }
-    if let Some(value) = priority_value.filter(|value| (1..=3).contains(value)) {
+    if let Some(value) = priority_value {
         rendered.push_str(" !p");
         rendered.push(char::from(b'0' + value));
+    }
+    if let Some(assignee) = assignee_value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        rendered.push_str(" @assignee(");
+        rendered.push_str(assignee);
+        rendered.push(')');
     }
     rendered.push(' ');
     rendered.push_str(MARKER_PREFIX);
@@ -171,23 +199,33 @@ fn marker_id(content: &str) -> Option<String> {
 }
 
 fn due_date(content: &str) -> Option<String> {
-    content.split_whitespace().find_map(|token| {
-        token
-            .strip_prefix("@due(")
-            .and_then(|value| value.strip_suffix(')'))
-            .filter(|value| valid_date(value))
-            .map(str::to_string)
-    })
+    annotation_value(content, "@due(", valid_task_date)
 }
 
-fn valid_date(value: &str) -> bool {
-    value.len() == 10
-        && value.as_bytes()[4] == b'-'
-        && value.as_bytes()[7] == b'-'
-        && value
-            .bytes()
-            .enumerate()
-            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit())
+fn start_date(content: &str) -> Option<String> {
+    annotation_value(content, "@start(", valid_task_date)
+}
+
+fn annotation_value(
+    content: &str,
+    prefix: &str,
+    validate: impl Fn(&str) -> bool,
+) -> Option<String> {
+    let start = content.find(prefix)? + prefix.len();
+    let value = content[start..].split(')').next()?.trim();
+    validate(value).then(|| value.to_string())
+}
+
+pub fn valid_task_date(value: &str) -> bool {
+    chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
+}
+
+pub fn valid_task_assignee(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed.chars().count() <= 80
+        && !trimmed
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '(' | ')'))
 }
 
 fn priority(content: &str) -> Option<u8> {
@@ -200,13 +238,17 @@ fn priority(content: &str) -> Option<u8> {
 }
 
 fn display_text(content: &str) -> String {
-    content
-        .split_whitespace()
-        .take_while(|token| *token != "<!--")
-        .filter(|token| {
-            !(matches!(*token, "!p1" | "!P1" | "!p2" | "!P2" | "!p3" | "!P3")
-                || token.starts_with("@due(") && token.ends_with(')'))
-        })
+    let mut text = content.split("<!--").next().unwrap_or(content).to_string();
+    for prefix in ["@due(", "@start(", "@assignee("] {
+        while let Some(start) = text.find(prefix) {
+            let Some(end_offset) = text[start..].find(')') else {
+                break;
+            };
+            text.replace_range(start..=start + end_offset, "");
+        }
+    }
+    text.split_whitespace()
+        .filter(|token| !matches!(*token, "!p1" | "!P1" | "!p2" | "!P2" | "!p3" | "!P3"))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -232,12 +274,14 @@ mod tests {
 
     #[test]
     fn parses_checked_due_priority_and_duplicate_text_as_distinct_tasks() {
-        let markdown = "- [ ] 같은 작업 @due(2026-08-20) !p1 <!-- memoji-task:01ARZ3NDEKTSV4RRFFQ69G5FAV -->\n- [x] 같은 작업 <!-- memoji-task:01ARZ3NDEKTSV4RRFFQ69G5FAW -->\n";
+        let markdown = "- [ ] 같은 작업 @start(2026-08-18) @due(2026-08-20) @assignee(홍길동) !p1 <!-- memoji-task:01ARZ3NDEKTSV4RRFFQ69G5FAV -->\n- [x] 같은 작업 <!-- memoji-task:01ARZ3NDEKTSV4RRFFQ69G5FAW -->\n";
         let tasks = parse_tasks(markdown);
         assert_eq!(tasks.len(), 2);
         assert_ne!(tasks[0].id, tasks[1].id);
         assert!(!tasks[0].completed);
         assert_eq!(tasks[0].due_date.as_deref(), Some("2026-08-20"));
+        assert_eq!(tasks[0].start_date.as_deref(), Some("2026-08-18"));
+        assert_eq!(tasks[0].assignee.as_deref(), Some("홍길동"));
         assert_eq!(tasks[0].priority, Some(1));
         assert!(tasks[1].completed);
         assert_eq!(tasks[0].text, "같은 작업");
@@ -259,10 +303,26 @@ mod tests {
     fn renders_status_due_and_priority_without_changing_the_marker() {
         let original =
             "  - [ ] 배포 @due(2026-08-20) !p1 <!-- memoji-task:01ARZ3NDEKTSV4RRFFQ69G5FAV -->";
-        let rendered = render_task_line(original, true, Some("2026-08-21"), Some(2)).unwrap();
+        let rendered =
+            render_task_line(original, true, Some("2026-08-21"), None, None, Some(2)).unwrap();
         assert_eq!(
             rendered,
             "  - [x] 배포 @due(2026-08-21) !p2 <!-- memoji-task:01ARZ3NDEKTSV4RRFFQ69G5FAV -->"
         );
+    }
+
+    #[test]
+    fn rejects_impossible_dates_and_assignee_annotation_injection() {
+        let original = "- [ ] 배포 <!-- memoji-task:01ARZ3NDEKTSV4RRFFQ69G5FAV -->";
+        assert!(render_task_line(original, false, Some("2026-02-30"), None, None, None,).is_none());
+        assert!(render_task_line(
+            original,
+            false,
+            None,
+            None,
+            Some("홍길동)\n- [ ] 주입"),
+            None,
+        )
+        .is_none());
     }
 }

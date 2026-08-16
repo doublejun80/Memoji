@@ -7,7 +7,6 @@ use crate::domain::page::{
 };
 use crate::indexing::worker::IndexWorker;
 use crate::tasks::parser::ensure_task_markers;
-use crate::tasks::service::TaskService;
 use rusqlite::{Connection, Transaction};
 use std::fmt;
 
@@ -44,6 +43,12 @@ impl PageService {
         Ok(PageRepository::list_summaries(connection)?)
     }
 
+    pub fn list_trashed_summaries(
+        connection: &Connection,
+    ) -> Result<Vec<PageSummary>, PageServiceError> {
+        Ok(PageRepository::list_trashed_summaries(connection)?)
+    }
+
     pub fn get_body(connection: &Connection, page_id: &str) -> Result<PageBody, PageServiceError> {
         Ok(PageRepository::get_body(connection, page_id)?)
     }
@@ -56,6 +61,16 @@ impl PageService {
         let transaction = connection.transaction()?;
         Self::save_in_transaction(&transaction, &request)?;
         transaction.commit()?;
+
+        if let Ok(report) = IndexWorker::drain_page_jobs(connection, Some(&request.id)) {
+            if report.failed > 0 {
+                log::warn!(
+                    "Derived page data update deferred after canonical save: page_id={}, failed_jobs={}",
+                    request.id,
+                    report.failed
+                );
+            }
+        }
 
         Ok(SavePageV2Response {
             summary: PageRepository::get_summary(connection, &request.id)?,
@@ -96,23 +111,6 @@ impl PageService {
         };
         NodeRepository::upsert(transaction, &node)?;
         PageRepository::upsert(transaction, request, next_revision)?;
-        IndexWorker::replace_page_index(
-            transaction,
-            &request.id,
-            &request.title,
-            &request.body_markdown,
-            &request.tags,
-        )?;
-        TaskService::replace_page_tasks(
-            transaction,
-            &request.id,
-            &request.body_markdown,
-            request.project_parent_id.as_deref(),
-            &request.updated_at,
-        )
-        .map_err(|error| {
-            PageServiceError::Sqlite(rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
-        })?;
         RevisionRepository::insert(
             transaction,
             &request.id,
@@ -121,6 +119,7 @@ impl PageService {
             &request.updated_at,
             &request.source,
         )?;
+        IndexWorker::enqueue_page(transaction, &request.id, next_revision, &request.updated_at)?;
         Ok(next_revision)
     }
 
@@ -164,12 +163,6 @@ impl PageService {
             &RevisionRepository::get_body(&transaction, page_id, revision)?,
             page_id,
         );
-        let (title, tags_json): (String, String) = transaction.query_row(
-            "SELECT title, tags FROM pages WHERE id=?1",
-            [page_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
         let next_revision = actual_revision + 1;
         let created_at = chrono::Utc::now().to_rfc3339();
         transaction.execute(
@@ -184,23 +177,9 @@ impl PageService {
             &created_at,
             "revision_restore",
         )?;
-        IndexWorker::replace_page_index(&transaction, page_id, &title, &body, &tags)?;
-        let project_id: Option<String> = transaction.query_row(
-            "SELECT project_parent_id FROM pages WHERE id=?1",
-            [page_id],
-            |row| row.get(0),
-        )?;
-        TaskService::replace_page_tasks(
-            &transaction,
-            page_id,
-            &body,
-            project_id.as_deref(),
-            &created_at,
-        )
-        .map_err(|error| {
-            PageServiceError::Sqlite(rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
-        })?;
+        IndexWorker::enqueue_page(&transaction, page_id, next_revision, &created_at)?;
         transaction.commit()?;
+        let _ = IndexWorker::drain_page_jobs(connection, Some(page_id));
         Ok(PageRepository::get_body(connection, page_id)?)
     }
 }
@@ -294,8 +273,15 @@ mod tests {
 
         PageService::trash(&mut connection, "page-1").expect("trash");
         assert!(PageService::list_summaries(&connection).unwrap().is_empty());
+        let trashed = PageService::list_trashed_summaries(&connection).expect("trashed pages");
+        assert_eq!(trashed.len(), 1);
+        assert_eq!(trashed[0].id, "page-1");
+        assert!(trashed[0].deleted_at.is_some());
         PageService::restore(&mut connection, "page-1").expect("restore");
         assert_eq!(PageService::list_summaries(&connection).unwrap().len(), 1);
+        assert!(PageService::list_trashed_summaries(&connection)
+            .unwrap()
+            .is_empty());
 
         let restored = PageService::restore_revision(&mut connection, "page-1", 1, 2)
             .expect("restore revision");
@@ -307,5 +293,38 @@ mod tests {
                 .len(),
             3
         );
+    }
+
+    #[test]
+    fn derived_index_failure_keeps_canonical_markdown_and_failed_job() {
+        let mut connection = connection();
+        connection
+            .execute_batch("DROP TABLE page_fts;")
+            .expect("remove derived FTS table");
+
+        let saved = PageService::save(&mut connection, request("# 원문 보존", 0))
+            .expect("canonical save must not depend on derived indexes");
+
+        assert_eq!(saved.body.body_markdown, "# 원문 보존");
+        assert_eq!(saved.body.revision, 1);
+        assert_eq!(
+            PageService::list_revisions(&connection, "page-1")
+                .unwrap()
+                .len(),
+            1
+        );
+        let job: (String, i64, Option<String>) = connection
+            .query_row(
+                "SELECT status, attempts, error FROM jobs WHERE page_id='page-1' AND kind='index_page'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("failed derived-data job");
+        assert_eq!(job.0, "failed");
+        assert_eq!(job.1, 1);
+        assert!(job
+            .2
+            .as_deref()
+            .is_some_and(|error| error.contains("page_fts")));
     }
 }

@@ -12,6 +12,7 @@ pub struct RetrievalRequest {
     pub current_page_id: Option<String>,
     pub current_project_id: Option<String>,
     pub object_type: Option<String>,
+    pub context_scope: Option<String>,
     #[serde(default = "default_limit")]
     pub limit: usize,
 }
@@ -47,7 +48,8 @@ pub fn retrieve(
     request: &RetrievalRequest,
 ) -> rusqlite::Result<Vec<RetrievalSource>> {
     let query = request.query.trim();
-    if query.is_empty() {
+    let context_scope = request.context_scope.as_deref().unwrap_or("workspace");
+    if query.is_empty() || context_scope == "none" || context_scope == "page" {
         return Ok(Vec::new());
     }
     let requested_limit = request.limit.clamp(1, 20);
@@ -118,6 +120,12 @@ pub fn retrieve(
                 .map(|value| value == 1)
                 .unwrap_or(false)
         });
+        if context_scope == "project" && !same_project {
+            continue;
+        }
+        if context_scope == "linked" && !explicitly_linked {
+            continue;
+        }
         let recency = recency_score(&page.updated_at);
         let object_type_match = request
             .object_type
@@ -305,6 +313,7 @@ mod tests {
                 current_page_id: Some("current".to_string()),
                 current_project_id: None,
                 object_type: Some("page".to_string()),
+                context_scope: Some("workspace".to_string()),
                 limit: 4,
             },
         )
@@ -318,5 +327,74 @@ mod tests {
             sources[0].text_hash.as_deref(),
             Some(expected_hash.as_str())
         );
+    }
+
+    #[test]
+    fn explicit_context_scope_filters_project_and_linked_sources() {
+        let connection = connection();
+        insert_page(
+            &connection,
+            "current",
+            Some("project-a"),
+            "현재",
+            "기준 문서",
+        );
+        insert_page(
+            &connection,
+            "project",
+            Some("project-a"),
+            "같은 프로젝트",
+            "범위검색 근거",
+        );
+        insert_page(
+            &connection,
+            "linked",
+            Some("project-b"),
+            "연결 문서",
+            "범위검색 근거",
+        );
+        insert_page(
+            &connection,
+            "other",
+            Some("project-b"),
+            "다른 문서",
+            "범위검색 근거",
+        );
+        connection.execute(
+            "INSERT INTO links(source_page_id,target_page_id,target_title,target_anchor,source_start,source_end)
+             VALUES ('current','linked','연결 문서',NULL,0,2)",
+            [],
+        ).expect("link");
+
+        let scoped = |scope: &str| {
+            retrieve(
+                &connection,
+                &RetrievalRequest {
+                    query: "범위검색".to_string(),
+                    current_page_id: Some("current".to_string()),
+                    current_project_id: Some("project-a".to_string()),
+                    object_type: Some("page".to_string()),
+                    context_scope: Some(scope.to_string()),
+                    limit: 8,
+                },
+            )
+            .expect("scoped retrieve")
+        };
+
+        assert_eq!(
+            scoped("project")
+                .iter()
+                .map(|source| source.page_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["project"]
+        );
+        assert_eq!(
+            scoped("linked")
+                .iter()
+                .map(|source| source.page_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["linked"]
+        );
+        assert!(scoped("none").is_empty());
     }
 }

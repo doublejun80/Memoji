@@ -20,6 +20,7 @@ pub struct AiRunRequest {
     pub current_page_context: Option<String>,
     pub current_project_id: Option<String>,
     pub object_type: Option<String>,
+    pub context_scope: Option<String>,
     #[serde(default = "default_context_chars")]
     pub max_context_chars: usize,
 }
@@ -54,6 +55,13 @@ impl AiService {
         if request.id.trim().is_empty() || request.prompt.trim().is_empty() {
             return Err("AI run requires a request id and prompt".to_string());
         }
+        let context_scope = request.context_scope.as_deref().unwrap_or("workspace");
+        if !matches!(
+            context_scope,
+            "none" | "page" | "project" | "linked" | "workspace"
+        ) {
+            return Err(format!("Invalid AI context scope: {context_scope}"));
+        }
         let sources = retrieve(
             connection,
             &RetrievalRequest {
@@ -61,21 +69,28 @@ impl AiService {
                 current_page_id: request.page_id.clone(),
                 current_project_id: request.current_project_id.clone(),
                 object_type: request.object_type.clone(),
+                context_scope: Some(context_scope.to_string()),
                 limit: 6,
             },
         )
         .map_err(|error| error.to_string())?;
-        let current_page = request.current_page_context.or_else(|| {
-            request.page_id.as_deref().and_then(|page_id| {
-                connection
-                    .query_row(
-                        "SELECT content FROM pages WHERE id=?1 AND deleted_at IS NULL",
-                        [page_id],
-                        |row| row.get(0),
-                    )
-                    .ok()
-            })
-        });
+        let current_page = (context_scope != "none")
+            .then_some(request.current_page_context)
+            .flatten()
+            .or_else(|| {
+                if context_scope == "none" {
+                    return None;
+                }
+                request.page_id.as_deref().and_then(|page_id| {
+                    connection
+                        .query_row(
+                            "SELECT content FROM pages WHERE id=?1 AND deleted_at IS NULL",
+                            [page_id],
+                            |row| row.get(0),
+                        )
+                        .ok()
+                })
+            });
         let prompt = build_prompt(&PromptBuildRequest {
             system: DEFAULT_SYSTEM_PROMPT,
             schema: DEFAULT_OUTPUT_SCHEMA,
@@ -213,6 +228,7 @@ mod tests {
                 current_page_context: None,
                 current_project_id: None,
                 object_type: Some("page".to_string()),
+                context_scope: Some("workspace".to_string()),
                 max_context_chars: 2_000,
             },
         )

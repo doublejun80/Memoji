@@ -1,3 +1,4 @@
+use crate::indexing::worker::{IndexWorker, ReindexReport};
 use crate::search::{
     list_page_anchors as list_anchors, list_page_links as list_links, search, PageAnchorView,
     PageLinkView, SearchRequest, SearchResult,
@@ -12,6 +13,12 @@ pub fn search_workspace(
 ) -> Result<Vec<SearchResult>, String> {
     let database = state.db.lock().map_err(|error| error.to_string())?;
     search(database.connection(), &request).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn reindex_workspace(state: State<'_, AppState>) -> Result<ReindexReport, String> {
+    let mut database = state.db.lock().map_err(|error| error.to_string())?;
+    IndexWorker::reindex_workspace(database.connection_mut()).map_err(|error| error.to_string())
 }
 
 #[tauri::command]

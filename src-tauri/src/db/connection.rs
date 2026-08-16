@@ -28,8 +28,7 @@ pub fn open_database(path: &Path) -> Result<Connection, MigrationError> {
         }
         let artifact = create_backup(connection, &backup_path)?;
         log::info!(
-            "SQLite pre-migration backup created: path={}, sha256={}, bytes={}",
-            artifact.path.display(),
+            "SQLite pre-migration backup created: sha256={}, bytes={}",
             artifact.sha256,
             artifact.bytes
         );
@@ -50,6 +49,7 @@ fn migration_backup_path(database_path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::migrations::MIGRATIONS;
     use serde_json::json;
     use sha2::{Digest, Sha256};
     use std::time::Instant;
@@ -135,7 +135,10 @@ mod tests {
         let backup_bytes = backup_path.metadata().expect("backup metadata").len();
 
         assert_eq!(quick_check, "ok");
-        assert_eq!(schema_version, 5);
+        assert_eq!(
+            schema_version,
+            MIGRATIONS.last().expect("at least one migration").version
+        );
         assert_eq!(before_counts["pages"], 1);
         assert_eq!(after_counts["pages"], 1);
         assert_eq!(backup_counts["pages"], 1);

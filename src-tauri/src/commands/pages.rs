@@ -12,6 +12,12 @@ pub fn list_page_summaries(state: State<'_, AppState>) -> Result<Vec<PageSummary
 }
 
 #[tauri::command]
+pub fn list_trashed_page_summaries(state: State<'_, AppState>) -> Result<Vec<PageSummary>, String> {
+    let database = state.db.lock().map_err(|error| error.to_string())?;
+    PageService::list_trashed_summaries(database.connection()).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn get_page_body(page_id: String, state: State<'_, AppState>) -> Result<PageBody, String> {
     let database = state.db.lock().map_err(|error| error.to_string())?;
     PageService::get_body(database.connection(), &page_id).map_err(|error| error.to_string())

@@ -10,6 +10,8 @@ pub struct TaskRecord {
     pub text: String,
     pub completed: bool,
     pub due_date: Option<String>,
+    pub start_date: Option<String>,
+    pub assignee: Option<String>,
     pub priority: Option<u8>,
     pub line: usize,
     pub source_start: usize,
@@ -38,6 +40,8 @@ pub struct UpdateTaskRequest {
     pub id: String,
     pub completed: bool,
     pub due_date: Option<String>,
+    pub start_date: Option<String>,
+    pub assignee: Option<String>,
     pub priority: Option<u8>,
     pub expected_hash: String,
 }

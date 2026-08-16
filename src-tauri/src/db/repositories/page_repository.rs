@@ -70,6 +70,16 @@ impl PageRepository {
         rows.collect()
     }
 
+    pub fn list_trashed_summaries(connection: &Connection) -> rusqlite::Result<Vec<PageSummary>> {
+        let mut statement = connection.prepare(
+            "SELECT id, title, icon, parent_id, project_parent_id, COALESCE(project_index, 0),
+                    date_key, created_at, updated_at, type, tags, page_order, revision, deleted_at
+             FROM pages WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC",
+        )?;
+        let rows = statement.query_map([], read_summary)?;
+        rows.collect()
+    }
+
     pub fn get_summary(connection: &Connection, page_id: &str) -> rusqlite::Result<PageSummary> {
         connection.query_row(
             "SELECT id, title, icon, parent_id, project_parent_id, COALESCE(project_index, 0),

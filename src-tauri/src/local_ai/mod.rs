@@ -1,5 +1,6 @@
 mod gemma4;
 mod litert_manager;
+mod litert_native;
 mod mtp_client;
 mod sampler;
 mod tokenizer;

@@ -2,7 +2,7 @@ use crate::db::repositories::page_repository::PageRepository;
 use crate::domain::page::SavePageV2Request;
 use crate::domain::task::{TaskListRequest, TaskRecord, UpdateTaskRequest};
 use crate::services::page_service::PageService;
-use crate::tasks::parser::{parse_tasks, render_task_line};
+use crate::tasks::parser::{parse_tasks, render_task_line, valid_task_assignee, valid_task_date};
 use rusqlite::{params, Connection};
 use std::fmt;
 
@@ -12,6 +12,7 @@ pub enum TaskServiceError {
     NotFound,
     Conflict,
     InvalidSource,
+    InvalidMetadata,
     Page(String),
 }
 
@@ -22,6 +23,7 @@ impl fmt::Display for TaskServiceError {
             Self::NotFound => write!(formatter, "Task was not found"),
             Self::Conflict => write!(formatter, "Task source changed; refresh before updating"),
             Self::InvalidSource => write!(formatter, "Task source could not be patched safely"),
+            Self::InvalidMetadata => write!(formatter, "Task metadata is invalid"),
             Self::Page(error) => write!(formatter, "Task page save failed: {error}"),
         }
     }
@@ -50,9 +52,9 @@ impl TaskService {
             let Some(id) = task.id else { continue };
             connection.execute(
                 "INSERT INTO tasks (
-                    id, page_id, project_id, text, completed, due_date, priority, line,
-                    source_start, source_end, source_hash, updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                    id, page_id, project_id, text, completed, due_date, start_date, assignee,
+                    priority, line, source_start, source_end, source_hash, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 params![
                     id,
                     page_id,
@@ -60,6 +62,8 @@ impl TaskService {
                     task.text,
                     task.completed,
                     task.due_date,
+                    task.start_date,
+                    task.assignee,
                     task.priority,
                     task.line,
                     task.source_start,
@@ -78,7 +82,7 @@ impl TaskService {
     ) -> Result<Vec<TaskRecord>, TaskServiceError> {
         let mut statement = connection.prepare(
             "SELECT t.id, t.page_id, p.title, t.project_id, t.text, t.completed,
-                    t.due_date, t.priority, t.line, t.source_start, t.source_end,
+                    t.due_date, t.start_date, t.assignee, t.priority, t.line, t.source_start, t.source_end,
                     t.source_hash, t.updated_at
              FROM tasks t JOIN pages p ON p.id=t.page_id
              WHERE p.deleted_at IS NULL
@@ -123,6 +127,24 @@ impl TaskService {
         connection: &mut Connection,
         request: &UpdateTaskRequest,
     ) -> Result<TaskRecord, TaskServiceError> {
+        if request
+            .due_date
+            .as_deref()
+            .is_some_and(|value| !valid_task_date(value))
+            || request
+                .start_date
+                .as_deref()
+                .is_some_and(|value| !valid_task_date(value))
+            || request
+                .assignee
+                .as_deref()
+                .is_some_and(|value| !valid_task_assignee(value))
+            || request
+                .priority
+                .is_some_and(|value| !(1..=3).contains(&value))
+        {
+            return Err(TaskServiceError::InvalidMetadata);
+        }
         let existing = get_task(connection, &request.id)?;
         if existing.source_hash != request.expected_hash {
             return Err(TaskServiceError::Conflict);
@@ -146,6 +168,8 @@ impl TaskService {
             source,
             request.completed,
             request.due_date.as_deref(),
+            request.start_date.as_deref(),
+            request.assignee.as_deref(),
             request.priority,
         )
         .ok_or(TaskServiceError::InvalidSource)?;
@@ -186,12 +210,14 @@ fn read_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
         text: row.get(4)?,
         completed: row.get::<_, i64>(5)? != 0,
         due_date: row.get(6)?,
-        priority: row.get(7)?,
-        line: row.get(8)?,
-        source_start: row.get(9)?,
-        source_end: row.get(10)?,
-        source_hash: row.get(11)?,
-        updated_at: row.get(12)?,
+        start_date: row.get(7)?,
+        assignee: row.get(8)?,
+        priority: row.get(9)?,
+        line: row.get(10)?,
+        source_start: row.get(11)?,
+        source_end: row.get(12)?,
+        source_hash: row.get(13)?,
+        updated_at: row.get(14)?,
     })
 }
 
@@ -199,7 +225,7 @@ fn get_task(connection: &Connection, id: &str) -> Result<TaskRecord, TaskService
     connection
         .query_row(
             "SELECT t.id, t.page_id, p.title, t.project_id, t.text, t.completed,
-                    t.due_date, t.priority, t.line, t.source_start, t.source_end,
+                    t.due_date, t.start_date, t.assignee, t.priority, t.line, t.source_start, t.source_end,
                     t.source_hash, t.updated_at
              FROM tasks t JOIN pages p ON p.id=t.page_id WHERE t.id=?1",
             [id],
@@ -279,6 +305,8 @@ mod tests {
                 id: inbox[0].id.clone(),
                 completed: true,
                 due_date: Some("2026-08-18".to_string()),
+                start_date: Some("2026-08-17".to_string()),
+                assignee: Some("홍길동".to_string()),
                 priority: Some(2),
                 expected_hash: inbox[0].source_hash.clone(),
             },
@@ -286,6 +314,8 @@ mod tests {
         .expect("update");
         assert!(updated.completed);
         assert_eq!(updated.due_date.as_deref(), Some("2026-08-18"));
+        assert_eq!(updated.start_date.as_deref(), Some("2026-08-17"));
+        assert_eq!(updated.assignee.as_deref(), Some("홍길동"));
         assert_eq!(
             PageRepository::get_body(&connection, "page-1")
                 .unwrap()
@@ -295,7 +325,7 @@ mod tests {
         assert!(PageRepository::get_body(&connection, "page-1")
             .unwrap()
             .body_markdown
-            .contains("- [x] 인박스 @due(2026-08-18) !p2"));
+            .contains("- [x] 인박스 @start(2026-08-17) @due(2026-08-18) !p2 @assignee(홍길동)"));
     }
 
     #[test]
@@ -317,11 +347,42 @@ mod tests {
                 id: task.id,
                 completed: true,
                 due_date: None,
+                start_date: None,
+                assignee: None,
                 priority: None,
                 expected_hash: "stale".to_string(),
             },
         )
         .expect_err("must conflict");
         assert!(matches!(error, TaskServiceError::Conflict));
+    }
+
+    #[test]
+    fn rejects_invalid_task_metadata_before_patching_markdown() {
+        let mut connection = connection();
+        PageService::save(&mut connection, page_request("- [ ] 입력 검증\n")).expect("save");
+        let task = TaskService::list(
+            &connection,
+            &TaskListRequest {
+                filter: "all".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .remove(0);
+        let error = TaskService::update(
+            &mut connection,
+            &UpdateTaskRequest {
+                id: task.id,
+                completed: false,
+                due_date: Some("2026-02-30".to_string()),
+                start_date: None,
+                assignee: Some("담당자)\n- [ ] 주입".to_string()),
+                priority: Some(2),
+                expected_hash: task.source_hash,
+            },
+        )
+        .expect_err("invalid metadata must be rejected");
+        assert!(matches!(error, TaskServiceError::InvalidMetadata));
     }
 }

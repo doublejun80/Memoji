@@ -1,5 +1,6 @@
 use crate::ai::retrieval::hash_text_anchor;
 use crate::domain::page::{PageBody, SavePageV2Request};
+use crate::indexing::worker::IndexWorker;
 use crate::services::page_service::{PageService, PageServiceError};
 use crate::tasks::parser::ensure_task_markers;
 use rusqlite::{params, Connection, Transaction};
@@ -249,6 +250,16 @@ pub fn apply(connection: &mut Connection, id: &str) -> Result<ApplyProposalResul
     )?;
     transaction.commit()?;
 
+    if let Ok(report) = IndexWorker::drain_page_jobs(connection, Some(&request.id)) {
+        if report.failed > 0 {
+            log::warn!(
+                "AI proposal applied but derived page data update was deferred: page_id={}, failed_jobs={}",
+                request.id,
+                report.failed
+            );
+        }
+    }
+
     proposal.status = "applied".to_string();
     Ok(ApplyProposalResult {
         proposal,
@@ -430,6 +441,7 @@ mod tests {
                 current_page_context: Some(body.to_string()),
                 current_project_id: None,
                 object_type: Some("page".to_string()),
+                context_scope: Some("workspace".to_string()),
                 max_context_chars: 1_000,
             },
         )
@@ -500,6 +512,7 @@ mod tests {
                 current_page_context: None,
                 current_project_id: None,
                 object_type: Some("page".to_string()),
+                context_scope: Some("workspace".to_string()),
                 max_context_chars: 1_000,
             },
         )
@@ -534,6 +547,7 @@ mod tests {
                 current_page_context: None,
                 current_project_id: None,
                 object_type: Some("page".to_string()),
+                context_scope: Some("workspace".to_string()),
                 max_context_chars: 1_000,
             },
         )
