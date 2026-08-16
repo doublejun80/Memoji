@@ -51,5 +51,6 @@ describe('VDI local AI runtime contract', () => {
     expect(sbom).toContain('runtime-compatibility.json');
     expect(sbom).toContain('machine-learning-model');
     expect(sbom).toContain('LiteRT-LM');
+    expect(sbom).toContain("process.platform === 'win32' ? 'npm.cmd' : 'npm'");
   });
 });

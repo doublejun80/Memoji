@@ -12,7 +12,8 @@ const runtimeCompatibility = JSON.parse(await readFile(
   'src-tauri/resources/local_ai/runtime-compatibility.json',
   'utf8',
 ));
-const npmTree = jsonCommand('npm', ['ls', '--all', '--json']);
+const npmExecutable = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const npmTree = jsonCommand(npmExecutable, ['ls', '--all', '--json']);
 const cargo = jsonCommand('cargo', ['metadata', '--locked', '--format-version', '1', '--manifest-path', 'src-tauri/Cargo.toml']);
 const components = new Map();
 
