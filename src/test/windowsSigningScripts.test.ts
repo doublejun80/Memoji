@@ -34,5 +34,6 @@ describe('Windows release signing gates', () => {
     expect(vdiWorkflow).toContain('memoji-vdi-benchmark');
     expect(vdiWorkflow).toContain('prerelease: true');
     expect(vdiWorkflow).toContain('SHA256SUMS');
+    expect(vdiWorkflow).toContain('cache-on-failure: true');
   });
 });
