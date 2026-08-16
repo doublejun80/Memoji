@@ -85,4 +85,3 @@ export function useAiStream(api: AiApi, callbacks: AiGenerationCallbacks) {
     cancel,
   };
 }
-

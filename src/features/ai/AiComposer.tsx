@@ -9,7 +9,6 @@ interface AiComposerProps {
   canGenerate: boolean;
   isGenerating: boolean;
 }
-
 export function AiComposer({
   value,
   onChange,
@@ -58,4 +57,3 @@ export function AiComposer({
     </div>
   );
 }
-
