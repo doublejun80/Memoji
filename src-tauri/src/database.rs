@@ -1416,6 +1416,7 @@ mod tests {
         assert_eq!(pages.len(), 1);
         assert_eq!(pages[0].id, "existing");
         assert!(!directory.join("imports").exists());
+        drop(target);
         std::fs::remove_dir_all(directory).expect("clean import test directory");
     }
 
@@ -1471,6 +1472,7 @@ mod tests {
             .expect("backup count");
         assert_eq!(backup_count, 1);
         drop(backup);
+        drop(target);
 
         std::fs::remove_dir_all(directory).expect("clean import test directory");
     }
