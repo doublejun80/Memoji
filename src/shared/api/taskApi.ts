@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { TAURI_COMMANDS } from './tauriCommands';
 import type {
   MarkdownTaskDto,
   TaskListRequest,
@@ -11,6 +12,6 @@ export interface TaskApi {
 }
 
 export const tauriTaskApi: TaskApi = {
-  list: (request) => invoke('list_tasks', { request }),
-  update: (request) => invoke('update_task', { request }),
+  list: (request) => invoke(TAURI_COMMANDS.listTasks, { request }),
+  update: (request) => invoke(TAURI_COMMANDS.updateTask, { request }),
 };

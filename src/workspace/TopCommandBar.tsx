@@ -84,7 +84,8 @@ export function TopCommandBar(props: TopCommandBarProps) {
 
   return (
     <header className="memoji-command-bar" data-tauri-drag-region>
-      <div className="memoji-command-bar-leading">
+      <div className="memoji-command-bar-drag-surface" data-tauri-drag-region aria-hidden="true" />
+      <div className="memoji-command-bar-leading" data-tauri-drag-region>
         <button
           type="button"
           className="memoji-icon-button"
@@ -95,7 +96,7 @@ export function TopCommandBar(props: TopCommandBarProps) {
         >
           {props.leftOpen ? <PanelLeftClose aria-hidden="true" /> : <PanelLeftOpen aria-hidden="true" />}
         </button>
-        <h1>{props.workspaceName}</h1>
+        <h1 data-tauri-drag-region>{props.workspaceName}</h1>
       </div>
 
       <button
@@ -109,7 +110,7 @@ export function TopCommandBar(props: TopCommandBarProps) {
         <kbd>Ctrl&nbsp;K</kbd>
       </button>
 
-      <div className="memoji-command-bar-trailing">
+      <div className="memoji-command-bar-trailing" data-tauri-drag-region>
         <button
           type="button"
           className="memoji-save-indicator"
@@ -122,7 +123,7 @@ export function TopCommandBar(props: TopCommandBarProps) {
           <span>{saveLabels[displayedSaveState]}</span>
         </button>
 
-        <span className="memoji-runtime-indicator" title={props.runtimeState}>
+        <span className="memoji-runtime-indicator" title={props.runtimeState} data-tauri-drag-region>
           <Bot aria-hidden="true" />
           <span>{props.runtimeState}</span>
         </span>

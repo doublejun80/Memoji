@@ -9,6 +9,7 @@ import type {
 } from '../../types/localAi';
 import type { AiGenerationRequest } from '../../features/ai/aiTypes';
 import { getEnvironment } from '../../utils/environment';
+import { TAURI_COMMANDS } from './tauriCommands';
 
 const nativeInvoke = <T>(command: string, payload?: Record<string, unknown>): Promise<T> => {
   if (!getEnvironment().isTauri) {
@@ -42,27 +43,28 @@ const finishRun = (request: {
   promptTokens?: number;
   generatedTokens?: number;
   errorCode?: string;
-}) => nativeInvoke<void>('finish_ai_run', { request });
+}) => nativeInvoke<void>(TAURI_COMMANDS.finishAiRun, { request });
 
 export const tauriAiApi: AiApi = {
-  getStatus: () => nativeInvoke<LocalAiStatus>('local_ai_status'),
-  loadModel: () => nativeInvoke<LocalAiStatus>('local_ai_load'),
-  saveRuntimeConfig: (config) => nativeInvoke('local_ai_save_runtime_config', { config }),
-  generate: async ({ requestId, request, useServer, currentPageId, currentProjectId, objectType }) => {
-    const prepared = await nativeInvoke<PreparedAiRun>('create_ai_run', {
+  getStatus: () => nativeInvoke<LocalAiStatus>(TAURI_COMMANDS.localAiStatus),
+  loadModel: () => nativeInvoke<LocalAiStatus>(TAURI_COMMANDS.localAiLoad),
+  saveRuntimeConfig: (config) => nativeInvoke(TAURI_COMMANDS.localAiSaveRuntimeConfig, { config }),
+  generate: async ({ requestId, request, useServer, runtimeFamily, currentPageId, currentProjectId, contextScope, objectType }) => {
+    const prepared = await nativeInvoke<PreparedAiRun>(TAURI_COMMANDS.createAiRun, {
       request: {
         id: requestId,
         pageId: currentPageId,
         prompt: request.prompt,
         currentPageContext: request.pageContext,
         currentProjectId,
+        contextScope,
         objectType: objectType ?? 'page',
         maxContextChars: 12_000,
       },
     });
     try {
       const response = await nativeInvoke<LocalAiGenerateResponse>(
-        useServer ? 'local_ai_generate_mtp_stream' : 'local_ai_generate_stream',
+        useServer ? TAURI_COMMANDS.localAiGenerateMtpStream : TAURI_COMMANDS.localAiGenerateStream,
         {
           requestId,
           request: { ...request, prompt: prepared.prompt, pageContext: undefined },
@@ -71,7 +73,7 @@ export const tauriAiApi: AiApi = {
       await finishRun({
         id: requestId,
         status: 'completed',
-        runtimeFamily: useServer ? 'open_ai_compatible_loopback' : 'candle',
+        runtimeFamily: runtimeFamily ?? (useServer ? 'open_ai_compatible_loopback' : 'candle'),
         promptTokens: response.promptTokens,
         generatedTokens: response.generatedTokens,
       });
@@ -80,7 +82,7 @@ export const tauriAiApi: AiApi = {
       await finishRun({
         id: requestId,
         status: 'failed',
-        runtimeFamily: useServer ? 'open_ai_compatible_loopback' : 'candle',
+        runtimeFamily: runtimeFamily ?? (useServer ? 'open_ai_compatible_loopback' : 'candle'),
         errorCode: 'generation_failed',
       }).catch(() => undefined);
       throw error;
@@ -88,7 +90,7 @@ export const tauriAiApi: AiApi = {
   },
   cancel: async (requestId) => {
     await Promise.allSettled([
-      nativeInvoke<void>('local_ai_cancel', { requestId }),
+      nativeInvoke<void>(TAURI_COMMANDS.localAiCancel, { requestId }),
       finishRun({ id: requestId, status: 'cancelled' }),
     ]);
   },

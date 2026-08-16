@@ -51,6 +51,8 @@ export interface LocalAiRuntimeCapabilities {
   assistantModelVerified: boolean;
   mtpVerified: boolean;
   authEnforced: boolean;
+  authApplicable?: boolean;
+  externalRequestSurface?: boolean;
 }
 
 export interface LocalAiRuntimeMetrics {
@@ -184,11 +186,22 @@ export interface LocalAiManagedRuntimeStatus {
   sessionIsolated?: boolean;
   authConfigured?: boolean;
   authEnforced?: boolean;
+  authApplicable?: boolean;
+  externalRequestSurface?: boolean;
+  transport?: 'in_process' | string;
+  runtimeVersion?: string;
+  cApiVersion?: string;
+  activeModelId?: string | null;
+  availableModelIds?: string[];
+  backend?: string | null;
+  threads?: number | null;
+  restartAttempts?: number;
+  restartLimit?: number;
 }
 
 export const LOCAL_AI_MAX_NEW_TOKENS_MIN = 32;
-export const LOCAL_AI_MAX_NEW_TOKENS_MAX = 2048;
-export const LOCAL_AI_MAX_NEW_TOKENS_DEFAULT = 256;
+export const LOCAL_AI_MAX_NEW_TOKENS_MAX = 4096;
+export const LOCAL_AI_MAX_NEW_TOKENS_DEFAULT = 1024;
 export const LOCAL_AI_MAX_NEW_TOKENS_STEP = 16;
 export const LOCAL_AI_MAX_NEW_TOKENS_STORAGE_KEY = 'memoji.localAi.maxNewTokens';
 export const LOCAL_AI_SETTINGS_CHANGED_EVENT = 'memoji-local-ai-settings-changed';
@@ -208,13 +221,45 @@ export interface LocalAiRuntimePreset {
   draftModel?: string;
 }
 
+export interface LocalAiModelPreset {
+  id: 'gemma4-e2b' | 'gemma4-e4b';
+  label: string;
+  qualityLabel: string;
+  description: string;
+  minimumRamGb: number;
+  defaultForVdi: boolean;
+}
+
+export const LOCAL_AI_MODEL_PRESETS: LocalAiModelPreset[] = [
+  {
+    id: 'gemma4-e2b',
+    label: 'Gemma 4 E2B · VDI Fast',
+    qualityLabel: '속도 우선',
+    description: '8GB 이상 VDI의 기본 모델. CPU 메모리와 응답 지연을 낮춥니다.',
+    minimumRamGb: 8,
+    defaultForVdi: true,
+  },
+  {
+    id: 'gemma4-e4b',
+    label: 'Gemma 4 E4B · Quality',
+    qualityLabel: '품질 우선',
+    description: '16GB 이상 환경용 선택 모델. 더 높은 품질 대신 메모리를 더 사용합니다.',
+    minimumRamGb: 16,
+    defaultForVdi: false,
+  },
+];
+
+export const findLocalAiModelPreset = (model?: string | null): LocalAiModelPreset => (
+  LOCAL_AI_MODEL_PRESETS.find((preset) => preset.id === model) ?? LOCAL_AI_MODEL_PRESETS[0]
+);
+
 export const LOCAL_AI_RUNTIME_PRESETS: LocalAiRuntimePreset[] = [
   {
     id: 'litert_lm',
     label: 'Gemma 4 E2B · LiteRT-LM',
     shortLabel: 'Gemma 4 LiteRT-LM',
-    modeLabel: '고속 로컬 서버',
-    description: 'VDI 배포본에 포함된 Gemma 4와 LiteRT-LM을 자동으로 실행',
+    modeLabel: '인프로세스 엔진',
+    description: 'VDI 배포본의 Gemma 4를 LiteRT-LM C API로 앱 안에서 직접 실행',
     serverEnabled: true,
     endpoint: 'http://127.0.0.1:9379/v1/chat/completions',
     model: 'gemma4-e2b',
@@ -290,6 +335,9 @@ export const runtimeKindFromLocalAiConfig = (
 
 export const localAiRuntimeBadgeLabel = (status?: LocalAiStatus | null): string => {
   if (status?.runtimeCapabilities?.mtpVerified) return 'MTP 활성';
+  if (status?.runtimeCapabilities?.inProcess && status?.runtimeCapabilities?.family === 'lite_rt') {
+    return '인프로세스 AI';
+  }
   if (status?.runtimeCapabilities?.openAiCompatible || status?.mtpConfigured) return '고속 로컬 서버';
   return '내장 로컬';
 };
@@ -299,6 +347,9 @@ export const formatLocalAiGenerateError = (
   status?: LocalAiStatus | null
 ): string => {
   const rawMessage = String(error);
+  if (status?.runtimeCapabilities?.inProcess && status?.runtimeCapabilities?.family === 'lite_rt') {
+    return `Gemma 4 인프로세스 엔진 오류: ${rawMessage}\n\n설정의 네이티브 엔진 상태와 진단 정보를 확인하세요.`;
+  }
   if (status?.runtimeCapabilities?.openAiCompatible || status?.mtpConfigured) {
     const runtimePreset = findLocalAiRuntimePreset(status.mtpRuntimeKind ?? null);
     const endpoint = status.mtpEndpoint || runtimePreset.endpoint;

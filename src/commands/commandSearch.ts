@@ -4,9 +4,17 @@ import type {
 } from '../shared/api/searchApi';
 import type { AppCommand, CommandContext } from './types';
 
-export type CommandSearchGroup = 'commands' | 'pages' | 'tasks';
+export type CommandSearchGroup = 'commands' | 'projects' | 'pages' | 'tasks';
 
 export type CommandSearchResult =
+  | {
+    id: `project:${string}`;
+    group: 'projects';
+    label: string;
+    description: string;
+    page: SearchPageSummary;
+    score: number;
+  }
   | {
     id: `command:${string}`;
     group: 'commands';
@@ -43,7 +51,7 @@ interface SearchWorkspaceOptions {
   limit?: number;
 }
 
-type SearchField = 'all' | 'title' | 'tag';
+type SearchField = 'all' | 'title' | 'tag' | 'type' | 'due' | 'project' | 'is';
 
 function normalize(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase('ko-KR').trim();
@@ -51,11 +59,9 @@ function normalize(value: string): string {
 
 function parseQuery(query: string): { field: SearchField; term: string } {
   const normalized = normalize(query);
-  if (normalized.startsWith('title:')) {
-    return { field: 'title', term: normalized.slice(6).trim() };
-  }
-  if (normalized.startsWith('tag:')) {
-    return { field: 'tag', term: normalized.slice(4).trim() };
+  for (const field of ['title', 'tag', 'type', 'due', 'project', 'is'] as const) {
+    const prefix = `${field}:`;
+    if (normalized.startsWith(prefix)) return { field, term: normalized.slice(prefix.length).trim() };
   }
   return { field: 'all', term: normalized };
 }
@@ -114,10 +120,19 @@ function searchPages(
   term: string,
 ): CommandSearchResult[] {
   return sortByScore(pages.flatMap((page) => {
+    if (page.pageType === 'folder' || page.projectIndex) return [];
     const score = field === 'tag'
       ? tagScore(page.tags, term)
       : field === 'title'
         ? textScore(page.title, term, 80)
+        : field === 'type'
+          ? (['page', '문서'].includes(term) && (page.pageType ?? 'page') === 'page' ? 90 : 0)
+          : field === 'due'
+            ? dueScore(page.dueDate, term)
+            : field === 'project'
+              ? textScore(page.projectTitle ?? page.projectId ?? '', term, 80)
+              : field === 'is'
+                ? Math.max(textScore(page.status ?? '', term, 80), term === (page.pageType ?? 'page') ? 80 : 0)
         : Math.max(
           textScore(page.title, term, 80),
           textScore(page.excerpt, term, 40),
@@ -135,6 +150,43 @@ function searchPages(
   }));
 }
 
+function dueScore(dueDate: string | null | undefined, term: string): number {
+  if (!dueDate) return 0;
+  const date = dueDate.slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  if (term === 'today' || term === '오늘') return date === today ? 90 : 0;
+  if (term === 'overdue' || term === '지연') return date < today ? 90 : 0;
+  return textScore(date, term, 80);
+}
+
+function searchProjects(
+  pages: SearchPageSummary[],
+  field: SearchField,
+  term: string,
+): CommandSearchResult[] {
+  return sortByScore(pages.flatMap((page) => {
+    if (page.pageType !== 'folder' && !page.projectIndex) return [];
+    const score = field === 'type'
+      ? (['project', '프로젝트', 'folder', '폴더'].includes(term) ? 100 : 0)
+      : field === 'tag'
+        ? tagScore(page.tags, term)
+        : field === 'title' || field === 'project'
+          ? textScore(page.title, term, 90)
+          : field === 'all'
+            ? Math.max(textScore(page.title, term, 90), tagScore(page.tags, term))
+            : 0;
+    if (score === 0) return [];
+    return [{
+      id: `project:${page.id}` as const,
+      group: 'projects' as const,
+      label: page.title,
+      description: page.excerpt || '프로젝트',
+      page,
+      score,
+    }];
+  }));
+}
+
 function searchTasks(
   tasks: SearchTaskSummary[],
   field: SearchField,
@@ -143,7 +195,15 @@ function searchTasks(
   return sortByScore(tasks.flatMap((task) => {
     const score = field === 'tag'
       ? tagScore(task.tags, term)
-      : textScore(task.title, term, 80);
+      : field === 'type'
+        ? (['task', '작업'].includes(term) ? 90 : 0)
+        : field === 'due'
+          ? dueScore(task.dueDate, term)
+          : field === 'project'
+            ? textScore(task.projectTitle ?? task.projectId ?? '', term, 80)
+            : field === 'is'
+              ? (normalize(task.status) === term ? 90 : 0)
+              : textScore(task.title, term, 80);
     if (score === 0) return [];
     return [{
       id: `task:${task.id}` as const,
@@ -198,6 +258,7 @@ export function searchWorkspace({
 
   return [
     ...searchCommands(commands, context, field, term),
+    ...searchProjects(pages, field, term),
     ...searchPages(pages, field, term),
     ...searchTasks(tasks, field, term),
   ].slice(0, Math.max(0, limit));

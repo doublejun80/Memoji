@@ -11,6 +11,7 @@ interface MarkdownEditorProps {
   pages?: Page[];
   onPageSelect?: (page: Page) => void;
   onPageCreate?: (title: string) => void;
+  onOpenProperties?: () => void;
 }
 
 export interface MarkdownEditorHandle {
@@ -21,6 +22,7 @@ export interface MarkdownEditorHandle {
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(({
   currentPage,
   onPageUpdate,
+  onOpenProperties,
 }, ref) => {
   const workspaceRef = useRef<DocumentWorkspaceHandle>(null);
   useImperativeHandle(ref, () => ({
@@ -32,6 +34,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       ref={workspaceRef}
       currentPage={currentPage}
       onPageUpdate={onPageUpdate}
+      onOpenProperties={onOpenProperties}
     />
   );
 });

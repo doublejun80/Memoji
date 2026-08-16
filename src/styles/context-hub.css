@@ -115,9 +115,14 @@
 }
 
 .outline-list button:hover,
-.outline-list button:focus-visible {
+.outline-list button:focus-visible,
+.outline-list button[data-active='true'] {
   background: var(--memoji-surface-canvas);
   color: var(--memoji-text-primary);
+}
+
+.outline-list button[data-active='true'] {
+  box-shadow: inset 2px 0 var(--memoji-accent, #2563eb);
 }
 
 .outline-level {
@@ -274,6 +279,127 @@
 
 .properties-list code {
   font-size: 11px;
+}
+
+.properties-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.properties-editor > label {
+  display: grid;
+  gap: 5px;
+}
+
+.properties-editor > label > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--memoji-text-tertiary);
+  font-size: var(--memoji-text-xs);
+}
+
+.properties-editor > label svg,
+.properties-save svg {
+  width: 13px;
+  height: 13px;
+}
+
+.properties-editor input {
+  height: 32px;
+  border: 1px solid var(--memoji-border);
+  border-radius: 6px;
+  padding: 0 8px;
+  background: var(--memoji-surface-canvas);
+  color: var(--memoji-text-primary);
+  font-size: var(--memoji-text-sm);
+}
+
+.properties-save {
+  display: inline-flex;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--memoji-border-strong);
+  border-radius: 6px;
+  background: var(--memoji-surface-raised);
+  color: var(--memoji-text-primary);
+  font-size: var(--memoji-text-sm);
+}
+
+.revision-history {
+  display: grid;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--memoji-border);
+}
+
+.revision-history-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--memoji-text-secondary);
+  font-size: var(--memoji-text-xs);
+}
+
+.revision-history-title svg,
+.revision-history button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.revision-history-title span {
+  margin-left: auto;
+  color: var(--memoji-text-tertiary);
+}
+
+.revision-history > p {
+  margin: 2px 0;
+  color: var(--memoji-text-tertiary);
+  font-size: var(--memoji-text-xs);
+}
+
+.revision-history details {
+  border: 1px solid var(--memoji-border);
+  border-radius: 6px;
+  background: var(--memoji-surface-canvas);
+}
+
+.revision-history summary {
+  display: flex;
+  cursor: pointer;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  color: var(--memoji-text-secondary);
+  font-size: var(--memoji-text-xs);
+}
+
+.revision-history summary time {
+  margin-left: auto;
+  color: var(--memoji-text-tertiary);
+}
+
+.revision-history pre {
+  max-height: 180px;
+  overflow: auto;
+  margin: 0;
+  padding: 8px;
+  border-top: 1px solid var(--memoji-border);
+  white-space: pre-wrap;
+  color: var(--memoji-text-secondary);
+  font: 11px/1.5 var(--memoji-font-mono);
+}
+
+.revision-history button {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 5px;
+  margin: 7px 8px;
+  color: var(--memoji-text-secondary);
+  font-size: var(--memoji-text-xs);
 }
 
 .context-search-panel label {

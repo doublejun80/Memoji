@@ -23,6 +23,7 @@ export function DocumentBar({ page, mode, hasUnsavedChanges, onModeChange }: Doc
         </div>
         <div className="document-title-row">
           <h1>{page.title}</h1>
+          <span className="document-revision" title="현재 문서 리비전">r{page.revision ?? 0}</span>
           <span className="document-save-state" data-dirty={hasUnsavedChanges ? 'true' : 'false'}>
             <Check aria-hidden="true" />
             {hasUnsavedChanges ? '저장 중' : '저장됨'}

@@ -38,9 +38,10 @@ const commands: AppCommand[] = [
 ];
 
 const pages = [
-  { id: 'p1', title: '구매 계획', excerpt: '업체 견적을 비교합니다.', tags: ['조달'], updatedAt: '2026-08-15T10:00:00Z' },
-  { id: 'p2', title: '회의 기록', excerpt: '다음 배포 계획을 확정했습니다.', tags: ['회의'], updatedAt: '2026-08-14T10:00:00Z' },
-  { id: 'p3', title: '읽을거리', excerpt: '메모', tags: ['계획'], updatedAt: '2026-08-13T10:00:00Z' },
+  { id: 'p1', title: '구매 계획', excerpt: '업체 견적을 비교합니다.', tags: ['조달'], updatedAt: '2026-08-15T10:00:00Z', pageType: 'page' as const, projectId: 'project-1', projectTitle: 'GA 출시', dueDate: '2026-09-01', status: 'active' },
+  { id: 'p2', title: '회의 기록', excerpt: '다음 배포 계획을 확정했습니다.', tags: ['회의'], updatedAt: '2026-08-14T10:00:00Z', pageType: 'page' as const, projectId: 'project-1', projectTitle: 'GA 출시', status: 'review' },
+  { id: 'p3', title: '읽을거리', excerpt: '메모', tags: ['계획'], updatedAt: '2026-08-13T10:00:00Z', pageType: 'page' as const },
+  { id: 'project-1', title: 'GA 출시', excerpt: '프로젝트', tags: ['GA'], updatedAt: '2026-08-16T10:00:00Z', pageType: 'folder' as const, projectIndex: true },
 ];
 
 const tasks = [
@@ -80,5 +81,14 @@ describe('searchWorkspace', () => {
   it('enforces the global result limit', () => {
     const results = searchWorkspace({ query: '계획', commands, context, pages, tasks, limit: 2 });
     expect(results).toHaveLength(2);
+  });
+
+  it('groups project records and supports type, due, project, and is DSL fields', () => {
+    const projects = searchWorkspace({ query: 'type:project', commands, context, pages, tasks, limit: 10 });
+    expect(projects).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'project:project-1', group: 'projects' })]));
+    expect(searchWorkspace({ query: 'due:2026-09-01', commands, context, pages, tasks, limit: 10 }).map((result) => result.id)).toContain('page:p1');
+    expect(searchWorkspace({ query: 'project:GA', commands, context, pages, tasks, limit: 10 }).map((result) => result.id)).toEqual(expect.arrayContaining(['page:p1', 'page:p2']));
+    expect(searchWorkspace({ query: 'is:done', commands, context, pages, tasks, limit: 10 }).map((result) => result.id)).not.toContain('task:t1');
+    expect(searchWorkspace({ query: 'is:open', commands, context, pages, tasks, limit: 10 }).map((result) => result.id)).toContain('task:t1');
   });
 });

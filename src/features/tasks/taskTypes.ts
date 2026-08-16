@@ -10,6 +10,8 @@ export interface MarkdownTaskDto {
   text: string;
   completed: boolean;
   dueDate?: string | null;
+  startDate?: string | null;
+  assignee?: string | null;
   priority?: number | null;
   line: number;
   sourceStart: number;
@@ -29,6 +31,8 @@ export interface UpdateTaskRequest {
   id: string;
   completed: boolean;
   dueDate?: string | null;
+  startDate?: string | null;
+  assignee?: string | null;
   priority?: number | null;
   expectedHash: string;
 }

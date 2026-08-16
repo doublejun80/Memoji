@@ -5,6 +5,7 @@ import type {
   CalendarRange,
   UpsertCalendarEvent,
 } from '../../features/calendar/eventTypes';
+import { TAURI_COMMANDS } from './tauriCommands';
 
 export interface CalendarApi {
   list(request: CalendarRange): Promise<CalendarItemDto[]>;
@@ -15,9 +16,9 @@ export interface CalendarApi {
 }
 
 export const tauriCalendarApi: CalendarApi = {
-  list: (request) => invoke('list_calendar_items', { request }),
-  save: (request) => invoke('save_calendar_event', { request }),
-  delete: (id) => invoke('delete_calendar_event', { id }),
-  exportIcs: (request) => invoke('export_calendar_ics', { request }),
-  importIcs: (source) => invoke('import_calendar_ics', { source }),
+  list: (request) => invoke(TAURI_COMMANDS.listCalendarItems, { request }),
+  save: (request) => invoke(TAURI_COMMANDS.saveCalendarEvent, { request }),
+  delete: (id) => invoke(TAURI_COMMANDS.deleteCalendarEvent, { id }),
+  exportIcs: (request) => invoke(TAURI_COMMANDS.exportCalendarIcs, { request }),
+  importIcs: (source) => invoke(TAURI_COMMANDS.importCalendarIcs, { source }),
 };

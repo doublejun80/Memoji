@@ -4,10 +4,12 @@ import type { AiApi } from '../../shared/api/aiApi';
 import { tauriAiApi } from '../../shared/api/aiApi';
 import {
   findLocalAiRuntimePreset,
+  findLocalAiModelPreset,
   formatLocalAiGenerateError,
   isLocalAiReady,
   LOCAL_AI_MAX_NEW_TOKENS_DEFAULT,
   LOCAL_AI_RUNTIME_PRESETS,
+  LOCAL_AI_MODEL_PRESETS,
   localAiModelLabel,
   localAiRuntimeBadgeLabel,
   localAiStateHelp,
@@ -26,7 +28,7 @@ import {
   initialAiProposalState,
   type AiProposal,
 } from './aiProposalReducer';
-import type { AiQuickAction } from './aiTypes';
+import type { AiContextScope, AiQuickAction } from './aiTypes';
 import type { EditorSelection } from '../../editor/SelectionAiToolbar';
 import {
   defaultProposalApi,
@@ -59,9 +61,9 @@ interface ProposalIntent {
 
 const PAGE_CONTEXT_CHAR_LIMIT = 2_000;
 const TOKEN_PRESETS = [
-  { label: '짧게', value: 64 },
+  { label: '짧게', value: 256 },
   { label: '기본', value: LOCAL_AI_MAX_NEW_TOKENS_DEFAULT },
-  { label: '길게', value: 512 },
+  { label: '길게', value: 2048 },
 ];
 
 const QUICK_ACTIONS: AiQuickAction[] = [
@@ -87,6 +89,38 @@ const QUICK_ACTIONS: AiQuickAction[] = [
     title: '선택 영역을 명확하게 다듬기',
     prompt: '아래 선택 영역만 더 명확한 한국어 Markdown 문장으로 다듬어줘. 설명 없이 치환할 본문만 출력해줘.',
     requiresSelection: true,
+  },
+  {
+    id: 'decision',
+    label: '결정',
+    title: '결정 사항과 근거 추출',
+    prompt: '현재 문서에서 확정된 결정, 그 근거, 아직 결정되지 않은 항목을 구분해 한국어 Markdown으로 정리해줘.',
+    includePageContext: true,
+    requiresPage: true,
+  },
+  {
+    id: 'risks',
+    label: '위험',
+    title: '위험과 대응책 추출',
+    prompt: '현재 문서에서 위험, 영향, 발생 가능성, 대응책, 담당이 명시된 경우 담당을 표로 정리해줘.',
+    includePageContext: true,
+    requiresPage: true,
+  },
+  {
+    id: 'translate',
+    label: '번역',
+    title: '한국어와 영어 사이로 번역',
+    prompt: '현재 문서의 언어를 감지해 한국어면 자연스러운 영어로, 그 외 언어면 자연스러운 한국어로 번역해줘. Markdown 구조를 유지하고 번역문만 출력해줘.',
+    includePageContext: true,
+    requiresPage: true,
+  },
+  {
+    id: 'tasks',
+    label: '작업',
+    title: '실행 가능한 작업 추출',
+    prompt: '현재 문서에서 실행 가능한 작업을 추출해 Markdown task list 형식(- [ ] 작업)으로 정리해줘. 담당자와 기한이 명시된 경우 원문 의미를 유지해 함께 적어줘.',
+    includePageContext: true,
+    requiresPage: true,
   },
 ];
 
@@ -190,6 +224,12 @@ export function AiAssistantPanel({
   const runtime = useAiRuntimeStatus(api, stream.isGenerating);
   statusRef.current = runtime.status;
   const [maxNewTokens, setMaxNewTokens] = useState(readLocalAiMaxNewTokens);
+  const [contextScope, setContextScope] = useState<AiContextScope>(currentPageId ? 'page' : 'workspace');
+
+  useEffect(() => {
+    if (!currentPageId && (contextScope === 'page' || contextScope === 'linked')) setContextScope('workspace');
+    if (!currentProjectId && contextScope === 'project') setContextScope(currentPageId ? 'page' : 'workspace');
+  }, [contextScope, currentPageId, currentProjectId]);
 
   useEffect(() => {
     let active = true;
@@ -222,25 +262,28 @@ export function AiAssistantPanel({
       useServer: Boolean(
         runtime.status?.runtimeCapabilities?.openAiCompatible || runtime.status?.mtpConfigured,
       ),
+      runtimeFamily: runtime.status?.runtimeCapabilities?.family
+        ?? (runtime.status?.mtpConfigured ? 'open_ai_compatible_loopback' : 'candle'),
       request: {
         prompt,
-        pageContext: options.includePageContext
+        pageContext: contextScope !== 'none' && (options.includePageContext || contextScope === 'page')
           ? currentPageContent?.slice(-PAGE_CONTEXT_CHAR_LIMIT)
           : undefined,
         maxNewTokens,
         temperature: 0.4,
         topP: 0.95,
       },
-      currentPageId,
-      currentProjectId,
+      contextScope,
+      currentPageId: contextScope === 'none' ? undefined : currentPageId,
+      currentProjectId: contextScope === 'project' ? currentProjectId : undefined,
       objectType: 'page',
     });
-  }, [conversation, currentPageContent, currentPageId, currentProjectId, maxNewTokens, runtime.status, stream]);
+  }, [contextScope, conversation, currentPageContent, currentPageId, currentProjectId, maxNewTokens, runtime.status, stream]);
 
   useEffect(() => {
     const handleSelectionAction = (event: Event) => {
       const detail = (event as CustomEvent<{
-        action: 'rewrite' | 'summarize' | 'tasks';
+        action: 'rewrite' | 'summarize' | 'tasks' | 'translate';
         selection: EditorSelection;
       }>).detail;
       if (!detail || detail.selection.pageId !== currentPageId) return;
@@ -259,6 +302,11 @@ export function AiAssistantPanel({
           type: 'tasks' as const,
           title: '작업 목록 추출',
           prompt: '아래 선택 영역에서 실행 가능한 작업을 Markdown task list로 추출해줘. 목록만 출력해줘.',
+        },
+        translate: {
+          type: 'replace' as const,
+          title: '선택 영역 번역',
+          prompt: '아래 선택 영역의 언어를 감지해 한국어면 자연스러운 영어로, 그 외 언어면 자연스러운 한국어로 번역해줘. Markdown 구조를 유지하고 번역문만 출력해줘.',
         },
       }[detail.action];
       const selection = {
@@ -329,6 +377,7 @@ export function AiAssistantPanel({
   const selectedRuntimeKind = runtimeKindFromLocalAiStatus(status);
   const selectedRuntimePreset = findLocalAiRuntimePreset(selectedRuntimeKind);
   const selectedRuntimeIsPublic = LOCAL_AI_RUNTIME_PRESETS.some(({ id }) => id === selectedRuntimeKind);
+  const selectedModel = findLocalAiModelPreset(status?.mtpModel);
   const showLoadButton = !status?.runtimeCapabilities?.openAiCompatible
     && !status?.mtpConfigured
     && ['not_loaded', 'error', 'unsupported'].includes(status?.state || '');
@@ -378,6 +427,37 @@ export function AiAssistantPanel({
         <div className="memoji-ai-runtime-row">
           <span className="memoji-ai-runtime-badge">{localAiRuntimeBadgeLabel(status)}</span>
           <span>최대 {maxNewTokens}토큰</span>
+        </div>
+        {selectedRuntimeKind === 'litert_lm' && (
+          <div className="memoji-ai-context-row">
+            <label htmlFor="memoji-ai-model-preset">모델</label>
+            <select
+              id="memoji-ai-model-preset"
+              aria-label="Gemma 4 모델 프리셋"
+              value={selectedModel.id}
+              onChange={(event) => void runtime.changeModel(event.target.value)}
+              disabled={stream.isGenerating || runtime.isLoadingModel || runtime.isSavingRuntime}
+            >
+              {LOCAL_AI_MODEL_PRESETS.map((preset) => (
+                <option key={preset.id} value={preset.id}>{preset.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div className="memoji-ai-context-row">
+          <label htmlFor="memoji-ai-context-scope">문맥</label>
+          <select
+            id="memoji-ai-context-scope"
+            aria-label="AI 문맥 범위"
+            value={contextScope}
+            onChange={(event) => setContextScope(event.target.value as AiContextScope)}
+          >
+            <option value="none">문맥 없음</option>
+            <option value="page" disabled={!currentPageId}>현재 문서</option>
+            <option value="project" disabled={!currentProjectId}>현재 프로젝트</option>
+            <option value="linked" disabled={!currentPageId}>연결 문서</option>
+            <option value="workspace">전체 워크스페이스</option>
+          </select>
         </div>
         <div className="memoji-ai-token-presets" aria-label="답변 길이">
           {TOKEN_PRESETS.map((preset) => (

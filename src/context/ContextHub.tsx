@@ -22,6 +22,7 @@ interface ContextHubProps {
   onApplyProposal?: (proposal: AiProposal) => boolean | Promise<boolean>;
   onProposalApplied?: (result: ApplyProposalResult) => void | Promise<void>;
   onOpenSource?: (source: AiSource) => void | Promise<void>;
+  onPageUpdate?: (page: Page) => void | Promise<void>;
 }
 
 const TAB_ITEMS = [
@@ -43,6 +44,7 @@ export function ContextHub({
   onApplyProposal,
   onProposalApplied,
   onOpenSource,
+  onPageUpdate,
 }: ContextHubProps) {
   const resolvedTab = activeTab === 'search' && !searchPinned ? 'ai' : activeTab;
   const taskCount = parseMarkdownTasks(currentPage?.content ?? '').filter((task) => !task.done).length;
@@ -96,7 +98,7 @@ export function ContextHub({
         <DocumentTasksPanel page={currentPage} />
       </Tabs.Content>
       <Tabs.Content value="properties" className="context-hub-panel" data-context-panel>
-        <PropertiesPanel page={currentPage} />
+        <PropertiesPanel page={currentPage} onPageUpdate={onPageUpdate} />
       </Tabs.Content>
       {searchPinned ? (
         <Tabs.Content value="search" className="context-hub-panel" data-context-panel>

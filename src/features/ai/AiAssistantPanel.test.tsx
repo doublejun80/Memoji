@@ -72,6 +72,71 @@ async function startGeneration(api: AiApi) {
 }
 
 describe('AiAssistantPanel', () => {
+  it.each([
+    ['짧게', 256],
+    ['기본', 1024],
+    ['길게', 2048],
+  ])('%s 프리셋은 생성 요청에 %i 토큰을 전달한다', async (label, maxNewTokens) => {
+    window.localStorage.clear();
+    const fixture = createApi();
+    renderWithProviders(<AiAssistantPanel api={fixture.api} currentPageContent="# 출시" />);
+    await waitFor(() => expect(screen.getByLabelText('AI 메시지')).toBeEnabled());
+    await userEvent.click(screen.getByRole('button', { name: label }));
+    expect(screen.getByText(`최대 ${maxNewTokens}토큰`)).toBeVisible();
+    await userEvent.type(screen.getByLabelText('AI 메시지'), '확인');
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
+    expect(fixture.api.generate).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({ maxNewTokens }),
+    }));
+  });
+
+  it('exposes explicit context scopes and decision, risk, and translation actions', async () => {
+    const fixture = createApi();
+    renderWithProviders(<AiAssistantPanel api={fixture.api} currentPageId="page-1" currentProjectId="project-1" currentPageContent="# 출시" />);
+    expect(await screen.findByLabelText('AI 문맥 범위')).toBeVisible();
+    expect(screen.getByRole('button', { name: '결정' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '위험' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '번역' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '작업' })).toBeVisible();
+
+    await userEvent.selectOptions(screen.getByLabelText('AI 문맥 범위'), 'none');
+    await userEvent.type(screen.getByLabelText('AI 메시지'), '일반 질문');
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
+    expect(fixture.api.generate).toHaveBeenCalledWith(expect.objectContaining({
+      contextScope: 'none',
+      currentPageId: undefined,
+      currentProjectId: undefined,
+    }));
+  });
+
+  it('passes the verified LiteRT runtime family into generation history', async () => {
+    const fixture = createApi();
+    vi.mocked(fixture.api.getStatus).mockResolvedValue({
+      ...readyStatus,
+      mtpConfigured: true,
+      mtpReachable: true,
+      runtimeCapabilities: {
+        family: 'lite_rt',
+        localOnly: true,
+        inProcess: true,
+        streaming: true,
+        openAiCompatible: false,
+        managedProcess: false,
+        targetModelVerified: true,
+        assistantModelVerified: false,
+        mtpVerified: false,
+        authEnforced: false,
+        authApplicable: false,
+        externalRequestSurface: false,
+      },
+    });
+    await startGeneration(fixture.api);
+    expect(fixture.api.generate).toHaveBeenCalledWith(expect.objectContaining({
+      runtimeFamily: 'lite_rt',
+      useServer: true,
+    }));
+  });
+
   it('enters generating state and sends only once for Enter', async () => {
     const fixture = createApi();
     renderWithProviders(<AiAssistantPanel api={fixture.api} />);
@@ -170,7 +235,7 @@ describe('AiAssistantPanel', () => {
     expect(await screen.findByText('선택 영역 다듬기')).toBeVisible();
     expect(proposalApi.create).toHaveBeenCalledTimes(1);
     await userEvent.click(screen.getByRole('button', { name: '변경 비교' }));
-    await userEvent.click(screen.getByRole('button', { name: '변경 적용' }));
+    await userEvent.click(await screen.findByRole('button', { name: '변경 적용' }));
     expect(onApplyProposal).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.getByText('적용됨')).toBeVisible());
   });

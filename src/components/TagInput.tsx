@@ -28,22 +28,15 @@ export const TagInput: React.FC<TagInputProps> = ({
 
   const handleAddTag = () => {
     let trimmedValue = inputValue.trim();
-    console.log('🏷️ TagInput - 태그 추가 시도');
-    console.log('  - 입력값:', inputValue);
-    console.log('  - trimmedValue:', trimmedValue);
 
     // # 기호 자동 제거 (일관성 유지)
     if (trimmedValue.startsWith('#')) {
       trimmedValue = trimmedValue.slice(1);
-      console.log('  - # 제거 후:', trimmedValue);
     }
 
     if (trimmedValue && !tags.includes(trimmedValue)) {
       const newTags = [...tags, trimmedValue];
-      console.log('  - 새 태그 배열:', newTags);
       onTagsChange(newTags);
-    } else {
-      console.log('  - 태그 추가 실패 (중복 또는 빈 값)');
     }
 
     setInputValue('');

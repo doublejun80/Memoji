@@ -70,6 +70,8 @@ export const normalizePage = (page: any, index: number = 0): Page => {
     tags: Array.isArray(page.tags) ? page.tags : [],
     order: page.order !== undefined ? page.order : page.page_order !== undefined ? page.page_order : index,
     revision: typeof page.revision === 'number' ? page.revision : 0,
+    status: typeof page.status === 'string' ? page.status : null,
+    dueDate: typeof page.dueDate === 'string' ? page.dueDate : null,
     bodyLoaded: page.bodyLoaded !== undefined ? Boolean(page.bodyLoaded) : true,
   };
 };

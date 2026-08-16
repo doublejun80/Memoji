@@ -13,6 +13,8 @@ export interface Page {
   tags: string[]; // 태그 배열 추가
   order: number; // 정렬 순서
   revision?: number; // SQLite optimistic concurrency revision
+  status?: string | null; // Markdown frontmatter/status:: derived metadata
+  dueDate?: string | null; // Markdown frontmatter/due:: derived metadata
   bodyLoaded?: boolean; // false when startup only loaded a body-free summary
 }
 

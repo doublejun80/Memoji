@@ -1,4 +1,4 @@
-import { CalendarClock, Circle, CircleCheck, Flag, FileText } from 'lucide-react';
+import { CalendarClock, Circle, CircleCheck, Flag, FileText, Play, UserRound } from 'lucide-react';
 import type { MarkdownTaskDto } from './taskTypes';
 
 interface TaskListProps {
@@ -6,6 +6,8 @@ interface TaskListProps {
   busyId?: string | null;
   onToggle: (task: MarkdownTaskDto) => void;
   onDueChange: (task: MarkdownTaskDto, dueDate: string | null) => void;
+  onStartChange: (task: MarkdownTaskDto, startDate: string | null) => void;
+  onAssigneeChange: (task: MarkdownTaskDto, assignee: string | null) => void;
   onPriorityChange: (task: MarkdownTaskDto, priority: number | null) => void;
   onOpenPage: (task: MarkdownTaskDto) => void;
 }
@@ -15,6 +17,8 @@ export function TaskList({
   busyId,
   onToggle,
   onDueChange,
+  onStartChange,
+  onAssigneeChange,
   onPriorityChange,
   onOpenPage,
 }: TaskListProps) {
@@ -37,7 +41,18 @@ export function TaskList({
               <FileText aria-hidden="true" /> {task.pageTitle} · L{task.line}
             </button>
           </div>
-          <label className="task-field">
+          <div className="task-row-fields">
+          <label className="task-field" title="시작일">
+            <Play aria-hidden="true" />
+            <span className="sr-only">{task.text} 시작일</span>
+            <input
+              type="date"
+              value={task.startDate ?? ''}
+              disabled={busyId === task.id}
+              onChange={(event) => onStartChange(task, event.target.value || null)}
+            />
+          </label>
+          <label className="task-field" title="마감일">
             <CalendarClock aria-hidden="true" />
             <span className="sr-only">{task.text} 마감일</span>
             <input
@@ -47,6 +62,18 @@ export function TaskList({
               onChange={(event) => onDueChange(task, event.target.value || null)}
             />
           </label>
+          <label className="task-field task-assignee-field" title="담당자">
+            <UserRound aria-hidden="true" />
+            <span className="sr-only">{task.text} 담당자</span>
+            <input
+              type="text"
+              defaultValue={task.assignee ?? ''}
+              disabled={busyId === task.id}
+              placeholder="담당자"
+              onBlur={(event) => onAssigneeChange(task, event.target.value.trim() || null)}
+            />
+          </label>
+          </div>
           <label className="task-field task-priority-field">
             <Flag aria-hidden="true" />
             <span className="sr-only">{task.text} 우선순위</span>

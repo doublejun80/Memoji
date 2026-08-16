@@ -7,6 +7,8 @@ interface WorkspaceCanvasProps {
   editor: ReactNode;
   tasks?: ReactNode;
   calendar?: ReactNode;
+  knowledge?: ReactNode;
+  search?: ReactNode;
 }
 
 const EMPTY_VIEWS = {
@@ -36,10 +38,12 @@ const EMPTY_VIEWS = {
   },
 } as const;
 
-export function WorkspaceCanvas({ view, editor, tasks, calendar }: WorkspaceCanvasProps) {
+export function WorkspaceCanvas({ view, editor, tasks, calendar, knowledge, search }: WorkspaceCanvasProps) {
   if (view === 'editor') return <>{editor}</>;
   if (view === 'tasks' && tasks) return <>{tasks}</>;
   if (view === 'calendar' && calendar) return <>{calendar}</>;
+  if (view === 'knowledge' && knowledge) return <>{knowledge}</>;
+  if (view === 'search' && search) return <>{search}</>;
   const empty = EMPTY_VIEWS[view];
   const Icon = empty.icon;
   return (

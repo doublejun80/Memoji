@@ -17,6 +17,22 @@ function fixture(): CalendarApi {
 }
 
 describe('CalendarWorkspace', () => {
+  it('uses mode-aware Korean period labels and navigation names', async () => {
+    renderWithProviders(<CalendarWorkspace pages={[page]} selectedDate={new Date(2026, 7, 16)} onDateSelect={vi.fn()} onPageOpen={vi.fn()} api={fixture()} />);
+
+    expect(screen.getByRole('heading', { name: '2026년 8월' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '월간' })).toHaveAttribute('data-active', 'true');
+    expect(screen.getByRole('button', { name: '이전 달' })).toBeVisible();
+
+    await userEvent.click(screen.getByRole('button', { name: '일간' }));
+    expect(screen.getByRole('heading', { name: '2026년 8월 16일 일요일' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '이전 날' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '다음 날' })).toBeVisible();
+
+    await userEvent.click(screen.getByRole('button', { name: '다음 날' }));
+    expect(screen.getByRole('heading', { name: '2026년 8월 17일 월요일' })).toBeVisible();
+  });
+
   it('shows projected task due items and opens their linked page', async () => {
     const api = fixture();
     const onPageOpen = vi.fn();

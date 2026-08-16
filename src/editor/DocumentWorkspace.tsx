@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useState, type SyntheticEvent } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type SyntheticEvent } from 'react';
 import { FileQuestion, FolderOpen } from 'lucide-react';
 import type { Page } from '../types';
 import { MilkdownEditor } from '../components/editor/MilkdownEditor';
@@ -12,6 +12,7 @@ import { hashTextAnchor } from '../features/ai/aiProposalReducer';
 export interface DocumentWorkspaceProps {
   currentPage: Page | null;
   onPageUpdate: (page: Page) => void | Promise<void>;
+  onOpenProperties?: () => void;
 }
 
 export interface DocumentWorkspaceHandle {
@@ -21,6 +22,7 @@ export interface DocumentWorkspaceHandle {
 export const DocumentWorkspace = forwardRef<DocumentWorkspaceHandle, DocumentWorkspaceProps>(({
   currentPage,
   onPageUpdate,
+  onOpenProperties,
 }, ref) => {
   const {
     content,
@@ -31,8 +33,32 @@ export const DocumentWorkspace = forwardRef<DocumentWorkspaceHandle, DocumentWor
     handleContentChange,
   } = useMarkdownPageEditor({ currentPage, onPageUpdate });
   const [selection, setSelection] = useState<EditorSelection | null>(null);
+  const sourceRef = useRef<HTMLTextAreaElement>(null);
 
   useImperativeHandle(ref, () => ({ flushUnsaved }), [flushUnsaved]);
+
+  useEffect(() => {
+    const navigate = (event: Event) => {
+      const heading = (event as CustomEvent<{ id: string; text: string; line: number }>).detail;
+      if (!heading || !currentPage || currentPage.type === 'folder') return;
+      if (mode === 'source' && sourceRef.current) {
+        const lines = content.split(/\r?\n/);
+        const lineIndex = Math.max(0, Math.min(lines.length - 1, heading.line - 1));
+        const start = lines.slice(0, lineIndex).reduce((offset, line) => offset + line.length + 1, 0);
+        const end = start + (lines[lineIndex]?.length ?? 0);
+        sourceRef.current.focus();
+        sourceRef.current.setSelectionRange(start, end);
+        sourceRef.current.scrollTop = Math.max(0, (lineIndex - 3) * 21);
+      } else {
+        const candidates = Array.from(document.querySelectorAll<HTMLElement>('.document-body h1, .document-body h2, .document-body h3, .document-body h4, .document-body h5, .document-body h6'));
+        const target = candidates.find((candidate) => candidate.textContent?.trim() === heading.text);
+        target?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+      }
+      window.dispatchEvent(new CustomEvent('memoji:outline-active', { detail: heading }));
+    };
+    window.addEventListener('memoji:outline-navigate', navigate);
+    return () => window.removeEventListener('memoji:outline-navigate', navigate);
+  }, [content, currentPage, mode]);
 
   if (!currentPage) {
     return (
@@ -84,7 +110,7 @@ export const DocumentWorkspace = forwardRef<DocumentWorkspaceHandle, DocumentWor
           setMode(nextMode);
         }}
       />
-      <MetadataStrip page={currentPage} />
+      <MetadataStrip page={currentPage} onOpenProperties={onOpenProperties} />
       <div className="document-body">
         {mode === 'wysiwyg' ? (
           <MilkdownEditor
@@ -95,6 +121,7 @@ export const DocumentWorkspace = forwardRef<DocumentWorkspaceHandle, DocumentWor
           />
         ) : (
           <textarea
+            ref={sourceRef}
             value={content}
             onChange={(event) => handleContentChange(event.target.value)}
             onSelect={updateSourceSelection}

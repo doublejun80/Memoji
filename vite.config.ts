@@ -8,6 +8,14 @@ const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Milkdown ships Vue's esm-bundler runtime for a few deferred UI features.
+  // Define its compile-time flags explicitly so development and production
+  // use the same lean runtime without noisy console warnings.
+  define: {
+    __VUE_OPTIONS_API__: false,
+    __VUE_PROD_DEVTOOLS__: false,
+    __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: false,
+  },
   // prevent vite from obscuring rust errors
   clearScreen: false,
   resolve: {

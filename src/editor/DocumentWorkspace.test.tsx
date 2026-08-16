@@ -1,6 +1,6 @@
 import { createRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, renderWithProviders, screen, userEvent } from '../test/render';
+import { act, fireEvent, renderWithProviders, screen, userEvent } from '../test/render';
 import type { Page } from '../types';
 import { DocumentWorkspace, type DocumentWorkspaceHandle } from './DocumentWorkspace';
 
@@ -29,6 +29,9 @@ const page: Page = {
   type: 'page',
   tags: ['GA', '출시'],
   order: 0,
+  revision: 7,
+  status: 'active',
+  dueDate: '2026-08-31',
 };
 
 describe('DocumentWorkspace', () => {
@@ -38,6 +41,9 @@ describe('DocumentWorkspace', () => {
     expect(screen.getByLabelText('문서 경로')).toHaveTextContent('프로젝트/GA 출시 계획');
     expect(screen.getByRole('heading', { name: 'GA 출시 계획' })).toBeVisible();
     expect(screen.getByText('저장됨')).toBeVisible();
+    expect(screen.getByText('r7')).toBeVisible();
+    expect(screen.getByText('active')).toBeVisible();
+    expect(screen.getByText('마감 2026-08-31')).toBeVisible();
     expect(screen.getByRole('button', { name: '편집' })).toBeVisible();
     expect(screen.getByRole('button', { name: '원문' })).toBeVisible();
     expect(screen.getByText('문서')).toBeVisible();
@@ -48,6 +54,16 @@ describe('DocumentWorkspace', () => {
     expect(screen.queryByRole('toolbar', { name: '선택 영역 AI 도구' })).not.toBeInTheDocument();
   });
 
+  it('opens the editable properties inspector from the metadata strip', async () => {
+    const onOpenProperties = vi.fn();
+    renderWithProviders(
+      <DocumentWorkspace currentPage={page} onPageUpdate={vi.fn()} onOpenProperties={onOpenProperties} />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: '속성 추가 및 편집' }));
+    expect(onOpenProperties).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps source selection explicit and exposes the save flush handle', async () => {
     const ref = createRef<DocumentWorkspaceHandle>();
     renderWithProviders(<DocumentWorkspace ref={ref} currentPage={page} onPageUpdate={vi.fn()} />);
@@ -56,6 +72,21 @@ describe('DocumentWorkspace', () => {
     source.setSelectionRange(2, 4);
     fireEvent.select(source);
     expect(await screen.findByRole('toolbar', { name: '선택 영역 AI 도구' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '번역' })).toBeVisible();
     await expect(ref.current?.flushUnsaved()).resolves.toBeUndefined();
+  });
+
+  it('moves the source editor to an outline heading and reports the active heading', async () => {
+    renderWithProviders(<DocumentWorkspace currentPage={page} onPageUpdate={vi.fn()} />);
+    await userEvent.click(screen.getByRole('button', { name: '원문' }));
+    const source = screen.getByRole('textbox', { name: 'Markdown 원문' }) as HTMLTextAreaElement;
+    const active = vi.fn();
+    window.addEventListener('memoji:outline-active', active, { once: true });
+    act(() => window.dispatchEvent(new CustomEvent('memoji:outline-navigate', {
+      detail: { id: '목표', level: 1, text: '목표', line: 1 },
+    })));
+    expect(source.selectionStart).toBe(0);
+    expect(source.selectionEnd).toBe('# 목표'.length);
+    expect(active).toHaveBeenCalled();
   });
 });

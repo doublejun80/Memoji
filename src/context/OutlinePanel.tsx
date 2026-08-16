@@ -37,6 +37,7 @@ export function parseOutline(markdown: string): OutlineHeading[] {
 
 export function OutlinePanel({ page }: { page: Page | null }) {
   const [indexedHeadings, setIndexedHeadings] = useState<OutlineHeading[] | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
   useEffect(() => {
     setIndexedHeadings(null);
     if (!page || !(window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) return;
@@ -51,6 +52,15 @@ export function OutlinePanel({ page }: { page: Page | null }) {
     }).catch(() => undefined);
     return () => { disposed = true; };
   }, [page]);
+  useEffect(() => {
+    setActiveId(null);
+    const activate = (event: Event) => {
+      const heading = (event as CustomEvent<OutlineHeading>).detail;
+      if (heading?.id) setActiveId(heading.id);
+    };
+    window.addEventListener('memoji:outline-active', activate);
+    return () => window.removeEventListener('memoji:outline-active', activate);
+  }, [page?.id]);
   const headings = indexedHeadings ?? parseOutline(page?.content ?? '');
   if (!page) return <div className="context-empty" role="status">선택한 문서가 없습니다.</div>;
   if (headings.length === 0) return <div className="context-empty" role="status">이 문서에는 제목이 없습니다.</div>;
@@ -62,8 +72,12 @@ export function OutlinePanel({ page }: { page: Page | null }) {
           type="button"
           key={`${heading.id}-${heading.line}`}
           data-heading-id={heading.id}
+          data-active={activeId === heading.id ? 'true' : 'false'}
           style={{ paddingLeft: `${10 + (heading.level - 1) * 12}px` }}
-          onClick={() => window.dispatchEvent(new CustomEvent('memoji:outline-navigate', { detail: heading }))}
+          onClick={() => {
+            setActiveId(heading.id);
+            window.dispatchEvent(new CustomEvent('memoji:outline-navigate', { detail: heading }));
+          }}
         >
           <span className="outline-level" aria-hidden="true">H{heading.level}</span>
           <span>{heading.text}</span>

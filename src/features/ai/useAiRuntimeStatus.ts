@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AiApi } from '../../shared/api/aiApi';
 import {
   configFromLocalAiRuntimePreset,
+  findLocalAiModelPreset,
   LOCAL_AI_SETTINGS_CHANGED_EVENT,
   type LocalAiRuntimeKind,
   type LocalAiStatus,
@@ -63,6 +64,27 @@ export function useAiRuntimeStatus(api: AiApi, isGenerating: boolean) {
     }
   }, [api, isSavingRuntime, refreshStatus]);
 
+  const changeModel = useCallback(async (model: string) => {
+    if (generatingRef.current || loadingRef.current || isSavingRuntime) return;
+    const preset = findLocalAiModelPreset(model);
+    setIsSavingRuntime(true);
+    setStatusError(null);
+    try {
+      await api.saveRuntimeConfig({
+        ...configFromLocalAiRuntimePreset('litert_lm'),
+        model: preset.id,
+      });
+      didAutoLoadRef.current = false;
+      window.dispatchEvent(new CustomEvent(LOCAL_AI_SETTINGS_CHANGED_EVENT));
+      await refreshStatus();
+    } catch (error) {
+      setStatusError(`모델 선택 저장 실패: ${String(error)}`);
+      await refreshStatus();
+    } finally {
+      setIsSavingRuntime(false);
+    }
+  }, [api, isSavingRuntime, refreshStatus]);
+
   useEffect(() => {
     void refreshStatus();
     const interval = window.setInterval(() => {
@@ -103,5 +125,6 @@ export function useAiRuntimeStatus(api: AiApi, isGenerating: boolean) {
     refreshStatus,
     loadModel,
     changeRuntime,
+    changeModel,
   };
 }

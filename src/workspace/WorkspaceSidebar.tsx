@@ -4,7 +4,6 @@ import {
   FolderTree,
   Network,
   NotebookTabs,
-  PanelLeftClose,
   SunMedium,
 } from 'lucide-react';
 import type { SidebarProps } from '../components/Sidebar';
@@ -45,9 +44,6 @@ export function WorkspaceSidebar({
     <aside className="workspace-sidebar" aria-label="Workspace navigation">
       <div className="workspace-sidebar-topline">
         <span>작업 공간</span>
-        <button type="button" aria-label="왼쪽 패널 닫기" onClick={onClose}>
-          <PanelLeftClose aria-hidden="true" />
-        </button>
       </div>
       <nav className="workspace-sidebar-switcher" aria-label="작업 공간 보기">
         {VIEW_ITEMS.map(({ id, label, icon: Icon, shortcut }) => (

@@ -1,12 +1,15 @@
 import { Page } from '../types';
 import { normalizePage } from './pageModel';
 import { tauriPageApi, type PageBodyDto, type PageSummaryDto } from '../shared/api/pageApi';
+import { TAURI_COMMANDS } from '../shared/api/tauriCommands';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 
 export interface DatabaseImportSummary {
   imported: number;
   duplicated: number;
   skipped: number;
+  revisions_imported: number;
+  source_schema_version: number | null;
   backup_path: string;
   backup_sha256: string;
   backup_bytes: number;
@@ -62,7 +65,7 @@ class TauriStorage {
     
     if (this.isTauriAvailable && invoke) {
       try {
-        await invoke('init_database');
+        await invoke(TAURI_COMMANDS.initDatabase);
         this.isInitialized = true;
         await this.migrateLocalStoragePagesToTauri();
       } catch (error) {
@@ -101,7 +104,7 @@ class TauriStorage {
           summaries = await tauriPageApi.listSummaries();
         } catch (error) {
           if (!this.isUnknownCommand(error)) throw error;
-          const legacyPages = await invoke('get_pages') as any[];
+          const legacyPages = await invoke(TAURI_COMMANDS.getPagesLegacy) as any[];
           return this.migratePages(legacyPages.map((page) => ({
             ...page,
             content: page.content,
@@ -163,7 +166,7 @@ class TauriStorage {
           return result.body.revision;
         } catch (error) {
           if (!this.isUnknownCommand(error)) throw error;
-          await invoke('save_page', { page: this.toTauriPage(page) });
+          await invoke(TAURI_COMMANDS.savePageLegacy, { page: this.toTauriPage(page) });
           return baseRevision;
         }
       } catch (error) {
@@ -203,7 +206,7 @@ class TauriStorage {
         if (!this.isUnknownCommand(error)) {
           throw this.makeDesktopStorageError('페이지 본문 로드', error);
         }
-        const legacyPages = await invoke('get_pages') as any[];
+        const legacyPages = await invoke(TAURI_COMMANDS.getPagesLegacy) as any[];
         const page = legacyPages.find((candidate) => candidate.id === pageId);
         if (!page) throw new Error(`페이지를 찾을 수 없습니다: ${pageId}`);
         return { pageId, bodyMarkdown: page.content || '', revision: 0 };
@@ -284,7 +287,7 @@ class TauriStorage {
       return;
     }
 
-    const existingPages = await invoke('get_pages') as any[];
+    const existingPages = await invoke(TAURI_COMMANDS.getPagesLegacy) as any[];
     const existingIds = new Set(
       (Array.isArray(existingPages) ? existingPages : [])
         .map((page) => String(page?.id ?? ''))
@@ -320,7 +323,7 @@ class TauriStorage {
           await tauriPageApi.trash(pageId);
         } catch (error) {
           if (!this.isUnknownCommand(error)) throw error;
-          await invoke('delete_page', { pageId });
+          await invoke(TAURI_COMMANDS.deletePageLegacy, { pageId });
         }
         this.bodyCache.delete(pageId);
         this.revisionCache.delete(pageId);
@@ -378,7 +381,7 @@ class TauriStorage {
   async getAppDataDir(): Promise<string | null> {
     if (this.isInitialized && this.isTauriAvailable && invoke) {
       try {
-        return await invoke('get_app_data_dir') as string;
+        return await invoke(TAURI_COMMANDS.getAppDataDir) as string;
       } catch (error) {
         console.error('Failed to get app data dir:', error);
       }
@@ -391,7 +394,7 @@ class TauriStorage {
 
     if (this.isInitialized && this.isTauriAvailable && invoke) {
       try {
-        return await invoke('get_app_title') as string;
+        return await invoke(TAURI_COMMANDS.getAppTitle) as string;
       } catch (error) {
         console.error('Failed to get app title from Tauri:', error);
         throw this.makeDesktopStorageError('앱 제목 로드', error);
@@ -409,7 +412,7 @@ class TauriStorage {
 
     if (this.isInitialized && this.isTauriAvailable && invoke) {
       try {
-        await invoke('save_app_title', { title });
+        await invoke(TAURI_COMMANDS.saveAppTitle, { title });
         return;
       } catch (error) {
         console.error('Failed to save app title to Tauri:', error);
@@ -434,7 +437,7 @@ class TauriStorage {
     if (!normalizedPath.toLowerCase().endsWith('.db')) {
       throw new Error('memoji.db 파일을 선택해주세요.');
     }
-    return await invoke('import_memoji_database', { dbPath: normalizedPath }) as DatabaseImportSummary;
+    return await invoke(TAURI_COMMANDS.importMemojiDatabase, { dbPath: normalizedPath }) as DatabaseImportSummary;
   }
 
   async exportPagesZip(): Promise<PagesZipExportSummary> {
@@ -444,7 +447,7 @@ class TauriStorage {
       throw new Error('전체 페이지 ZIP 내보내기는 데스크톱 앱에서만 사용할 수 있습니다.');
     }
 
-    return await invoke('export_pages_zip') as PagesZipExportSummary;
+    return await invoke(TAURI_COMMANDS.exportPagesZip) as PagesZipExportSummary;
   }
 }
 

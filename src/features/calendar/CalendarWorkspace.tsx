@@ -30,6 +30,26 @@ function visibleRange(date: Date, mode: CalendarMode) {
   return { startDate: dateKey(addDays(first, -first.getDay())), endDate: dateKey(addDays(last, 6 - last.getDay())) };
 }
 
+const DAY_NAMES = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
+
+function periodTitle(date: Date, mode: CalendarMode) {
+  if (mode === 'day') {
+    return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일 ${DAY_NAMES[date.getDay()]}`;
+  }
+  if (mode === 'week') {
+    const start = addDays(date, -date.getDay());
+    const end = addDays(start, 6);
+    const endLabel = start.getFullYear() === end.getFullYear()
+      ? `${end.getMonth() + 1}월 ${end.getDate()}일`
+      : `${end.getFullYear()}년 ${end.getMonth() + 1}월 ${end.getDate()}일`;
+    return `${start.getFullYear()}년 ${start.getMonth() + 1}월 ${start.getDate()}일 – ${endLabel}`;
+  }
+  return `${date.getFullYear()}년 ${date.getMonth() + 1}월`;
+}
+
+const MODE_LABELS: Record<CalendarMode, string> = { month: '월간', week: '주간', day: '일간' };
+const PERIOD_LABELS: Record<CalendarMode, string> = { month: '달', week: '주', day: '날' };
+
 function projectedLocalTasks(pages: Page[], range: { startDate: string; endDate: string }): CalendarItemDto[] {
   return pages.flatMap((page) => page.content.split(/\r?\n/).flatMap((line, index) => {
     const match = line.match(/^\s*[-*+]\s+\[([ xX])\]\s+(.+?)\s+@due\((\d{4}-\d{2}-\d{2})\)(?:\s+!p([1-3]))?/);
@@ -125,14 +145,14 @@ export function CalendarWorkspace({ pages, selectedDate, onDateSelect, onPageOpe
   return (
     <section className="calendar-workspace" aria-label="캘린더 공간">
       <header className="calendar-workspace-header">
-        <div className="calendar-title"><span>OFFLINE CALENDAR</span><h2>{cursor.getFullYear()}년 {cursor.getMonth() + 1}월</h2></div>
+        <div className="calendar-title"><span>OFFLINE CALENDAR</span><h2>{periodTitle(cursor, mode)}</h2></div>
         <div className="calendar-navigation">
-          <button type="button" aria-label="이전 기간" onClick={() => move(-1)}><ChevronLeft aria-hidden="true" /></button>
+          <button type="button" aria-label={`이전 ${PERIOD_LABELS[mode]}`} onClick={() => move(-1)}><ChevronLeft aria-hidden="true" /></button>
           <button type="button" onClick={() => selectDate(new Date())}>오늘</button>
-          <button type="button" aria-label="다음 기간" onClick={() => move(1)}><ChevronRight aria-hidden="true" /></button>
+          <button type="button" aria-label={`다음 ${PERIOD_LABELS[mode]}`} onClick={() => move(1)}><ChevronRight aria-hidden="true" /></button>
         </div>
         <div className="calendar-mode" aria-label="캘린더 보기">
-          {(['month', 'week', 'day'] as const).map((value) => <button type="button" data-active={mode === value ? 'true' : 'false'} key={value} onClick={() => setMode(value)}>{value === 'month' ? '월' : value === 'week' ? '주' : '일'}</button>)}
+          {(['month', 'week', 'day'] as const).map((value) => <button type="button" data-active={mode === value ? 'true' : 'false'} key={value} onClick={() => setMode(value)}>{MODE_LABELS[value]}</button>)}
         </div>
         <button type="button" className="calendar-add" onClick={() => setFormOpen(true)}><Plus aria-hidden="true" />새 일정</button>
       </header>

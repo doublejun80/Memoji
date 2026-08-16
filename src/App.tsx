@@ -39,6 +39,12 @@ const TasksWorkspace = lazy(() => import('./features/tasks/TasksWorkspace').then
 const CalendarWorkspace = lazy(() => import('./features/calendar/CalendarWorkspace').then((module) => ({
   default: module.CalendarWorkspace,
 })));
+const KnowledgeWorkspace = lazy(() => import('./workspace/KnowledgeWorkspace').then((module) => ({
+  default: module.KnowledgeWorkspace,
+})));
+const SearchWorkspace = lazy(() => import('./workspace/SearchWorkspace').then((module) => ({
+  default: module.SearchWorkspace,
+})));
 const SettingsModal = lazy(() => import('./components/SettingsModal').then((module) => ({
   default: module.SettingsModal,
 })));
@@ -324,12 +330,12 @@ function AppContent() {
     const pageSnapshot = currentPage;
     void tauriStorage.getPageBody(currentPage.id).then((body) => {
       if (disposed) return;
-      const hydratedPage = normalizePage({
+      const hydratedPage = pageWithMarkdownMetadata(normalizePage({
         ...pageSnapshot,
         content: body.bodyMarkdown,
         revision: body.revision,
         bodyLoaded: true,
-      });
+      }), body.bodyMarkdown);
       const updatedPages = pagesRef.current.map((page) => (
         page.id === hydratedPage.id ? hydratedPage : page
       ));
@@ -859,6 +865,10 @@ function AppContent() {
                     pages={pages}
                     onPageSelect={handlePageSelect}
                     onPageCreate={handlePageCreate}
+                    onOpenProperties={() => {
+                      setContextTab('properties');
+                      setPanelOpen('right', true);
+                    }}
                   />
                 </Suspense>
               )}
@@ -882,6 +892,27 @@ function AppContent() {
                   />
                 </Suspense>
               )}
+              knowledge={(
+                <Suspense fallback={<WorkspaceLoading label="지식" />}>
+                  <KnowledgeWorkspace
+                    pages={pages}
+                    onPageSelect={handlePageSelect}
+                    onRestored={reloadPagesFromStorage}
+                  />
+                </Suspense>
+              )}
+              search={(
+                <Suspense fallback={<WorkspaceLoading label="검색" />}>
+                  <SearchWorkspace
+                    onPageOpen={(pageId) => {
+                      const page = pages.find((candidate) => candidate.id === pageId);
+                      if (!page) return;
+                      setWorkspaceView('editor');
+                      void handlePageSelect(page, 'global');
+                    }}
+                  />
+                </Suspense>
+              )}
             />
           )}
           right={(
@@ -900,6 +931,7 @@ function AppContent() {
               onOpenSource={handleOpenAiSource}
               activeTab={workspaceUi.contextTab}
               onTabChange={setContextTab}
+              onPageUpdate={handlePageUpdate}
             />
           )}
           leftOpen={workspaceUi.leftOpen}
@@ -919,14 +951,18 @@ function AppContent() {
         onOpenChange={setCommandPaletteOpen}
         commands={APP_COMMANDS}
         context={commandContextRef.current}
-        pages={pages
-          .filter((page) => page.type === 'page')
-          .map((page) => ({
+        pages={pages.map((page) => ({
             id: page.id,
             title: page.title,
             excerpt: page.content.replace(/\s+/g, ' ').trim().slice(0, 120),
             tags: page.tags,
             updatedAt: page.updatedAt,
+            pageType: page.type,
+            projectIndex: page.projectIndex,
+            projectId: page.projectParentId,
+            projectTitle: pages.find((candidate) => candidate.id === page.projectParentId)?.title,
+            dueDate: page.dueDate,
+            status: page.status,
           }))}
         tasks={[]}
         recentPageIds={currentPage ? [currentPage.id] : undefined}

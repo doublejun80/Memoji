@@ -11,6 +11,8 @@ const task: MarkdownTaskDto = {
   text: '배포 확인',
   completed: false,
   dueDate: null,
+  startDate: '2026-08-17',
+  assignee: '홍길동',
   priority: 1,
   line: 3,
   sourceStart: 10,
@@ -46,5 +48,20 @@ describe('TasksWorkspace', () => {
     renderWithProviders(<TasksWorkspace pages={[page]} onPageSelect={vi.fn()} api={api} today="2026-08-16" />);
     await userEvent.selectOptions(screen.getByLabelText('필터'), 'completed');
     await waitFor(() => expect(api.list).toHaveBeenLastCalledWith(expect.objectContaining({ filter: 'completed' })));
+  });
+
+  it('shows and updates task start date and assignee annotations', async () => {
+    const api: TaskApi = {
+      list: vi.fn().mockResolvedValue([task]),
+      update: vi.fn().mockResolvedValue(task),
+    };
+    renderWithProviders(<TasksWorkspace pages={[page]} onPageSelect={vi.fn()} api={api} today="2026-08-16" />);
+    const start = await screen.findByLabelText('배포 확인 시작일');
+    expect(start).toHaveValue('2026-08-17');
+    expect(screen.getByLabelText('배포 확인 담당자')).toHaveValue('홍길동');
+    await userEvent.clear(screen.getByLabelText('배포 확인 담당자'));
+    await userEvent.type(screen.getByLabelText('배포 확인 담당자'), '김코덱스');
+    await userEvent.tab();
+    await waitFor(() => expect(api.update).toHaveBeenCalledWith(expect.objectContaining({ assignee: '김코덱스' })));
   });
 });

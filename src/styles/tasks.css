@@ -129,7 +129,7 @@
 .task-row {
   display: grid;
   min-height: 58px;
-  grid-template-columns: 28px minmax(180px, 1fr) minmax(132px, auto) 72px;
+  grid-template-columns: 28px minmax(160px, 1fr) minmax(240px, auto) 72px;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
@@ -206,8 +206,19 @@
   color: var(--memoji-text-tertiary);
 }
 
+.task-row-fields {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px 8px;
+}
+
 .task-field input {
   width: 112px;
+}
+
+.task-assignee-field input {
+  width: 96px;
 }
 
 .task-priority-field select {
@@ -307,7 +318,8 @@
     grid-template-columns: 28px minmax(0, 1fr) 58px;
   }
 
-  .task-field:not(.task-priority-field) {
+  .task-row-fields {
     grid-column: 2 / -1;
+    justify-content: flex-start;
   }
 }

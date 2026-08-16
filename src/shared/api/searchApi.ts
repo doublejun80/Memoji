@@ -1,9 +1,18 @@
+import { invoke } from '@tauri-apps/api/core';
+import { TAURI_COMMANDS } from './tauriCommands';
+
 export interface SearchPageSummary {
   id: string;
   title: string;
   excerpt: string;
   tags: string[];
   updatedAt: string;
+  pageType?: 'page' | 'folder';
+  projectIndex?: boolean;
+  projectId?: string | null;
+  projectTitle?: string | null;
+  dueDate?: string | null;
+  status?: string | null;
 }
 
 export interface SearchTaskSummary {
@@ -12,6 +21,11 @@ export interface SearchTaskSummary {
   status: 'open' | 'done' | 'cancelled';
   pageId: string;
   tags: string[];
+  projectId?: string | null;
+  projectTitle?: string | null;
+  dueDate?: string | null;
+  startDate?: string | null;
+  assignee?: string | null;
 }
 
 export interface WorkspaceSearchSnapshot {
@@ -59,14 +73,16 @@ export interface IndexedSearchApi {
   search(query: string, filters?: SearchFilters, limit?: number): Promise<IndexedSearchResult[]>;
   getPageAnchors(pageId: string): Promise<IndexedAnchor[]>;
   getPageLinks(pageId: string): Promise<IndexedPageLink[]>;
+  reindex?(): Promise<{ pagesIndexed: number; elapsedMs: number }>;
 }
 
 export const tauriIndexedSearchApi: IndexedSearchApi = {
-  search: (query, filters = {}, limit = 30) => invoke('search_workspace', {
+  search: (query, filters = {}, limit = 30) => invoke(TAURI_COMMANDS.searchWorkspace, {
     request: { query, filters, limit },
   }),
-  getPageAnchors: (pageId) => invoke('get_page_anchors', { pageId }),
-  getPageLinks: (pageId) => invoke('get_page_links', { pageId }),
+  getPageAnchors: (pageId) => invoke(TAURI_COMMANDS.getPageAnchors, { pageId }),
+  getPageLinks: (pageId) => invoke(TAURI_COMMANDS.getPageLinks, { pageId }),
+  reindex: () => invoke(TAURI_COMMANDS.reindexWorkspace),
 };
 
 /**
@@ -82,4 +98,3 @@ export function createInMemorySearchApi(
     },
   };
 }
-import { invoke } from '@tauri-apps/api/core';

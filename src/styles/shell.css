@@ -27,6 +27,17 @@
   letter-spacing: var(--memoji-tracking-ui);
 }
 
+.memoji-command-bar-drag-surface {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+}
+
+.memoji-command-bar > :not(.memoji-command-bar-drag-surface) {
+  position: relative;
+  z-index: 1;
+}
+
 .memoji-command-bar-leading,
 .memoji-command-bar-trailing,
 .memoji-window-controls {

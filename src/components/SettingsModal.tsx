@@ -11,6 +11,7 @@ import {
   FolderOpen,
   Gauge,
   Loader2,
+  LifeBuoy,
   PenLine,
   Settings,
   Upload,
@@ -18,6 +19,7 @@ import {
 import { toast } from 'sonner';
 import {
   configFromLocalAiRuntimePreset,
+  findLocalAiModelPreset,
   findLocalAiRuntimePreset,
   formatLocalAiBytes,
   formatLocalAiSpeed,
@@ -25,6 +27,7 @@ import {
   LOCAL_AI_MAX_NEW_TOKENS_MAX,
   LOCAL_AI_MAX_NEW_TOKENS_MIN,
   LOCAL_AI_MAX_NEW_TOKENS_STEP,
+  LOCAL_AI_MODEL_PRESETS,
   LOCAL_AI_RUNTIME_PRESETS,
   LOCAL_AI_SETTINGS_CHANGED_EVENT,
   localAiModelLabel,
@@ -49,6 +52,7 @@ import {
   writeEditorPreferences,
 } from '../utils/editorPreferences';
 import { tauriStorage } from '../utils/tauriStorage';
+import { TAURI_COMMANDS } from '../shared/api/tauriCommands';
 import { Button } from './ui/button';
 import {
   Dialog,
@@ -66,6 +70,13 @@ interface SettingsModalProps {
   appTitle: string;
   onAppTitleChange: (newTitle: string) => void | Promise<void>;
   onDataImported?: () => void | Promise<void>;
+}
+
+interface DataPathStatus {
+  databasePath: string;
+  source: 'policy_env' | 'portable' | 'os_local_fallback';
+  writable: boolean;
+  persistenceWarning?: string | null;
 }
 
 type SettingsSectionId = 'general' | 'editor' | 'local-ai' | 'data';
@@ -94,6 +105,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [title, setTitle] = useState(appTitle);
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [dataPath, setDataPath] = useState('');
+  const [dataPathStatus, setDataPathStatus] = useState<DataPathStatus | null>(null);
   const [aiStatus, setAiStatus] = useState<LocalAiStatus | null>(null);
   const [isLoadingModel, setIsLoadingModel] = useState(false);
   const [isBenchmarkingAi, setIsBenchmarkingAi] = useState(false);
@@ -106,6 +118,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [aiBenchmark, setAiBenchmark] = useState<LocalAiBenchmarkResult | null>(null);
   const [isImportingDatabase, setIsImportingDatabase] = useState(false);
   const [isExportingPages, setIsExportingPages] = useState(false);
+  const [isExportingDiagnostics, setIsExportingDiagnostics] = useState(false);
   const [maxNewTokens, setMaxNewTokens] = useState(readLocalAiMaxNewTokens);
   const [editorPreferences, setEditorPreferences] = useState(readEditorPreferences);
   const [aiAdvancedOpen, setAiAdvancedOpen] = useState(false);
@@ -117,15 +130,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const loadDataPath = useCallback(async () => {
     try {
-      setDataPath(await invoke<string>('get_data_path'));
+      const status = await invoke<DataPathStatus>(TAURI_COMMANDS.getDataPathStatus);
+      setDataPathStatus(status);
+      setDataPath(status.databasePath);
     } catch {
+      setDataPathStatus(null);
       setDataPath('브라우저 모드');
     }
   }, []);
 
   const loadAiStatus = useCallback(async () => {
     try {
-      setAiStatus(await invoke<LocalAiStatus>('local_ai_status'));
+      setAiStatus(await invoke<LocalAiStatus>(TAURI_COMMANDS.localAiStatus));
     } catch (error) {
       setAiStatus(null);
       toast.error('AI 상태 확인 실패: ' + String(error));
@@ -134,7 +150,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const loadRuntimeConfig = useCallback(async () => {
     try {
-      setRuntimeConfig(await invoke<LocalAiRuntimeConfigView>('local_ai_get_runtime_config'));
+      setRuntimeConfig(await invoke<LocalAiRuntimeConfigView>(TAURI_COMMANDS.localAiGetRuntimeConfig));
       setRuntimeTestResult(null);
     } catch (error) {
       setRuntimeConfig(null);
@@ -145,7 +161,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const loadManagedRuntime = useCallback(async () => {
     try {
       setManagedRuntime(
-        await invoke<LocalAiManagedRuntimeStatus>('local_ai_managed_runtime_status')
+        await invoke<LocalAiManagedRuntimeStatus>(TAURI_COMMANDS.localAiManagedRuntimeStatus)
       );
     } catch {
       setManagedRuntime(null);
@@ -195,7 +211,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (isLoadingModel || isBenchmarkingAi) return;
     setIsLoadingModel(true);
     try {
-      const status = await invoke<LocalAiStatus>('local_ai_load');
+      const status = await invoke<LocalAiStatus>(TAURI_COMMANDS.localAiLoad);
       setAiStatus(status);
       toast[status.state === 'loaded' ? 'success' : 'info'](localAiStateLabel(status.state));
     } catch (error) {
@@ -210,7 +226,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (isBenchmarkingAi || isLoadingModel) return;
     setIsBenchmarkingAi(true);
     try {
-      const result = await invoke<LocalAiBenchmarkResult>('local_ai_benchmark');
+      const result = await invoke<LocalAiBenchmarkResult>(TAURI_COMMANDS.localAiBenchmark);
       setAiBenchmark(result);
       setAiStatus(result.status);
       toast.success(`AI 진단 완료: ${formatLocalAiSpeed(result.tokensPerSecond)}`);
@@ -245,7 +261,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (!runtimeConfig) return;
     setIsSavingRuntimeConfig(true);
     try {
-      const saved = await invoke<LocalAiRuntimeConfigView>('local_ai_save_runtime_config', {
+      const saved = await invoke<LocalAiRuntimeConfigView>(TAURI_COMMANDS.localAiSaveRuntimeConfig, {
         config: {
           serverEnabled: runtimeConfig.serverEnabled,
           endpoint: runtimeConfig.endpoint,
@@ -269,7 +285,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (!runtimeConfig) return;
     setIsTestingRuntimeConfig(true);
     try {
-      const result = await invoke<LocalAiRuntimeTestResult>('local_ai_test_runtime_config', {
+      const result = await invoke<LocalAiRuntimeTestResult>(TAURI_COMMANDS.localAiTestRuntimeConfig, {
         config: {
           serverEnabled: runtimeConfig.serverEnabled,
           endpoint: runtimeConfig.endpoint,
@@ -299,16 +315,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (isStartingManagedRuntime) return;
     setIsStartingManagedRuntime(true);
     try {
-      const status = await invoke<LocalAiManagedRuntimeStatus>('local_ai_start_managed_runtime');
+      const status = await invoke<LocalAiManagedRuntimeStatus>(TAURI_COMMANDS.localAiStartManagedRuntime);
       setManagedRuntime(status);
       await loadAiStatus();
       if (status.endpointReachable) {
-        toast.success('VDI 내장 Gemma 서버를 시작했습니다.');
+        toast.success('VDI 내장 Gemma 엔진을 시작했습니다.');
       } else {
-        toast.info('Gemma 서버를 시작하는 중입니다. 잠시 후 다시 확인해주세요.');
+        toast.info('Gemma 엔진을 시작하는 중입니다. 잠시 후 다시 확인해주세요.');
       }
     } catch (error) {
-      toast.error('내장 Gemma 서버 시작 실패: ' + String(error).slice(0, 180));
+      toast.error('내장 Gemma 엔진 시작 실패: ' + String(error).slice(0, 180));
       await loadManagedRuntime();
     } finally {
       setIsStartingManagedRuntime(false);
@@ -325,7 +341,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const openDataFolder = async () => {
     try {
-      await invoke('open_data_folder');
+      await invoke(TAURI_COMMANDS.openDataFolder);
     } catch (error) {
       toast.error('폴더 열기 실패: ' + String(error));
     }
@@ -355,8 +371,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const summary = await tauriStorage.importDatabasePath(selectedPath);
       await onDataImported?.();
       const addedCount = summary.imported + summary.duplicated;
-      toast.success(`DB 가져오기 완료: ${addedCount}개 추가, ${summary.skipped}개 중복 건너뜀`, {
-        description: `자동 백업: ${summary.backup_path} · ${summary.backup_bytes.toLocaleString('ko-KR')} bytes · SHA-256 ${summary.backup_sha256.slice(0, 12)}…`,
+      toast.success(`DB 가져오기 완료: ${addedCount}개 추가, 이력 ${summary.revisions_imported}개 보존, ${summary.skipped}개 중복 건너뜀`, {
+        description: `원본 스키마 v${summary.source_schema_version ?? 'legacy'} · 자동 백업: ${summary.backup_path} · ${summary.backup_bytes.toLocaleString('ko-KR')} bytes · SHA-256 ${summary.backup_sha256.slice(0, 12)}…`,
       });
     } catch (error) {
       toast.error('DB 가져오기 실패: ' + String(error));
@@ -376,6 +392,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       toast.error('전체 페이지 ZIP 내보내기 실패: ' + String(error));
     } finally {
       setIsExportingPages(false);
+    }
+  };
+
+  const exportDiagnostics = async () => {
+    setIsExportingDiagnostics(true);
+    try {
+      const result = await invoke<{ zipPath: string; sha256: string; bytes: number }>(TAURI_COMMANDS.exportDiagnosticZip);
+      toast.success('VDI 진단 ZIP을 만들었습니다.', {
+        description: `${result.zipPath} · ${result.bytes.toLocaleString('ko-KR')} bytes · SHA-256 ${result.sha256.slice(0, 12)}…`,
+      });
+    } catch (error) {
+      toast.error('VDI 진단 ZIP 생성 실패: ' + String(error));
+    } finally {
+      setIsExportingDiagnostics(false);
     }
   };
 
@@ -402,11 +432,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const runtimeConfigLockedByEnv = runtimeConfig?.envTakesPrecedence === true;
   const selectedRuntimeKind = runtimeKindFromLocalAiConfig(runtimeConfig);
   const selectedRuntimePreset = findLocalAiRuntimePreset(selectedRuntimeKind);
+  const selectedModelPreset = findLocalAiModelPreset(runtimeConfig?.model);
   const selectedRuntimeIsPublic = LOCAL_AI_RUNTIME_PRESETS.some(
     (preset) => preset.id === selectedRuntimeKind
   );
   const serverConfigured = aiStatus?.runtimeCapabilities?.openAiCompatible === true
     || aiStatus?.mtpConfigured === true;
+  const nativeRuntime = aiStatus?.runtimeCapabilities?.inProcess === true
+    || managedRuntime?.transport === 'in_process';
   const serverReachable = aiStatus?.mtpReachable === true;
   const serverChecking = serverConfigured && aiStatus?.mtpReachable == null;
   const isDesktopData = Boolean(dataPath && dataPath !== '브라우저 모드');
@@ -415,10 +448,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     ? '상태 확인 중'
     : serverConfigured
       ? serverChecking
-        ? '서버 확인 중'
+        ? nativeRuntime ? '엔진 확인 중' : '서버 확인 중'
         : serverReachable
-          ? '서버 연결됨'
-          : '서버 시작 필요'
+          ? nativeRuntime ? '엔진 준비됨' : '서버 연결됨'
+          : nativeRuntime ? '엔진 시작 필요' : '서버 시작 필요'
       : localAiStateLabel(aiStatus.state);
   const aiStateTone = !aiStatus || serverChecking
     ? 'checking'
@@ -576,10 +609,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="memoji-settings-note" role="status">
                       <strong>VDI 오프라인 AI 번들 감지됨</strong>
                       <p>
-                        Gemma 4 E2B 모델과 LiteRT-LM 실행 환경이 앱 폴더에 포함되어 있습니다.
+                        {selectedModelPreset.label} 모델과 LiteRT-LM 실행 환경이 앱 폴더에 포함되어 있습니다.
                         인터넷 연결이나 별도 모델 설치 없이 자동으로 시작합니다.
-                        {managedRuntime.authEnforced
-                          ? ' 이 세션은 임의 포트와 인증 토큰으로 보호됩니다.'
+                        {managedRuntime.transport === 'in_process'
+                          ? ' 외부 포트를 열지 않고 앱 프로세스 안에서 직접 추론합니다.'
+                          : managedRuntime.authEnforced
+                            ? ' 이 세션은 인증 토큰으로 보호됩니다.'
                           : managedRuntime.sessionIsolated
                             ? ' 인증 미지원 런타임이라 임의의 loopback 포트와 자식 PID 확인으로 격리합니다.'
                             : ''}
@@ -588,11 +623,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   )}
                   {serverConfigured && !serverReachable && !serverChecking && (
                     <div className="memoji-settings-warning" role="status">
-                      <strong>{findLocalAiRuntimePreset(aiStatus?.mtpRuntimeKind).modeLabel} 서버가 응답하지 않습니다.</strong>
+                      <strong>{findLocalAiRuntimePreset(aiStatus?.mtpRuntimeKind).modeLabel}가 준비되지 않았습니다.</strong>
                       <p>
-                        <code>{aiStatus?.mtpEndpoint ?? runtimeConfig?.endpoint}</code>에서 실행 중인 서버와 모델을 확인하세요.
+                        {nativeRuntime
+                          ? 'LiteRT-LM C API와 선택한 Gemma 모델 파일을 확인하세요.'
+                          : <><code>{aiStatus?.mtpEndpoint ?? runtimeConfig?.endpoint}</code>에서 실행 중인 서버와 모델을 확인하세요.</>}
                         {managedRuntime?.available
-                          ? ' 앱에 포함된 서버를 다시 시작할 수 있습니다.'
+                          ? ' 앱에 포함된 엔진을 다시 시작할 수 있습니다.'
                           : ' VDI 배포 폴더에 ai 런타임과 Gemma 모델이 함께 있는지 확인하세요.'}
                       </p>
                       {managedRuntime?.available && (
@@ -604,7 +641,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           disabled={isStartingManagedRuntime}
                         >
                           {isStartingManagedRuntime ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
-                          내장 Gemma 서버 시작
+                          내장 Gemma 엔진 시작
                         </Button>
                       )}
                     </div>
@@ -645,6 +682,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <option key={preset.id} value={preset.id}>{preset.label}</option>
                       ))}
                     </select>
+                  </div>
+
+                  <div className="memoji-settings-field">
+                    <Label htmlFor="local-ai-model-preset">Gemma 4 모델</Label>
+                    <select
+                      id="local-ai-model-preset"
+                      value={runtimeConfig?.model ?? 'gemma4-e2b'}
+                      disabled={runtimeConfigLockedByEnv || !runtimeConfig}
+                      onChange={(event) => changeRuntimeConfig({ model: event.target.value })}
+                      className="memoji-settings-select"
+                    >
+                      {LOCAL_AI_MODEL_PRESETS.map((preset) => (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.label} · RAM {preset.minimumRamGb}GB+
+                        </option>
+                      ))}
+                    </select>
+                    <p className="memoji-settings-help">
+                      {selectedModelPreset.qualityLabel} · {selectedModelPreset.description}
+                    </p>
                   </div>
 
                   {runtimeConfigLockedByEnv && (
@@ -732,13 +789,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     aria-expanded={aiAdvancedOpen}
                   >
                     <span>
-                      <strong>고급 서버 설정</strong>
-                      <small>Endpoint와 모델 별칭</small>
+                      <strong>엔진 상세</strong>
+                      <small>{nativeRuntime ? 'C API와 인프로세스 상태' : 'Endpoint와 모델 별칭'}</small>
                     </span>
                     <ChevronDown className="h-4 w-4" aria-hidden="true" />
                   </button>
                   {aiAdvancedOpen && (
                     <div className="memoji-settings-collapsible-panel">
+                      {nativeRuntime ? (
+                        <dl className="memoji-settings-diagnostic-grid">
+                          <div><dt>Transport</dt><dd>{managedRuntime?.transport ?? 'in_process'}</dd></div>
+                          <div><dt>LiteRT-LM</dt><dd>{managedRuntime?.runtimeVersion ?? '0.16.0'}</dd></div>
+                          <div><dt>C API</dt><dd>{managedRuntime?.cApiVersion ?? '0.1.0'}</dd></div>
+                          <div><dt>Backend</dt><dd>{managedRuntime?.backend ?? 'CPU'}</dd></div>
+                          <div><dt>Threads</dt><dd>{managedRuntime?.threads ?? '자동'}</dd></div>
+                          <div><dt>Restart</dt><dd>{managedRuntime?.restartAttempts ?? 0}/{managedRuntime?.restartLimit ?? 3}</dd></div>
+                        </dl>
+                      ) : <>
                       <div className="memoji-settings-field">
                         <Label htmlFor="local-ai-server-endpoint">Endpoint</Label>
                         <Input
@@ -775,6 +842,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           />
                         </div>
                       </div>
+                      </>}
                     </div>
                   )}
                 </div>
@@ -802,7 +870,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           <div><dt>TTFT</dt><dd>{aiStatus?.runtimeMetrics?.ttftMs != null ? `${aiStatus.runtimeMetrics.ttftMs} ms` : '—'}</dd></div>
                           <div><dt>Decode</dt><dd>{aiStatus?.runtimeMetrics?.decodeMs != null ? `${aiStatus.runtimeMetrics.decodeMs} ms` : '—'}</dd></div>
                           <div><dt>MTP</dt><dd>{aiStatus?.runtimeCapabilities?.mtpVerified ? '검증됨' : '비활성'}</dd></div>
-                          <div><dt>Session auth</dt><dd>{aiStatus?.runtimeCapabilities?.authEnforced ? '강제' : '미강제'}</dd></div>
+                          <div><dt>Runtime isolation</dt><dd>{nativeRuntime ? '인프로세스 · 포트 없음' : aiStatus?.runtimeCapabilities?.authEnforced ? '인증 강제' : '인증 미강제'}</dd></div>
                           <div><dt>Model file</dt><dd>{formatLocalAiBytes(aiStatus?.modelFileSizeBytes)}</dd></div>
                           <div><dt>Runtime AVX-512F</dt><dd>{cpuFeature('avx512f')}</dd></div>
                           <div><dt>Build AVX-512F</dt><dd>{buildFeature('avx512f')}</dd></div>
@@ -817,7 +885,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <div className="memoji-settings-card-heading">
                           <div>
                             <h4><Gauge className="h-4 w-4" aria-hidden="true" /> VDI 성능 진단</h4>
-                            <p>내장 GGUF 모델의 16토큰 생성 속도를 측정합니다.</p>
+                            <p>{nativeRuntime ? '실제 생성 테스트에서 TTFT와 decode 지표를 기록합니다.' : '내장 GGUF 모델의 16토큰 생성 속도를 측정합니다.'}</p>
                           </div>
                           <Button
                             variant="outline"
@@ -832,7 +900,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </div>
                         {serverConfigured ? (
                           <p className="memoji-settings-help">
-                            서버 런타임을 쓰는 동안에는 내장 모델 벤치마크가 비활성화됩니다.
+                            {nativeRuntime
+                              ? '위의 실제 생성 테스트를 실행하면 인프로세스 엔진 성능 지표가 갱신됩니다.'
+                              : '서버 런타임을 쓰는 동안에는 내장 모델 벤치마크가 비활성화됩니다.'}
                           </p>
                         ) : (
                           <dl className="memoji-settings-metric-grid">
@@ -881,8 +951,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </Button>
                   </div>
                   <p className="memoji-settings-help">
-                    비영구 VDI에서는 관리자가 지정한 영구 드라이브 경로인지 반드시 확인하세요.
+                    {dataPathStatus?.source === 'policy_env'
+                      ? '관리자 정책(MEMOJI_DATA_PATH)으로 지정된 저장소입니다.'
+                      : dataPathStatus?.source === 'portable'
+                        ? '실행 파일 옆 portable data 저장소입니다.'
+                        : '비영구 VDI에서는 관리자가 지정한 영구 드라이브 경로인지 반드시 확인하세요.'}
                   </p>
+                  {dataPathStatus && !dataPathStatus.writable && (
+                    <p className="memoji-settings-help text-destructive" role="alert">
+                      현재 저장 위치에 쓸 수 없습니다. 관리자에게 저장 권한을 요청하세요.
+                    </p>
+                  )}
+                  {dataPathStatus?.persistenceWarning && (
+                    <p className="memoji-settings-help text-destructive" role="alert">
+                      {dataPathStatus.persistenceWarning}
+                    </p>
+                  )}
                 </div>
 
                 <div className="memoji-settings-card">
@@ -914,6 +998,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
                         : <Download className="mr-1 h-4 w-4" aria-hidden="true" />}
                       전체 페이지 ZIP 내보내기
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="memoji-settings-card">
+                  <div className="memoji-settings-card-heading memoji-settings-card-heading-row">
+                    <div>
+                      <span className="memoji-settings-eyebrow">지원과 진단</span>
+                      <h4>VDI 진단 ZIP</h4>
+                      <p>문서 본문·AI 프롬프트·자격 증명·절대 경로를 제외하고 엔진, DB 무결성, 행 수만 저장합니다.</p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      type="button"
+                      onClick={() => void exportDiagnostics()}
+                      disabled={!isDesktopData || isExportingDiagnostics}
+                    >
+                      {isExportingDiagnostics
+                        ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                        : <LifeBuoy className="mr-1 h-4 w-4" aria-hidden="true" />}
+                      진단 ZIP 만들기
                     </Button>
                   </div>
                 </div>

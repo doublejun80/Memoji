@@ -86,6 +86,7 @@ function SidebarHarness({ keyboard = false }: { keyboard?: boolean }) {
 describe('WorkspaceSidebar', () => {
   it('defaults to Today and renders all six workspace views', () => {
     renderWithProviders(<SidebarHarness />);
+    expect(screen.queryByRole('button', { name: '왼쪽 패널 닫기' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '오늘' })).toHaveAttribute('aria-current', 'page');
     const viewNavigation = screen.getByRole('navigation', { name: '작업 공간 보기' });
     expect(within(viewNavigation).getAllByRole('button')).toHaveLength(6);

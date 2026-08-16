@@ -7,6 +7,7 @@ import {
   type SearchPageSummary,
   type SearchTaskSummary,
 } from '../shared/api/searchApi';
+import { tauriTaskApi, type TaskApi } from '../shared/api/taskApi';
 import { searchWorkspace, type CommandSearchResult } from './commandSearch';
 import type { AppCommand, CommandContext } from './types';
 
@@ -21,10 +22,12 @@ interface CommandPaletteProps {
   onPageSelect: (page: SearchPageSummary) => void;
   onTaskSelect: (task: SearchTaskSummary) => void;
   searchApi?: IndexedSearchApi;
+  taskApi?: TaskApi;
 }
 
 const GROUP_LABELS = {
   commands: '명령',
+  projects: '프로젝트',
   pages: '문서',
   tasks: '작업',
 } as const;
@@ -44,9 +47,11 @@ export function CommandPalette({
   onPageSelect,
   onTaskSelect,
   searchApi = tauriIndexedSearchApi,
+  taskApi = tauriTaskApi,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
   const [indexedPages, setIndexedPages] = useState<SearchPageSummary[] | null>(null);
+  const [backendTasks, setBackendTasks] = useState<SearchTaskSummary[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -75,7 +80,7 @@ export function CommandPalette({
 
   useEffect(() => {
     const term = query.trim();
-    if (!open || !term || /^(title|tag):/i.test(term)) {
+    if (!open || !term || /^(title|tag|type|due|project|is):/i.test(term)) {
       setIndexedPages(null);
       return;
     }
@@ -100,22 +105,46 @@ export function CommandPalette({
     };
   }, [open, query, searchApi]);
 
+  useEffect(() => {
+    if (!open || tasks.length > 0) return;
+    let disposed = false;
+    void taskApi.list({ filter: 'all' }).then((items) => {
+      if (disposed) return;
+      setBackendTasks(items.map((task) => ({
+        id: task.id,
+        title: task.text,
+        status: task.completed ? 'done' : 'open',
+        pageId: task.pageId,
+        tags: [],
+        projectId: task.projectId,
+        dueDate: task.dueDate,
+        startDate: task.startDate,
+        assignee: task.assignee,
+      })));
+    }).catch(() => {
+      if (!disposed) setBackendTasks([]);
+    });
+    return () => { disposed = true; };
+  }, [open, taskApi, tasks.length]);
+
+  const searchableTasks = tasks.length > 0 ? tasks : backendTasks;
+
   const results = useMemo(() => searchWorkspace({
     query,
     commands,
     context,
     pages: indexedPages ?? pages,
-    tasks,
+    tasks: searchableTasks,
     recentPageIds,
     limit: 30,
-  }), [commands, context, indexedPages, pages, query, recentPageIds, tasks]);
+  }), [commands, context, indexedPages, pages, query, recentPageIds, searchableTasks]);
 
   if (!open) return null;
 
   const choose = (result: CommandSearchResult) => {
     if (result.group === 'commands') {
       void result.command.run(context);
-    } else if (result.group === 'pages') {
+    } else if (result.group === 'pages' || result.group === 'projects') {
       onPageSelect(result.page);
     } else {
       onTaskSelect(result.task);
@@ -156,7 +185,7 @@ export function CommandPalette({
           </div>
           <Command.List className="command-palette-results">
             <Command.Empty>일치하는 명령, 문서 또는 작업이 없습니다.</Command.Empty>
-            {(['commands', 'pages', 'tasks'] as const).map((group) => {
+            {(['commands', 'projects', 'pages', 'tasks'] as const).map((group) => {
               const items = byGroup(results, group);
               if (items.length === 0) return null;
               const label = group === 'pages' && query.trim() === ''
@@ -186,7 +215,7 @@ export function CommandPalette({
           <footer className="command-palette-footer">
             <span><kbd>↑↓</kbd> 이동</span>
             <span><kbd>↵</kbd> 열기</span>
-            <span><code>title:</code> 제목 · <code>tag:</code> 태그</span>
+            <span><code>title:</code> · <code>tag:</code> · <code>type:</code> · <code>due:</code> · <code>project:</code> · <code>is:</code></span>
           </footer>
         </Command>
       </div>

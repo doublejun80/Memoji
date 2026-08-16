@@ -1,6 +1,7 @@
 import type {
   LocalAiGenerateRequest,
   LocalAiGenerateResponse,
+  LocalAiRuntimeFamily,
   LocalAiRuntimeKind,
 } from '../../types/localAi';
 
@@ -20,10 +21,14 @@ export interface AiGenerationRequest {
   requestId: string;
   request: LocalAiGenerateRequest;
   useServer: boolean;
+  runtimeFamily?: LocalAiRuntimeFamily;
   currentPageId?: string;
   currentProjectId?: string;
+  contextScope?: AiContextScope;
   objectType?: 'page' | 'task' | 'event';
 }
+
+export type AiContextScope = 'none' | 'page' | 'project' | 'linked' | 'workspace';
 
 export interface AiGenerationCallbacks {
   onStreamText: (requestId: string, text: string) => void;
@@ -33,7 +38,7 @@ export interface AiGenerationCallbacks {
 }
 
 export interface AiQuickAction {
-  id: 'summarize' | 'organize' | 'rewrite-selection';
+  id: 'summarize' | 'organize' | 'rewrite-selection' | 'decision' | 'risks' | 'translate' | 'tasks';
   label: string;
   title: string;
   prompt: string;

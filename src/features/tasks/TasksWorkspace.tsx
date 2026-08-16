@@ -42,9 +42,13 @@ function localTasks(pages: Page[], filter: TaskFilter, today: string): MarkdownT
       const match = line.match(/^\s*[-*+]\s+\[([ xX])\]\s+(.+)$/);
       if (!match || line.trimStart().startsWith('>')) return [];
       const dueDate = match[2].match(/@due\((\d{4}-\d{2}-\d{2})\)/)?.[1] ?? null;
+      const startDate = match[2].match(/@start\((\d{4}-\d{2}-\d{2})\)/)?.[1] ?? null;
+      const assignee = match[2].match(/@assignee\(([^)]+)\)/)?.[1]?.trim() ?? null;
       const priority = Number(match[2].match(/!p([1-3])/i)?.[1] ?? 0) || null;
       const text = match[2]
         .replace(/@due\(\d{4}-\d{2}-\d{2}\)/g, '')
+        .replace(/@start\(\d{4}-\d{2}-\d{2}\)/g, '')
+        .replace(/@assignee\([^)]+\)/g, '')
         .replace(/!p[1-3]/gi, '')
         .replace(/<!--\s*memoji-task:[^>]+-->/g, '')
         .trim();
@@ -56,6 +60,8 @@ function localTasks(pages: Page[], filter: TaskFilter, today: string): MarkdownT
         text,
         completed: match[1].toLowerCase() === 'x',
         dueDate,
+        startDate,
+        assignee,
         priority,
         line: lineIndex + 1,
         sourceStart: start,
@@ -123,6 +129,8 @@ export function TasksWorkspace({
           id: task.id,
           completed: values.completed ?? task.completed,
           dueDate: values.dueDate === undefined ? task.dueDate : values.dueDate,
+          startDate: values.startDate === undefined ? task.startDate : values.startDate,
+          assignee: values.assignee === undefined ? task.assignee : values.assignee,
           priority: values.priority === undefined ? task.priority : values.priority,
           expectedHash: task.sourceHash,
         });
@@ -133,14 +141,22 @@ export function TasksWorkspace({
         const lines = page.content.split(/\r?\n/);
         let line = lines[task.line - 1];
         line = line.replace(/\[([ xX])\]/, values.completed ?? task.completed ? '[x]' : '[ ]');
-        line = line.replace(/\s+@due\(\d{4}-\d{2}-\d{2}\)/g, '').replace(/\s+!p[1-3]/gi, '');
+        line = line
+          .replace(/\s+@due\(\d{4}-\d{2}-\d{2}\)/g, '')
+          .replace(/\s+@start\(\d{4}-\d{2}-\d{2}\)/g, '')
+          .replace(/\s+@assignee\([^)]+\)/g, '')
+          .replace(/\s+!p[1-3]/gi, '');
         const markerAt = line.indexOf(' <!-- memoji-task:');
         const marker = markerAt >= 0 ? line.slice(markerAt) : '';
         if (marker) line = line.slice(0, markerAt);
         const due = values.dueDate === undefined ? task.dueDate : values.dueDate;
+        const start = values.startDate === undefined ? task.startDate : values.startDate;
+        const assignee = values.assignee === undefined ? task.assignee : values.assignee;
         const priority = values.priority === undefined ? task.priority : values.priority;
+        if (start) line += ` @start(${start})`;
         if (due) line += ` @due(${due})`;
         if (priority) line += ` !p${priority}`;
+        if (assignee?.trim()) line += ` @assignee(${assignee.trim()})`;
         lines[task.line - 1] = line + marker;
         await onPageUpdate?.(pageWithMarkdownMetadata(page, lines.join('\n')));
       }
@@ -192,6 +208,8 @@ export function TasksWorkspace({
               busyId={busyId}
               onToggle={(task) => void update(task, { completed: !task.completed })}
               onDueChange={(task, dueDate) => void update(task, { dueDate })}
+              onStartChange={(task, startDate) => void update(task, { startDate })}
+              onAssigneeChange={(task, assignee) => void update(task, { assignee })}
               onPriorityChange={(task, priority) => void update(task, { priority })}
               onOpenPage={(task) => {
                 const page = pages.find((candidate) => candidate.id === task.pageId);

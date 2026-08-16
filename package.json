@@ -77,8 +77,10 @@
             "build": "vite build",
             "check": "npm run type-check && npm run test:unit && npm run test && npm run build",
             "tauri": "tauri",
-            "tauri:dev": "tauri dev",
+            "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
             "tauri:build": "tauri build",
-            "ai:bundle:vdi": "node scripts/prepare-vdi-ai-bundle.mjs"
+            "ai:bundle:vdi": "node scripts/prepare-vdi-ai-bundle.mjs",
+            "ai:benchmark:vdi": "cargo run --release --manifest-path src-tauri/Cargo.toml --bin memoji-vdi-benchmark --",
+            "sbom": "node scripts/generate-sbom.mjs"
       }
 }

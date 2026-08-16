@@ -72,6 +72,16 @@
   font-size: var(--memoji-text-xs);
 }
 
+.document-revision {
+  flex: 0 0 auto;
+  border: 1px solid var(--memoji-border-subtle);
+  border-radius: 999px;
+  padding: 1px 6px;
+  color: var(--memoji-text-tertiary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+}
+
 .document-save-state[data-dirty='true'] {
   color: #b45309;
 }

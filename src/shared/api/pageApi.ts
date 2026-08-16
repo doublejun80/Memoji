@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { TAURI_COMMANDS } from './tauriCommands';
 
 export interface PageSummaryDto {
   id: string;
@@ -45,6 +46,7 @@ export interface PageRevisionDto {
 
 export interface PageApi {
   listSummaries(): Promise<PageSummaryDto[]>;
+  listTrashedSummaries(): Promise<PageSummaryDto[]>;
   getBody(pageId: string): Promise<PageBodyDto>;
   save(request: SavePageV2Dto): Promise<SavePageV2Result>;
   trash(pageId: string): Promise<void>;
@@ -54,16 +56,16 @@ export interface PageApi {
 }
 
 export const tauriPageApi: PageApi = {
-  listSummaries: () => invoke('list_page_summaries'),
-  getBody: (pageId) => invoke('get_page_body', { pageId }),
-  save: (request) => invoke('save_page_v2', { request }),
-  trash: (pageId) => invoke('trash_page', { pageId }),
-  restore: (pageId) => invoke('restore_page', { pageId }),
-  listRevisions: (pageId) => invoke('list_page_revisions', { pageId }),
-  restoreRevision: (pageId, revision, baseRevision) => invoke('restore_page_revision', {
+  listSummaries: () => invoke(TAURI_COMMANDS.listPageSummaries),
+  listTrashedSummaries: () => invoke(TAURI_COMMANDS.listTrashedPageSummaries),
+  getBody: (pageId) => invoke(TAURI_COMMANDS.getPageBody, { pageId }),
+  save: (request) => invoke(TAURI_COMMANDS.savePageV2, { request }),
+  trash: (pageId) => invoke(TAURI_COMMANDS.trashPage, { pageId }),
+  restore: (pageId) => invoke(TAURI_COMMANDS.restorePage, { pageId }),
+  listRevisions: (pageId) => invoke(TAURI_COMMANDS.listPageRevisions, { pageId }),
+  restoreRevision: (pageId, revision, baseRevision) => invoke(TAURI_COMMANDS.restorePageRevision, {
     pageId,
     revision,
     baseRevision,
   }),
 };
-

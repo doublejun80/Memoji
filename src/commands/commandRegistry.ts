@@ -53,6 +53,15 @@ export function createCommandRegistry(): AppCommand[] {
     },
     ...navigationCommands(),
     {
+      id: 'view.search',
+      label: '전체 검색 보기',
+      description: 'SQLite FTS 결과를 중앙 검색 공간에서 엽니다.',
+      keywords: ['검색', 'search', 'fts', 'workspace'],
+      category: 'navigation',
+      enabled: always,
+      run: (context) => context.setWorkspaceView('search'),
+    },
+    {
       id: 'ai.open',
       label: 'AI 열기',
       keywords: ['assistant', '도우미', 'ai'],

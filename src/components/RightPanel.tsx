@@ -20,6 +20,7 @@ interface RightPanelProps {
   activeTab?: ContextHubTab;
   onTabChange?: (tab: ContextHubTab) => void;
   searchPinned?: boolean;
+  onPageUpdate?: (page: Page) => void | Promise<void>;
 }
 
 /** Compatibility boundary for the legacy App call site. */
@@ -35,6 +36,7 @@ export function RightPanel({
   activeTab = 'ai',
   onTabChange = () => undefined,
   searchPinned = false,
+  onPageUpdate,
 }: RightPanelProps) {
   if (!isOpen) return null;
   return (
@@ -49,6 +51,7 @@ export function RightPanel({
       onProposalApplied={onProposalApplied}
       onOpenSource={onOpenSource}
       searchPinned={searchPinned}
+      onPageUpdate={onPageUpdate}
     />
   );
 }

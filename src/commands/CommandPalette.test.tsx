@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { renderWithProviders, screen, userEvent, waitFor } from '../test/render';
 import { CommandPalette } from './CommandPalette';
 import type { AppCommand, CommandContext } from './types';
+import type { TaskApi } from '../shared/api/taskApi';
 
 const runSettings = vi.fn();
 const commands: AppCommand[] = [
@@ -83,5 +84,44 @@ describe('CommandPalette', () => {
 
     await userEvent.type(screen.getByRole('combobox', { name: '명령 또는 검색' }), '없는검색어');
     expect(screen.getByText('일치하는 명령, 문서 또는 작업이 없습니다.')).toBeVisible();
+  });
+
+  it('loads backend tasks when opened and returns them from the real palette', async () => {
+    const taskApi: TaskApi = {
+      list: vi.fn().mockResolvedValue([{
+        id: 'task-1',
+        pageId: 'p1',
+        pageTitle: '구매 계획',
+        text: '계약서 검토',
+        completed: false,
+        dueDate: '2026-08-20',
+        startDate: null,
+        assignee: '김코덱스',
+        priority: 1,
+        line: 2,
+        sourceStart: 10,
+        sourceEnd: 20,
+        sourceHash: 'sha256:task',
+        updatedAt: '2026-08-16T10:00:00Z',
+      }]),
+      update: vi.fn(),
+    };
+    renderWithProviders(
+      <CommandPalette
+        open
+        onOpenChange={vi.fn()}
+        commands={commands}
+        context={context}
+        pages={pages}
+        tasks={[]}
+        taskApi={taskApi}
+        onPageSelect={vi.fn()}
+        onTaskSelect={vi.fn()}
+      />,
+    );
+
+    await userEvent.type(screen.getByRole('combobox', { name: '명령 또는 검색' }), '계약서');
+    expect(await screen.findByText('계약서 검토')).toBeVisible();
+    expect(taskApi.list).toHaveBeenCalledWith({ filter: 'all' });
   });
 });

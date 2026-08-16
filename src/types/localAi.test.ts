@@ -3,16 +3,32 @@ import {
   configFromLocalAiRuntimePreset,
   findLocalAiRuntimePreset,
   formatLocalAiGenerateError,
+  findLocalAiModelPreset,
+  LOCAL_AI_MODEL_PRESETS,
   LOCAL_AI_RUNTIME_PRESETS,
   localAiModelLabel,
   localAiRuntimeBadgeLabel,
   runtimeKindFromLocalAiConfig,
+  LOCAL_AI_MAX_NEW_TOKENS_DEFAULT,
+  LOCAL_AI_MAX_NEW_TOKENS_MAX,
 } from './localAi';
+
+assert.equal(LOCAL_AI_MAX_NEW_TOKENS_DEFAULT, 1024);
+assert.equal(LOCAL_AI_MAX_NEW_TOKENS_MAX, 4096);
 
 assert.deepEqual(
   LOCAL_AI_RUNTIME_PRESETS.map((preset) => preset.id),
   ['litert_lm']
 );
+
+assert.deepEqual(
+  LOCAL_AI_MODEL_PRESETS.map((preset) => [preset.id, preset.minimumRamGb, preset.defaultForVdi]),
+  [
+    ['gemma4-e2b', 8, true],
+    ['gemma4-e4b', 16, false],
+  ],
+);
+assert.equal(findLocalAiModelPreset('gemma4-e4b').qualityLabel, '품질 우선');
 
 assert.deepEqual(configFromLocalAiRuntimePreset('builtin_candle'), {
   runtimeKind: 'builtin_candle',
@@ -38,7 +54,7 @@ assert.deepEqual(configFromLocalAiRuntimePreset('litert_lm'), {
   draftModel: undefined,
 });
 
-assert.equal(findLocalAiRuntimePreset('litert_lm').modeLabel, '고속 로컬 서버');
+assert.equal(findLocalAiRuntimePreset('litert_lm').modeLabel, '인프로세스 엔진');
 assert.equal(findLocalAiRuntimePreset('missing' as never).id, 'litert_lm');
 assert.equal(runtimeKindFromLocalAiConfig(null), 'litert_lm');
 assert.equal(
@@ -78,9 +94,9 @@ assert.equal(
     mtpModel: 'gemma-4-E2B-it-litert-lm',
     mtpRuntimeKind: 'litert_lm',
     runtimeCapabilities: {
-      family: 'lite_rt', localOnly: true, inProcess: false, streaming: true,
-      openAiCompatible: true, managedProcess: true, targetModelVerified: true,
-      assistantModelVerified: false, mtpVerified: false, authEnforced: false,
+      family: 'lite_rt', localOnly: true, inProcess: true, streaming: true,
+      openAiCompatible: false, managedProcess: false, targetModelVerified: true,
+      assistantModelVerified: false, mtpVerified: false, authEnforced: true,
     },
     modelExists: true,
     tokenizerExists: true,
@@ -90,7 +106,7 @@ assert.equal(
     avx512RuntimeReady: false,
     avx512Build: false,
   }),
-  '고속 로컬 서버'
+  '인프로세스 AI'
 );
 
 assert.equal(

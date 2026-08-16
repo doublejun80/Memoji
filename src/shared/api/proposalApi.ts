@@ -2,6 +2,7 @@ import type { AiProposal } from '../../features/ai/aiProposalReducer';
 import type { PageBodyDto } from './pageApi';
 import { invoke } from '@tauri-apps/api/core';
 import { getEnvironment } from '../../utils/environment';
+import { TAURI_COMMANDS } from './tauriCommands';
 
 export interface ApplyProposalResult {
   proposal: AiProposal;
@@ -34,15 +35,15 @@ export function createMemoryProposalApi(): ProposalApi {
 export const memoryProposalApi = createMemoryProposalApi();
 
 export const tauriProposalApi: ProposalApi = {
-  list: (pageId) => invoke('list_ai_proposals', { pageId }),
-  create: (proposal) => invoke('create_ai_proposal', { proposal }),
+  list: (pageId) => invoke(TAURI_COMMANDS.listAiProposals, { pageId }),
+  create: (proposal) => invoke(TAURI_COMMANDS.createAiProposal, { proposal }),
   updateStatus: async (id, status) => {
     if (status === 'rejected') {
-      await invoke('reject_ai_proposal', { id });
+      await invoke(TAURI_COMMANDS.rejectAiProposal, { id });
     }
   },
-  apply: (id) => invoke('apply_ai_proposal', { id }),
-  reject: (id) => invoke('reject_ai_proposal', { id }),
+  apply: (id) => invoke(TAURI_COMMANDS.applyAiProposal, { id }),
+  reject: (id) => invoke(TAURI_COMMANDS.rejectAiProposal, { id }),
 };
 
 export const defaultProposalApi = getEnvironment().isTauri

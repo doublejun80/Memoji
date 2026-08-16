@@ -28,6 +28,7 @@ import {
   EDITOR_PREFERENCES_CHANGED_EVENT,
   readEditorPreferences,
 } from '../../utils/editorPreferences';
+import { normalizeEditorLinkHref, paragraphIndentEdit } from '../../utils/editorFormatting';
 
 interface MilkdownEditorProps {
   value: string;
@@ -1134,6 +1135,31 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
           : liftListItemCommand.key
       ));
 
+      if (!didRun) {
+        const view = ctx.get(editorViewCtx);
+        const { state } = view;
+        const positions: Array<{ start: number; text: string }> = [];
+        const rangeTo = Math.min(state.doc.content.size, Math.max(state.selection.to, state.selection.from + 1));
+        state.doc.nodesBetween(state.selection.from, rangeTo, (node, position) => {
+          if (node.type === paragraphSchema.type(ctx)) {
+            positions.push({ start: position + 1, text: node.textContent });
+            return false;
+          }
+          return undefined;
+        });
+
+        let transaction = state.tr;
+        positions.sort((left, right) => right.start - left.start).forEach(({ start, text }) => {
+          const edit = paragraphIndentEdit(text, direction);
+          if (edit.insert) transaction = transaction.insertText(edit.insert, start);
+          if (edit.remove > 0) transaction = transaction.delete(start, start + edit.remove);
+        });
+        if (transaction.docChanged) {
+          view.dispatch(transaction.scrollIntoView());
+          didRun = true;
+        }
+      }
+
       if (didRun) {
         ctx.get(editorViewCtx).focus();
       }
@@ -1168,6 +1194,39 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
       editorElement.removeEventListener('keydown', handleTabIndent, true);
     };
   }, [applyListIndent, toolbarTarget]);
+
+  useEffect(() => {
+    const normalizeInput = (input: HTMLInputElement | null) => {
+      if (!input) return;
+      const normalized = normalizeEditorLinkHref(input.value);
+      if (normalized === input.value) return;
+      input.value = normalized;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    const labelLinkInput = () => {
+      const input = document.querySelector<HTMLInputElement>('.milkdown-link-edit .input-area');
+      if (input) input.setAttribute('aria-label', '링크 주소');
+    };
+    const handleLinkKeydown = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' || !(event.target instanceof HTMLInputElement)) return;
+      if (!event.target.matches('.milkdown-link-edit .input-area')) return;
+      normalizeInput(event.target);
+    };
+    const handleLinkConfirm = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest('.milkdown-link-edit .confirm')) return;
+      normalizeInput(document.querySelector<HTMLInputElement>('.milkdown-link-edit .input-area'));
+    };
+    const observer = new MutationObserver(labelLinkInput);
+    observer.observe(document.body, { childList: true, subtree: true });
+    document.addEventListener('keydown', handleLinkKeydown, true);
+    document.addEventListener('pointerdown', handleLinkConfirm, true);
+    labelLinkInput();
+    return () => {
+      observer.disconnect();
+      document.removeEventListener('keydown', handleLinkKeydown, true);
+      document.removeEventListener('pointerdown', handleLinkConfirm, true);
+    };
+  }, []);
 
   const toggleColorPicker = () => {
     if (!isColorPickerOpen) {
@@ -1250,8 +1309,8 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
               className="memoji-editor-indent-button"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => applyListIndent('decrease')}
-              title="내어쓰기"
-              aria-label="내어쓰기"
+              title="문단 내어쓰기"
+              aria-label="문단 내어쓰기"
             >
               <IndentDecrease className="h-4 w-4" />
             </button>
@@ -1260,8 +1319,8 @@ export const MilkdownEditor: React.FC<MilkdownEditorProps> = ({
               className="memoji-editor-indent-button"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => applyListIndent('increase')}
-              title="들여쓰기"
-              aria-label="들여쓰기"
+              title="문단 들여쓰기"
+              aria-label="문단 들여쓰기"
             >
               <IndentIncrease className="h-4 w-4" />
             </button>

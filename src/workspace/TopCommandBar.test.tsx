@@ -24,6 +24,14 @@ function renderBar() {
 }
 
 describe('TopCommandBar', () => {
+  it('exposes a broad non-interactive Tauri drag surface without turning controls into drag targets', () => {
+    const { container } = renderBar();
+
+    expect(container.querySelector('.memoji-command-bar-drag-surface')).toHaveAttribute('data-tauri-drag-region');
+    expect(screen.getByRole('heading', { name: 'Memoji' })).toHaveAttribute('data-tauri-drag-region');
+    expect(screen.getByRole('button', { name: '왼쪽 패널 닫기' })).not.toHaveAttribute('data-tauri-drag-region');
+  });
+
   it('keeps only the primary workspace controls persistent', () => {
     renderBar();
 
