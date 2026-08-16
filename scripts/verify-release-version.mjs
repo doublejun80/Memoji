@@ -31,7 +31,10 @@ if (unique.size !== 1 || unique.has(undefined)) {
   throw new Error(`Version mismatch: ${JSON.stringify(versions)}`);
 }
 const version = packageJson.version;
-if (tag && tag !== `v${version}`) {
-  throw new Error(`Tag ${tag} does not match application version v${version}`);
+if (tag) {
+  const matched = /^v(\d+\.\d+\.\d+)(-rc\.\d+)?$/.exec(tag);
+  if (!matched || matched[1] !== version) {
+    throw new Error(`Tag ${tag} does not match application version v${version}`);
+  }
 }
 console.log(`Verified Memoji version ${version}${tag ? ` against ${tag}` : ""}.`);
