@@ -55,10 +55,6 @@
       "scope": {
         "allow": ["$APPDATA/blocknote/**", "$LOCALDATA/blocknote/**"]
       }
-    },
-    "dialog": {
-      "open": true,
-      "save": true
     }
   }
 }

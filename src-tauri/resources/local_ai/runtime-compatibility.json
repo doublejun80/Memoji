@@ -2,15 +2,44 @@
   "schemaVersion": 1,
   "verifiedAt": "2026-08-15T16:50:00Z",
   "sourceRepository": "https://github.com/google-ai-edge/LiteRT-LM",
-  "defaultVersion": "0.13.1",
-  "candidateVersion": "0.16.0",
+  "defaultVersion": "0.16.0",
+  "candidateVersion": null,
   "decision": {
-    "status": "retain-baseline",
-    "reason": "0.16.0 has not completed the required Windows VDI model, EDR, restart, memory and performance matrix. It remains an explicitly pinned candidate."
+    "status": "promote-native-c-api",
+    "transport": "in_process",
+    "reason": "LiteRT-LM 0.16.0 provides the first versioned cross-platform C API prebuilts. Memoji loads that API in-process, removing the unauthenticated loopback server and Python runtime from the GA path."
+  },
+  "modelPresets": {
+    "e2b": {
+      "label": "Gemma 4 E2B VDI Fast",
+      "id": "gemma4-e2b",
+      "filename": "gemma-4-E2B-it.litertlm",
+      "bytes": 2588147712,
+      "sha256": "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c",
+      "url": "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/6b78abd019e61a1ca4cbe3b212d2c9ce8ff38a94/gemma-4-E2B-it.litertlm",
+      "source": "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm",
+      "sourceRevision": "6b78abd019e61a1ca4cbe3b212d2c9ce8ff38a94",
+      "license": "Apache-2.0",
+      "role": "vdi-default",
+      "recommendedRamBytes": 8589934592
+    },
+    "e4b": {
+      "label": "Gemma 4 E4B Quality",
+      "id": "gemma4-e4b",
+      "filename": "gemma-4-E4B-it.litertlm",
+      "bytes": 3659530240,
+      "sha256": "0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0",
+      "url": "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/2eee7ac325f20eb8c9ac1d0e972f7c84663062da/gemma-4-E4B-it.litertlm",
+      "source": "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm",
+      "sourceRevision": "2eee7ac325f20eb8c9ac1d0e972f7c84663062da",
+      "license": "Apache-2.0",
+      "role": "quality-optional",
+      "recommendedRamBytes": 17179869184
+    }
   },
   "versions": {
     "0.13.1": {
-      "role": "ga-default",
+      "role": "legacy-fallback",
       "release": {
         "tag": "v0.13.1",
         "publishedAt": "2026-06-03T20:52:11Z",
@@ -64,7 +93,12 @@
       }
     },
     "0.16.0": {
-      "role": "upgrade-candidate",
+      "role": "ga-default",
+      "cApi": {
+        "version": "0.1.0",
+        "transport": "in_process",
+        "asset": "litert_lm_c_api-0.1.0.zip"
+      },
       "release": {
         "tag": "v0.16.0",
         "publishedAt": "2026-08-11T18:25:33Z",

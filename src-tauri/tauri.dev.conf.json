@@ -1,0 +1,23 @@
+{
+  "productName": "Memoji Dev",
+  "identifier": "com.memoji.app.dev",
+  "app": {
+    "windows": [
+      {
+        "title": "Memoji 2.0 Dev - Tauri native",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "maximizable": true,
+        "minimizable": true,
+        "closable": true,
+        "center": true,
+        "decorations": false,
+        "transparent": true,
+        "shadow": true
+      }
+    ]
+  }
+}
