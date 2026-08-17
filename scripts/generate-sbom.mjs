@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
@@ -12,8 +13,7 @@ const runtimeCompatibility = JSON.parse(await readFile(
   'src-tauri/resources/local_ai/runtime-compatibility.json',
   'utf8',
 ));
-const npmExecutable = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const npmTree = jsonCommand(npmExecutable, ['ls', '--all', '--json']);
+const npmTree = jsonNpmCommand(['ls', '--all', '--json']);
 const cargo = jsonCommand('cargo', ['metadata', '--locked', '--format-version', '1', '--manifest-path', 'src-tauri/Cargo.toml']);
 const components = new Map();
 
@@ -107,6 +107,17 @@ function jsonCommand(command, commandArgs) {
   const result = spawnSync(command, commandArgs, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   if (!result.stdout?.trim()) throw new Error(`${command} failed: ${result.stderr || result.error}`);
   return JSON.parse(result.stdout);
+}
+
+function jsonNpmCommand(commandArgs) {
+  if (process.platform !== 'win32') return jsonCommand('npm', commandArgs);
+
+  // Windows cannot execute npm.cmd directly through spawnSync without a shell.
+  // Invoke npm's JavaScript entry point with the current node.exe instead so the
+  // fixed argument list never depends on cmd.exe quoting or shell expansion.
+  const npmCli = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  if (!existsSync(npmCli)) throw new Error(`npm CLI was not found beside node.exe: ${npmCli}`);
+  return jsonCommand(process.execPath, [npmCli, ...commandArgs]);
 }
 
 function parseArgs(values) {

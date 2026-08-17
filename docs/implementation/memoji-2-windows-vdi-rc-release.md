@@ -70,11 +70,19 @@ manifest와 다르면 부분 결과를 삭제하고 실패 처리한다.
 - Windows에서는 `npm.cmd`, 그 외 플랫폼에서는 `npm`을 사용하도록 수정했다.
 - 로컬에서 SBOM 1,073개 구성요소 생성과 계약 테스트를 통과했다.
 
+### `v2.0.0-rc.3`
+
+- 실행 기록: <https://github.com/doublejun80/Memoji/actions/runs/32016984886>
+- Windows Rust 품질 gate와 실제 `app.exe`·benchmark release 빌드는 다시 통과했다.
+- `npm.cmd`를 직접 `spawnSync`한 SBOM 호출이 Node.js 22에서 `EINVAL`로 실패했다.
+- 실패 후 Rust build cache를 정상 저장해 다음 후보가 재사용할 수 있게 했다.
+- Windows에서는 배치 파일 대신 현재 `node.exe`가 함께 설치된 npm의 `npm-cli.js`를 직접
+  실행하도록 변경했다. 이 방식은 `cmd.exe` shell·인자 quoting·배치 실행에 의존하지 않는다.
+
 ### 다음 RC
 
-다음 RC에는 위 SBOM 수정과 `cache-on-failure: true`를 포함한다. 후반 패키징 단계가 다시
-실패하더라도 Rust build cache를 저장해 재검증 시간을 줄인다. 태그와 최종 Release URL,
-자산 크기·체크섬은 실제 게시 성공 후 이 문서에 확정한다.
+다음 RC에는 위 `npm-cli.js` 직접 실행 수정을 포함한다. 태그와 최종 Release URL, 자산
+크기·체크섬은 실제 게시 성공 후 이 문서에 확정한다.
 
 ## 4. 현재 검증 결과
 
