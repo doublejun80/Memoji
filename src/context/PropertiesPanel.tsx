@@ -70,7 +70,7 @@ export function PropertiesPanel({ page, onPageUpdate, api = tauriPageApi }: { pa
   };
 
   return (
-    <form className="properties-editor" onSubmit={(event) => void save(event)}>
+    <form className="context-panel-stack properties-editor" onSubmit={(event) => void save(event)}>
       <label><span><CircleDot aria-hidden="true" /> 상태</span><input id="memoji-property-status" name="status" aria-label="문서 상태" value={status} onChange={(event) => setStatus(event.target.value)} placeholder="예: active, review" /></label>
       <label><span><CalendarClock aria-hidden="true" /> 마감</span><input id="memoji-property-due" name="due" aria-label="문서 마감일" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
       <label><span><Tags aria-hidden="true" /> 태그</span><input id="memoji-property-tags" name="tags" aria-label="문서 태그" value={tags} onChange={(event) => setTags(event.target.value)} placeholder="쉼표로 구분" /></label>

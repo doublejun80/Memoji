@@ -146,3 +146,39 @@ the UI. Runtime state is shown as library/model/engine readiness instead.
 Rendered validation must continue to compare against the same neutral, compact, row-first
 reference lock. The remaining target-specific work is Windows VDI performance/EDR/signing
 acceptance, not another product redesign.
+
+## 2026-08-17 Context panel and AI composer repair lock
+
+Scope: repair the clipped Properties view and restore direct typing in the AI conversation
+composer. This is a layout and interaction correction inside the existing Context Hub.
+
+### Research summary and reference lock
+
+- Primary visual foundation: Attio precision toolkit
+  (`9f0c028b-6b11-415e-ab92-f32e4597cbe2`) for compact 8px rhythm, hairline borders,
+  neutral UI type, and an interaction-only focus accent.
+- Secondary visual bounds: Audyr (`9552d07f-2f68-4dd7-a0e9-d779d4a31562`) and Grammarly
+  (`e9513ef7-1ac1-404a-bdb0-bfd269d2c3c9`) for flat white surfaces and contained,
+  readable text controls.
+- Product patterns: Craft document information sidebar
+  (`c31dbdcd-5c34-43d4-aff0-7d267d264e55`) for a consistently padded narrow metadata
+  column; GlossGenius AI side sheet (`18a6c8a9-3e60-484e-bba5-9a0f70eac321`) for a
+  scrollable conversation with a persistent, directly editable composer.
+- Preserve: existing neutral canvas, 8px panel gutter, compact labels, flat hierarchy,
+  native controls, and existing responsive overlay breakpoints.
+- Borrow only: Craft's consistent inner gutter and GlossGenius's always-editable draft
+  field with readiness enforced at the send action.
+- Role rules: focus blue is only for keyboard/input focus; unavailable AI readiness may
+  disable sending but must not disable draft composition.
+- Media strategy: code-native controls and Lucide icons only.
+- Reject: wider global panels as a symptom workaround, nested horizontal scrolling,
+  decorative cards, or loss of a typed draft while the model is loading.
+
+### Repair decision ledger
+
+| Decision | Source | Source role | Implementation reason |
+|---|---|---|---|
+| Give the entire Properties form one 8px content gutter | Craft info sidebar + Attio spacing | Narrow metadata layout | Keeps inputs, counts, and revision controls clear of the clipping edge |
+| Remove the nested list-only gutter | Existing Context Hub hierarchy | Internal alignment | Aligns editor, metadata, and history on one column instead of double-indenting one section |
+| Keep AI textarea editable before model readiness | GlossGenius AI side sheet | Composer interaction | Lets users prepare a prompt while loading/configuring the local model |
+| Gate only Send when the model is unavailable | Existing runtime contract | Readiness enforcement | Preserves safety without blocking text entry or IME composition |

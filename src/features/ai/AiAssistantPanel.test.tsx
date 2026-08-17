@@ -72,6 +72,26 @@ async function startGeneration(api: AiApi) {
 }
 
 describe('AiAssistantPanel', () => {
+  it('keeps a prompt draft editable while the local model is not ready', async () => {
+    const fixture = createApi();
+    vi.mocked(fixture.api.getStatus).mockResolvedValue({
+      ...readyStatus,
+      state: 'not_loaded',
+      modelExists: false,
+      tokenizerExists: false,
+    });
+
+    renderWithProviders(<AiAssistantPanel api={fixture.api} currentPageContent="# 출시" />);
+
+    const input = await screen.findByLabelText('AI 메시지');
+    await userEvent.type(input, '모델이 준비되면 보내기');
+
+    expect(input).toBeEnabled();
+    expect(input).toHaveValue('모델이 준비되면 보내기');
+    expect(screen.getByRole('button', { name: '전송' })).toBeDisabled();
+    expect(fixture.api.generate).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['짧게', 256],
     ['기본', 1024],

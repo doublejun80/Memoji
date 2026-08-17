@@ -244,7 +244,9 @@
 }
 
 .properties-list {
+  min-height: 0;
   gap: 0;
+  padding: 0;
 }
 
 .properties-list > div {

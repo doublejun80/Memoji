@@ -37,7 +37,6 @@ export function AiComposer({
         onCompositionEnd={() => { composingRef.current = false; }}
         placeholder={canGenerate ? '메시지를 입력하세요' : '모델 준비가 필요합니다'}
         rows={3}
-        disabled={!canGenerate && !isGenerating}
       />
       {isGenerating ? (
         <button type="button" onClick={onCancel} aria-label="생성 취소" title="생성 취소">

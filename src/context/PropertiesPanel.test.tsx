@@ -18,6 +18,14 @@ const page: Page = {
 };
 
 describe('PropertiesPanel', () => {
+  it('uses one shared context gutter for the full properties surface', () => {
+    const { container } = renderWithProviders(<PropertiesPanel page={page} onPageUpdate={vi.fn()} />);
+
+    const editor = container.querySelector('form.properties-editor');
+    expect(editor).toHaveClass('context-panel-stack');
+    expect(editor?.querySelector('.properties-list')).not.toHaveClass('context-panel-stack');
+  });
+
   it('edits and persists supported document properties into Markdown metadata', async () => {
     const onPageUpdate = vi.fn();
     renderWithProviders(<PropertiesPanel page={page} onPageUpdate={onPageUpdate} />);
