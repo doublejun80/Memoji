@@ -8,9 +8,10 @@ Memoji의 현행 소스와 GitHub 기본 브랜치는 React/TypeScript, Tauri/Ru
 Milkdown, LiteRT-LM 0.16.0 C API 기반의 Memoji 2.0으로 전환했다. 구버전은 삭제 대신
 복구 가능한 브랜치·태그·외부 보관본으로 봉인했다.
 
-Windows VDI 배포 후보는 서명되지 않은 시험판으로만 만든다. GitHub Windows runner에서
-Rust 품질 검증과 실제 `app.exe` 빌드는 통과했다. 다만 최종 분할 자산 게시와 대상 VDI의
-EDR·실행·성능 검증은 아직 완료 전이므로 정식 GA 또는 서명 완료 상태로 판정하지 않는다.
+Windows VDI 배포 후보는 서명되지 않은 시험판으로 만들었다. `v2.0.0-rc.4`는 GitHub
+Windows runner에서 Rust 품질 검증, 실제 `app.exe` 빌드, LiteRT-LM/Gemma 4 E2B 토큰
+생성, 분할 패키징과 prerelease 게시를 통과했다. 다만 대상 VDI의 EDR·실행·성능 검증은
+아직 완료 전이므로 정식 GA 또는 서명 완료 상태로 판정하지 않는다.
 
 ## 1. 구버전 보관과 현행 기준선
 
@@ -79,12 +80,34 @@ manifest와 다르면 부분 결과를 삭제하고 실패 처리한다.
 - Windows에서는 배치 파일 대신 현재 `node.exe`가 함께 설치된 npm의 `npm-cli.js`를 직접
   실행하도록 변경했다. 이 방식은 `cmd.exe` shell·인자 quoting·배치 실행에 의존하지 않는다.
 
-### 다음 RC
+### `v2.0.0-rc.4` — 성공
 
-다음 RC에는 위 `npm-cli.js` 직접 실행 수정을 포함한다. 태그와 최종 Release URL, 자산
-크기·체크섬은 실제 게시 성공 후 이 문서에 확정한다.
+- Actions 실행: <https://github.com/doublejun80/Memoji/actions/runs/32021714688>
+- prerelease: <https://github.com/doublejun80/Memoji/releases/tag/v2.0.0-rc.4>
+- 전체 workflow 성공: 1시간 6분 10초
+- Windows x64 GUI `Memoji.exe`, console benchmark, `litert-lm.dll`의 PE32+ 형식 확인
+- CycloneDX 1.5 SBOM 1,073개 구성요소 생성
+- runtime/model SHA-256, 인프로세스 transport, localhost/Python 부재 gate 통과
+- `realGenerationSmoke: true`, `status: passed-vdi-host` 확인
+- 2.59GB 모델 분할, core ZIP, 조립 스크립트와 release checksum 게시 성공
 
-## 4. 현재 검증 결과
+## 4. 게시 자산과 로컬 검증
+
+| 자산 | 바이트 | SHA-256 |
+|---|---:|---|
+| `Memoji-2.0.0-rc.4-windows-x64-vdi-core.zip` | 189,189,339 | `78f78959f5cf55124ba7d60ea2efa5ba93295053f3bb05458aea252e35b9c4f2` |
+| `Memoji-2.0.0-rc.4-gemma-4-E2B-it.litertlm.part001` | 1,900,000,000 | `106bb1f0c82fd8b16b124770497b43cb050c00fd7d71f8e40306bc0b273d131c` |
+| `Memoji-2.0.0-rc.4-gemma-4-E2B-it.litertlm.part002` | 688,147,712 | `80a88cd6cb9e585dd1dd6f7874bdbdaf630c7738355fe89f3be78c1c98ea6dd0` |
+| `Assemble-Memoji-VDI.ps1` | 1,718 | `50d147c8e8c66104cb33f762908196eebf3631f4f194cbe6358eb0d638404f96` |
+| `release-manifest.json` | 496 | `530b8e1e47ff1c539b56ddfef1d1681a97b15c759b7bd676cc1d7e4580d5a21a` |
+
+모든 자산은 `/Volumes/doublejun/Memoji-VDI-Releases/v2.0.0-rc.4/`에 내려받았다. release
+`SHA256SUMS`를 기준으로 5개 payload가 모두 일치했다. core ZIP을 `core/`에 풀고 두 모델
+조각을 순서대로 스트리밍 결합한 결과는 2,588,147,712바이트였으며 원본 모델 SHA-256
+`181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c`와 일치했다. 결합 후
+core 내부의 153개 파일 체크섬도 전부 통과했다.
+
+## 5. 현재 검증 결과
 
 2026-08-17 현행 소스에서 다음 검사를 새로 실행했다.
 
@@ -99,10 +122,11 @@ Rust 결과는 108개 통과(라이브 모델 자산이 필요한 3개 ignored �
 프런트엔드 검사는 Vitest, TypeScript 검사와 Vite production build를 포함한다.
 
 라이브 모델 테스트가 ignored인 것은 소스 저장소에 수 GiB 모델을 넣지 않기 때문이다.
-Windows 전용 workflow는 모델과 런타임을 다운로드한 뒤 strict manifest 검증, 실제 1회 생성
-smoke, 벤치마크를 실행하도록 구성했다.
+Windows 전용 workflow는 모델과 런타임을 다운로드한 뒤 strict manifest 검증과 실제 1회
+생성 smoke를 통과했다. 대상 VDI용 10회 반복 benchmark matrix는 사용자가 산출물을 VDI로
+옮긴 뒤 실행한다.
 
-## 5. 사용자 데이터와 롤백
+## 6. 사용자 데이터와 롤백
 
 - Windows 기본 portable 데이터는 실행물 옆 `data`에 저장하며 `MEMOJI_DATA_PATH`로 VDI
   영속 드라이브를 지정할 수 있다.
@@ -112,7 +136,7 @@ smoke, 벤치마크를 실행하도록 구성했다.
 - 문제가 생기면 앱을 종료하고 `data/memoji.db`를 보관한 뒤 가장 최근 backup DB를 복사해
   되돌린다. 앱 자체는 core ZIP을 새 폴더에 다시 풀어 교체할 수 있다.
 
-## 6. 아직 완료로 부르지 않는 항목
+## 7. 아직 완료로 부르지 않는 항목
 
 - Authenticode 서명 및 서명 체인 검증
 - 실제 대상 Windows VDI에서 실행·종료·재실행 후 데이터 영속성 확인

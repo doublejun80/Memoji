@@ -37,10 +37,11 @@ Memoji 2.0의 코드·데이터·UI 업그레이드는 독립 worktree에서 구
 
 코어 앱과 실제 Gemma 4 E2B 생성 경로는 구현·검증됐다. 기존 Python/HTTP sidecar를 제거해
 포트와 외부 요청 표면이 없는 인프로세스 구조로 바뀌었으므로 FR-078(Runtime Auth)은 더
-이상 서버 인증 기능에 의존하지 않는다. 그러나 **서명된 Windows VDI GA 출시는 현재
-NO-GO**다. FR-090(Signed Release)은 Windows 코드 서명 인증서·키와 실제 Windows 릴리스
-환경이 없어 검증되지 않았다. 또한 target VDI의 EDR·peak RSS·성능 수용 증빙은 별도 외부
-gate다. 사용자의 지시대로 이 단계에서는 Windows 배포물을 만들지 않았다.
+이상 서버 인증 기능에 의존하지 않는다. GitHub Windows runner에서 unsigned
+`v2.0.0-rc.4`의 실제 EXE 빌드, SBOM, E2B 토큰 생성과 분할 prerelease 게시까지 통과했다.
+그러나 **서명된 Windows VDI GA 출시는 현재 NO-GO**다. FR-090(Signed Release)은 Windows
+코드 서명 인증서·키가 없어 검증되지 않았다. 또한 target VDI의 EDR·peak RSS·성능 수용
+증빙은 별도 외부 gate다.
 
 ## 2. GitHub 기준선과 업그레이드 패키지의 차이
 
@@ -334,10 +335,9 @@ process도 실행했다. 로그에서 schema v6 migration, official E2B bundle d
 909,826 bytes raw / 287,531 bytes gzip은 문서를 열 때 지연 로드된다. 전체 JS asset 합계나
 이 수치를 설치 프로그램 크기로 해석하면 안 된다.
 
-**코어 앱 크기와 AI 번들 크기는 분리한다.** 이 호스트에서는 signed installer를 만들지
-않았으므로 MSI/NSIS/EXE 크기를 주장하지 않는다. LiteRT runtime과 Gemma model은 별도
-검증·서명해야 하는 multi-gigabyte 배포 자산이며, 실제 선택 모델을 준비한 Windows build의
-manifest byte count가 유일한 릴리스 크기 근거다.
+**코어 앱 크기와 AI 번들 크기는 분리한다.** unsigned RC4의 `Memoji.exe`는 24,992,768
+bytes, Windows LiteRT DLL은 48,424,448 bytes, Gemma 4 E2B 모델은 2,588,147,712 bytes다.
+이는 portable 시험판의 구성요소 크기이며 signed MSI/NSIS installer 크기로 해석하지 않는다.
 
 ## 10. Local AI와 Windows VDI
 
@@ -357,10 +357,12 @@ cache가 warm일 수 있으므로 이 수치를 물리 디스크 cold-start로 �
 존재하지 않았다. Vite의 `[::1]:1420` listener는 Tauri 개발 UI hot reload 전용이며 배포
 runtime의 AI transport가 아니다.
 
-target Windows VDI에서는 checked-in benchmark executable로 thread/prompt/output matrix,
-peak RSS, EDR, 재시작을 다시 측정해야 한다. Windows bundle script는 runtime DLL과 model을
-offline staging하고 인증서가 제공되면 app/benchmark/DLL을 SignTool로 서명·검증하도록
-작성됐지만, 이번 단계에서는 Windows 배포물을 생성하지 않았다.
+GitHub Windows runner에서는 RC4의 runtime/model 해시, 인프로세스 transport, Python·포트
+부재와 실제 생성 smoke를 통과했다. unsigned 분할 배포물은
+<https://github.com/doublejun80/Memoji/releases/tag/v2.0.0-rc.4>에 게시했다. target Windows
+VDI에서는 포함된 benchmark executable로 thread/prompt/output matrix, peak RSS, EDR,
+재시작을 다시 측정해야 한다. 인증서가 제공되면 app/benchmark/DLL을 SignTool로
+서명·검증하는 정식 경로는 별도로 유지한다.
 
 ## 11. 보안·릴리스·롤백
 
@@ -370,7 +372,8 @@ CI는 프런트엔드 check와 Rust fmt/clippy/test를 통과해야 bundle 단�
 CycloneDX 문서는 npm/Cargo/LiteRT C API/Gemma E2B·E4B를 포함한 1,073 components로
 생성했다. Windows scripts는 서명 입력이 없으면 기본 실패하고 명시적 비-GA
 `AllowUnsigned`만 예외로 허용한다. CI도 PFX secret으로 app/NSIS를 Authenticode 서명·검증한
-뒤에만 업로드한다. 실제 인증서와 Windows artifact가 없으므로 FR-090은 P0 차단으로 판정했다.
+뒤에만 업로드한다. unsigned Windows artifact는 생성됐지만 실제 인증서와 서명 artifact가
+없으므로 FR-090은 P0 차단으로 판정했다.
 
 소스 기본 동작은 cloud LLM endpoint를 사용하지 않으며 외부 host 저장을 거부한다. DB는
 import/migration 전에 backup하고, export snapshot에도 hash와 schema provenance를 남긴다.
