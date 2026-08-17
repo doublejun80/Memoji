@@ -66,7 +66,7 @@ foreach ($payload in $forbiddenPayloads) {
 
 Compress-Archive -Path (Join-Path $stageRoot "*") -DestinationPath $zipPath -CompressionLevel Optimal
 $zipHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath).Hash.ToLowerInvariant()
-Set-Content -Path (Join-Path $outputRoot "SHA256SUMS") -Encoding ascii -Value "$zipHash  $([IO.Path]::GetFileName($zipPath))"
+Set-Content -NoNewline -Path (Join-Path $outputRoot "SHA256SUMS") -Encoding ascii -Value "$zipHash  $([IO.Path]::GetFileName($zipPath))"
 
 Write-Host "Windows VDI app-only patch ready: $zipPath"
 Get-ChildItem -LiteralPath $outputRoot -File | Sort-Object Name | Select-Object Name, Length

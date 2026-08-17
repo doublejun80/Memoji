@@ -12,6 +12,7 @@ describe('Windows VDI packaging scripts', () => {
     expect(patchScript).toContain('npm run tauri:build -- --no-bundle');
     expect(patchScript).toContain('Memoji.exe');
     expect(patchScript).toContain('Start-Memoji-VDI.cmd');
+    expect(patchScript).toContain('Set-Content -NoNewline');
     expect(patchScript).not.toContain('prepare-vdi-ai-bundle.mjs');
     expect(patchScript).not.toContain('DownloadModel');
     expect(patchScript).not.toContain('Remove-Item -LiteralPath $ExistingBundle');
