@@ -40,6 +40,19 @@ describe('VDI local AI runtime contract', () => {
     expect(script).not.toContain('litert_lm_cli.main serve');
   });
 
+  it('keeps native LiteRT loading out of the desktop shell startup path', () => {
+    const appStartup = readFileSync(resolve(process.cwd(), 'src-tauri/src/lib.rs'), 'utf8');
+    const setupStart = appStartup.indexOf('.setup(|app|');
+    const manageState = appStartup.indexOf('app.manage(AppState', setupStart);
+    const startupPath = appStartup.slice(setupStart, manageState);
+
+    expect(setupStart).toBeGreaterThan(-1);
+    expect(manageState).toBeGreaterThan(setupStart);
+    expect(startupPath).toContain('LiteRtManager::discover');
+    expect(startupPath).not.toContain('ensure_started_for');
+    expect(startupPath).not.toContain('auto_start_litert_model');
+  });
+
   it('ships an in-process VDI benchmark matrix and a cross-platform runtime-aware SBOM generator', () => {
     const benchmark = readFileSync(resolve(process.cwd(), 'src-tauri/src/bin/memoji-vdi-benchmark.rs'), 'utf8');
     const sbom = readFileSync(resolve(process.cwd(), 'scripts/generate-sbom.mjs'), 'utf8');

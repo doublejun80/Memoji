@@ -7,6 +7,16 @@ function script(name: string) {
 }
 
 describe('Windows VDI packaging scripts', () => {
+  it('builds an app-only patch that leaves the existing AI bundle and user data untouched', () => {
+    const patchScript = script('build-windows-vdi-app-patch.ps1');
+    expect(patchScript).toContain('npm run tauri:build -- --no-bundle');
+    expect(patchScript).toContain('Memoji.exe');
+    expect(patchScript).toContain('Start-Memoji-VDI.cmd');
+    expect(patchScript).not.toContain('prepare-vdi-ai-bundle.mjs');
+    expect(patchScript).not.toContain('DownloadModel');
+    expect(patchScript).not.toContain('Remove-Item -LiteralPath $ExistingBundle');
+  });
+
   it('marks unsigned builds and verifies the native runtime bundle', () => {
     const buildScript = script('build-windows-vdi.ps1');
     expect(buildScript).toContain('[switch]$AllowUnsigned');

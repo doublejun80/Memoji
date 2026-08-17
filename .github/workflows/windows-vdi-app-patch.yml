@@ -1,0 +1,67 @@
+name: Windows VDI App Patch
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: App-only patch label
+        required: true
+        default: 2.0.0-rc.6
+        type: string
+
+concurrency:
+  group: windows-vdi-app-patch-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-app-patch:
+    name: Build app-only VDI patch
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust MSVC
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          cache-on-failure: true
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run app patch regression gates
+        shell: pwsh
+        run: |
+          npx vitest run src/test/localAiRuntimeContract.test.ts src/test/windowsVdiPackagingScripts.test.ts
+          if ($LASTEXITCODE -ne 0) { throw "App patch contract tests failed." }
+          cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check
+          if ($LASTEXITCODE -ne 0) { throw "cargo fmt failed." }
+
+      - name: Build app-only patch without model download
+        shell: pwsh
+        run: pwsh -File scripts/build-windows-vdi-app-patch.ps1 -Version "${{ inputs.version }}"
+
+      - name: Upload app-only patch
+        uses: actions/upload-artifact@v4
+        with:
+          name: Memoji-${{ inputs.version }}-windows-x64-app-only
+          path: |
+            release/windows-vdi-app-patch/*.zip
+            release/windows-vdi-app-patch/SHA256SUMS
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error

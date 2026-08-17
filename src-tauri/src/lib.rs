@@ -1545,30 +1545,11 @@ pub fn run() {
             });
             let litert_manager = LiteRtManager::discover(&resource_dir, &data_dir);
             let litert_status = litert_manager.status();
-            let auto_start_litert_model = MtpConfig::from_env_result()
-                .ok()
-                .flatten()
-                .or_else(|| {
-                    read_runtime_config_from_db(&db)
-                        .ok()
-                        .and_then(|config| config.to_mtp_config().ok().flatten())
-                })
-                .filter(should_manage_litert)
-                .map(|config| config.model);
             if litert_status.available {
                 log::info!(
-                    "LiteRT-LM runtime discovered: bundled={}",
+                    "LiteRT-LM runtime discovered for on-demand loading: bundled={}",
                     litert_status.bundled
                 );
-                if let Some(model) = auto_start_litert_model.as_deref() {
-                    if let Err(error) = litert_manager.ensure_started_for(model) {
-                        log::warn!(
-                            "LiteRT-LM auto start failed: code={}",
-                            diagnostic_error_code(Some(&error))
-                                .unwrap_or_else(|| "runtime_error".into())
-                        );
-                    }
-                }
             } else {
                 log::warn!("LiteRT-LM runtime/model bundle was not found");
             }
