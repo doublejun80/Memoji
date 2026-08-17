@@ -5,6 +5,7 @@ param(
     [string]$SignToolPath = "",
     [string]$CertificateThumbprint = "",
     [string]$TimestampUrl = "http://timestamp.digicert.com",
+    [string]$WebView2OfflineInstallerUrl = "https://go.microsoft.com/fwlink/?linkid=2124701",
     [switch]$AllowUnsigned
 )
 
@@ -17,6 +18,8 @@ if ($signingConfigured -and -not (Test-Path $SignToolPath)) { throw "SignToolPat
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $releaseRoot = Join-Path $repoRoot "release\memoji-vdi"
 $aiRoot = Join-Path $releaseRoot "ai"
+$webView2Root = Join-Path $releaseRoot "webview2"
+$webView2Installer = Join-Path $webView2Root "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
 $unsignedMarker = Join-Path $releaseRoot "UNSIGNED-VDI-PILOT.txt"
 Set-Location $repoRoot
 New-Item -ItemType Directory -Force -Path $releaseRoot | Out-Null
@@ -47,7 +50,21 @@ $releaseApp = Join-Path $releaseRoot "Memoji.exe"
 $releaseBenchmark = Join-Path $releaseRoot "memoji-vdi-benchmark.exe"
 Copy-Item $appPath $releaseApp -Force
 Copy-Item $benchmarkPath $releaseBenchmark -Force
+Copy-Item (Join-Path $PSScriptRoot "Start-Memoji-VDI.cmd") (Join-Path $releaseRoot "Start-Memoji-VDI.cmd") -Force
 New-Item -ItemType Directory -Force -Path (Join-Path $releaseRoot "data") | Out-Null
+New-Item -ItemType Directory -Force -Path $webView2Root | Out-Null
+
+Invoke-WebRequest -Uri $WebView2OfflineInstallerUrl -OutFile $webView2Installer
+if (-not (Test-Path $webView2Installer -PathType Leaf)) {
+    throw "WebView2 offline installer download failed."
+}
+if ((Get-Item $webView2Installer).Length -lt 100MB) {
+    throw "Downloaded WebView2 file is too small to be the x64 offline installer."
+}
+$webView2Signature = Get-AuthenticodeSignature -FilePath $webView2Installer
+if ($webView2Signature.Status -ne "Valid" -or $webView2Signature.SignerCertificate.Subject -notmatch "Microsoft Corporation") {
+    throw "WebView2 offline installer Authenticode verification failed."
+}
 
 node scripts/generate-sbom.mjs --output (Join-Path $releaseRoot "sbom.cdx.json")
 if ($LASTEXITCODE -ne 0) { throw "SBOM generation failed." }
@@ -75,16 +92,19 @@ Memoji 2.0 Windows VDI 오프라인 시험판
 1. 이 폴더 전체를 VDI의 쓰기 가능한 로컬 디스크로 복사합니다.
 2. Memoji.exe와 ai 폴더의 상대 위치를 그대로 유지합니다.
 3. 영구 저장 폴더가 필요하면 실행 전에 MEMOJI_DATA_PATH를 사용자 영구 드라이브로 지정합니다.
-4. Memoji.exe를 실행합니다. LiteRT-LM 0.16 C API는 앱 프로세스 안에서 동작하며 Python sidecar나 localhost 포트를 열지 않습니다.
-5. 배포 전에 다음 명령으로 대상 풀을 측정합니다.
+4. Start-Memoji-VDI.cmd를 실행합니다. WebView2 Runtime이 없으면 포함된 Microsoft 오프라인 설치 파일로 사용자 단위 설치를 먼저 시도합니다. Memoji.exe를 직접 실행해도 같은 사전 점검을 수행합니다.
+5. LiteRT-LM 0.16 C API는 앱 프로세스 안에서 동작하며 Python sidecar나 localhost 포트를 열지 않습니다.
+6. 배포 전에 다음 명령으로 대상 풀을 측정합니다.
    .\memoji-vdi-benchmark.exe --bundle .\ai --model gemma4-$ModelPreset --threads 2,4 --prompt-chars 256,1024 --output-tokens 64,256 --output .\vdi-benchmark.json
-6. 실패 로그는 앱 데이터 폴더의 logs와 vdi-benchmark.json을 함께 수집합니다. 문서 본문과 모델 파일은 로그에 포함하지 않습니다.
-7. 롤백하려면 Memoji.exe를 종료하고 이 시험판 폴더만 제거합니다. MEMOJI_DATA_PATH의 사용자 DB는 삭제하지 않습니다.
+7. 실패 시 Memoji-launch-diagnostics.txt, Memoji-startup-diagnostics.log, 앱 데이터 폴더의 logs와 vdi-benchmark.json을 함께 수집합니다. 문서 본문과 모델 파일은 로그에 포함하지 않습니다.
+8. 롤백하려면 Memoji.exe를 종료하고 이 시험판 폴더만 제거합니다. MEMOJI_DATA_PATH의 사용자 DB는 삭제하지 않습니다.
 
 E2B는 8GB 이상 VDI의 기본값입니다. E4B는 16GB 이상 풀에서 측정 후 사용합니다.
 모델·런타임 출처와 라이선스는 ai\NOTICE.txt 및 sbom.cdx.json에서 확인합니다.
 "@
 Set-Content -Path (Join-Path $releaseRoot "README-VDI.txt") -Value $instructions -Encoding UTF8
+node scripts/verify-windows-vdi-launch.mjs --bundle $releaseRoot
+if ($LASTEXITCODE -ne 0) { throw "Windows VDI launch contract verification failed." }
 node scripts/generate-checksums.mjs --input $releaseRoot --output (Join-Path $releaseRoot "SHA256SUMS")
 if ($LASTEXITCODE -ne 0) { throw "Checksum generation failed." }
 

@@ -130,6 +130,7 @@ dependencies = [
  "tokenizers",
  "tokio",
  "tokio-util",
+ "windows-sys 0.61.1",
  "zip",
 ]
 

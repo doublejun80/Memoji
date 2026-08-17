@@ -25,8 +25,10 @@ $modelRelativePath = [string]$manifest.model.file
 $modelPath = Join-Path (Join-Path $bundleRoot "ai") $modelRelativePath
 $requiredFiles = @(
     (Join-Path $bundleRoot "Memoji.exe"),
+    (Join-Path $bundleRoot "Start-Memoji-VDI.cmd"),
     (Join-Path $bundleRoot "memoji-vdi-benchmark.exe"),
     (Join-Path $bundleRoot "ai\runtime\lib\litert-lm.dll"),
+    (Join-Path $bundleRoot "webview2\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"),
     $manifestPath,
     $modelPath,
     (Join-Path $bundleRoot "sbom.cdx.json"),
@@ -42,7 +44,7 @@ New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
 $coreStage = Join-Path $outputRoot ".core-staging"
 New-Item -ItemType Directory -Force -Path $coreStage | Out-Null
 
-foreach ($fileName in @("Memoji.exe", "memoji-vdi-benchmark.exe", "README-VDI.txt", "UNSIGNED-VDI-PILOT.txt", "sbom.cdx.json", "SHA256SUMS")) {
+foreach ($fileName in @("Memoji.exe", "Start-Memoji-VDI.cmd", "memoji-vdi-benchmark.exe", "README-VDI.txt", "UNSIGNED-VDI-PILOT.txt", "sbom.cdx.json", "SHA256SUMS")) {
     $source = Join-Path $bundleRoot $fileName
     if (Test-Path $source) { Copy-Item -LiteralPath $source -Destination (Join-Path $coreStage $fileName) -Force }
 }
@@ -50,6 +52,7 @@ foreach ($fileName in @("Memoji.exe", "memoji-vdi-benchmark.exe", "README-VDI.tx
 $coreAi = Join-Path $coreStage "ai"
 New-Item -ItemType Directory -Force -Path $coreAi | Out-Null
 Copy-Item -LiteralPath (Join-Path $bundleRoot "ai\runtime") -Destination $coreAi -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $bundleRoot "webview2") -Destination $coreStage -Recurse -Force
 foreach ($fileName in @("bundle-manifest.json", "runtime-compatibility.json", "NOTICE.txt")) {
     $source = Join-Path $bundleRoot "ai\$fileName"
     if (-not (Test-Path $source)) { throw "Required AI metadata is missing: $source" }
