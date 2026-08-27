@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { renderWithProviders, screen, userEvent, within } from '../test/render';
+import { fireEvent, renderWithProviders, screen, userEvent, within } from '../test/render';
 import type { Page } from '../types';
 import { bindCommandKeyboard } from '../app/keyboardBindings';
 import type { LeftView } from '../app/workspaceState';
@@ -29,6 +29,16 @@ const projectPage: Page = {
   dateKey: null,
   projectIndex: true,
   content: '출시 계획',
+};
+
+const projectFolder: Page = {
+  ...projectPage,
+  id: 'project-folder-1',
+  title: 'GA 자료',
+  icon: '📁',
+  type: 'folder',
+  content: '',
+  order: 1,
 };
 
 const handlers = {
@@ -70,7 +80,7 @@ function SidebarHarness({ keyboard = false }: { keyboard?: boolean }) {
   }, [keyboard]);
 
   const props: WorkspaceSidebarProps = {
-    pages: [dailyPage, projectPage],
+    pages: [dailyPage, projectPage, projectFolder],
     dailyPages: [dailyPage],
     currentPage: dailyPage,
     currentPageIndex: 'daily',
@@ -111,5 +121,30 @@ describe('WorkspaceSidebar', () => {
     await userEvent.click(screen.getByText('GA 출시'));
     expect(handlers.onPageSelect).toHaveBeenCalledWith(projectPage, 'project');
     expect(container.querySelector('[data-sidebar-wide-layout]')).not.toBeInTheDocument();
+  });
+
+  it('opens title editing from right click for daily pages and project folders', async () => {
+    handlers.onPageUpdate.mockClear();
+    renderWithProviders(<SidebarHarness />);
+
+    await userEvent.click(screen.getByRole('button', { name: '데일리' }));
+    fireEvent.contextMenu(screen.getByText('오늘 메모'));
+    await userEvent.click(screen.getByRole('button', { name: '수정' }));
+    const dailyTitleInput = screen.getByDisplayValue('오늘 메모');
+    await userEvent.clear(dailyTitleInput);
+    await userEvent.type(dailyTitleInput, '오늘 제목 수정{Enter}');
+    expect(handlers.onPageUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: dailyPage.id, title: '오늘 제목 수정' })
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: '프로젝트' }));
+    fireEvent.contextMenu(screen.getByText('GA 자료'));
+    await userEvent.click(screen.getByRole('button', { name: '수정' }));
+    const folderTitleInput = screen.getByDisplayValue('GA 자료');
+    await userEvent.clear(folderTitleInput);
+    await userEvent.type(folderTitleInput, '출품 자료{Enter}');
+    expect(handlers.onPageUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: projectFolder.id, title: '출품 자료' })
+    );
   });
 });

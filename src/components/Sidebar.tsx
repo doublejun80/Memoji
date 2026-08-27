@@ -193,6 +193,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setEmojiMenuPage(null);
   };
 
+  const handleItemContextMenu = (pageId: string, event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setOpenMenu(pageId);
+    setEmojiMenuPage(null);
+  };
+
   const closeFloatingControls = (pageId: string) => {
     setOpenMenu(currentOpenMenu => (
       currentOpenMenu === pageId ? null : currentOpenMenu
@@ -341,6 +348,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   className={`${INDEX_ITEM_ROW_CLASS} ${isSelected ? 'bg-accent' : ''}`}
                   style={INDEX_ITEM_STYLE}
                   onMouseLeave={() => closeFloatingControls(page.id)}
+                  onContextMenu={(event) => handleItemContextMenu(page.id, event)}
                 >
                   <div
                     className={`${INDEX_ITEM_BUTTON_CLASS} cursor-pointer`}
@@ -363,6 +371,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         }}
                         className="h-5 px-1 py-0 text-xs"
                         autoFocus
+                        aria-label="페이지 제목"
                         onClick={(event) => event.stopPropagation()}
                       />
                     ) : (
@@ -498,6 +507,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             } ${dropTargetPageId === page.id ? 'ring-1 ring-primary/60' : ''}`}
             style={{ ...INDEX_ITEM_STYLE, paddingLeft: `${6 + level * 12}px` }}
             onMouseLeave={() => closeFloatingControls(page.id)}
+            onContextMenu={(event) => handleItemContextMenu(page.id, event)}
             draggable
             onDragStart={(event) => {
               event.dataTransfer.effectAllowed = 'move';
@@ -571,6 +581,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   }}
                   className="h-5 px-1 py-0 text-xs"
                   autoFocus
+                  aria-label={page.type === 'folder' ? '폴더 제목' : '페이지 제목'}
                   onClick={(event) => event.stopPropagation()}
                 />
               ) : (
