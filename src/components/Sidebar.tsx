@@ -10,9 +10,16 @@ import {
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger
+  AlertDialogTitle
 } from './ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
 import {
   ArrowDown,
   ArrowUp,
@@ -39,11 +46,9 @@ import { getProjectIndexPages, getProjectParentId } from '../utils/pageModel';
 const EMOJI_PALETTE = ['📝', '📄', '📌', '✅', '💡', '📚', '📅', '💼', '🚀', '⭐', '🔥', '🎯', '🔎', '🧠', '🛠️', '📊', '🔐', '🏠', '📁', '🙂'];
 const INDEX_ITEM_ROW_CLASS = 'group flex items-center gap-1 rounded px-1 py-2 hover:bg-accent';
 const INDEX_ITEM_BUTTON_CLASS = 'flex min-w-0 flex-1 items-center gap-2 text-left';
-const ACTION_MENU_CLASS = 'absolute right-0 top-7 z-50 flex items-center gap-1 rounded-lg border border-border bg-popover p-1.5 shadow-lg';
-const ACTION_BUTTON_CLASS = 'inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground [&>svg]:block [&>svg]:shrink-0';
-const ACTION_BUTTON_DISABLED_CLASS = 'inline-flex h-7 w-7 flex-shrink-0 cursor-not-allowed items-center justify-center rounded-md p-0 text-muted-foreground opacity-30 [&>svg]:block [&>svg]:shrink-0';
-const ACTION_DIVIDER_CLASS = 'hidden';
 const ACTION_ICON_CLASS = 'size-[15px] stroke-[2.2]';
+const ACTION_MENU_CONTENT_CLASS = 'w-48 text-xs';
+const ACTION_MENU_ITEM_CLASS = 'text-xs';
 const INDEX_LIST_STYLE: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
@@ -117,6 +122,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [editingPage, setEditingPage] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [pendingDeletePage, setPendingDeletePage] = useState<Page | null>(null);
   const [emojiMenuPage, setEmojiMenuPage] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState<PageNavigationIndex>(forcedIndex ?? 'daily');
   const [draggedPageId, setDraggedPageId] = useState<string | null>(null);
@@ -164,6 +170,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setOpenMenu(null);
   };
 
+  const startEditingAfterMenuClose = (page: Page) => {
+    setOpenMenu(null);
+    window.setTimeout(() => startEditing(page), 0);
+  };
+
   const finishEditing = () => {
     if (editingPage && editTitle.trim()) {
       const page = pages.find(p => p.id === editingPage);
@@ -187,26 +198,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return `${month}월 ${date}일(${dayName})`;
   };
 
-  const handleMenuClick = (pageId: string, event: React.MouseEvent) => {
-    event.stopPropagation();
-    setOpenMenu(openMenu === pageId ? null : pageId);
-    setEmojiMenuPage(null);
-  };
-
   const handleItemContextMenu = (pageId: string, event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
     setOpenMenu(pageId);
     setEmojiMenuPage(null);
-  };
-
-  const closeFloatingControls = (pageId: string) => {
-    setOpenMenu(currentOpenMenu => (
-      currentOpenMenu === pageId ? null : currentOpenMenu
-    ));
-    setEmojiMenuPage(currentEmojiMenuPage => (
-      currentEmojiMenuPage === pageId ? null : currentEmojiMenuPage
-    ));
   };
 
   const updatePageIcon = (page: Page, icon: string) => {
@@ -347,7 +343,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   key={page.id}
                   className={`${INDEX_ITEM_ROW_CLASS} ${isSelected ? 'bg-accent' : ''}`}
                   style={INDEX_ITEM_STYLE}
-                  onMouseLeave={() => closeFloatingControls(page.id)}
                   onContextMenu={(event) => handleItemContextMenu(page.id, event)}
                 >
                   <div
@@ -381,76 +376,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                   </div>
 
-                  <div className={`relative flex-shrink-0 transition-opacity ${isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="flex h-6 w-6 items-center justify-center p-1 hover:bg-accent"
-                      onClick={(event: React.MouseEvent) => handleMenuClick(page.id, event)}
-                      title="페이지 메뉴"
-                      aria-label="페이지 메뉴"
+                  <DropdownMenu
+                    open={isMenuOpen}
+                    onOpenChange={(open) => setOpenMenu(open ? page.id : null)}
+                  >
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className={`flex h-6 w-6 flex-shrink-0 items-center justify-center p-1 transition-opacity hover:bg-accent ${
+                          isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                        }`}
+                        onClick={(event: React.MouseEvent) => event.stopPropagation()}
+                        title="페이지 메뉴"
+                        aria-label="페이지 메뉴"
+                      >
+                        <MoreHorizontal className="h-3 w-3" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="end"
+                      sideOffset={4}
+                      collisionPadding={8}
+                      className={ACTION_MENU_CONTENT_CLASS}
+                      onCloseAutoFocus={(event) => event.preventDefault()}
                     >
-                      <MoreHorizontal className="h-3 w-3" />
-                    </Button>
-
-                    {isMenuOpen && (
-                      <div
-                        className={ACTION_MENU_CLASS}
-                        onMouseDown={(event) => {
-                          event.stopPropagation();
+                      <DropdownMenuItem
+                        className={ACTION_MENU_ITEM_CLASS}
+                        onSelect={() => startEditingAfterMenuClose(page)}
+                      >
+                        <ActionGlyph name="edit" />
+                        이름 수정
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className={ACTION_MENU_ITEM_CLASS}
+                        variant="destructive"
+                        onSelect={() => {
+                          setOpenMenu(null);
+                          setPendingDeletePage(page);
                         }}
                       >
-                        <button
-                          className={ACTION_BUTTON_CLASS}
-                          onMouseDown={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            startEditing(page);
-                          }}
-                          title="수정"
-                          aria-label="수정"
-                        >
-                          <ActionGlyph name="edit" />
-                        </button>
-
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <button
-                              className={`${ACTION_BUTTON_CLASS} hover:text-destructive`}
-                              onMouseDown={(event) => {
-                                event.stopPropagation();
-                              }}
-                              title="삭제"
-                              aria-label="삭제"
-                            >
-                              <ActionGlyph name="delete" />
-                            </button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>페이지 삭제</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                '{page.title}' 페이지를 정말 삭제하시겠습니까?<br />
-                                이 작업은 되돌릴 수 없습니다.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel onClick={() => setOpenMenu(null)}>취소</AlertDialogCancel>
-                              <AlertDialogAction
-                                onClick={() => {
-                                  onPageDelete(page.id);
-                                  setOpenMenu(null);
-                                }}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              >
-                                삭제
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    )}
-                  </div>
+                        <ActionGlyph name="delete" />
+                        삭제
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               );
             })}
@@ -506,7 +477,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               isSelected ? 'bg-accent' : ''
             } ${dropTargetPageId === page.id ? 'ring-1 ring-primary/60' : ''}`}
             style={{ ...INDEX_ITEM_STYLE, paddingLeft: `${6 + level * 12}px` }}
-            onMouseLeave={() => closeFloatingControls(page.id)}
             onContextMenu={(event) => handleItemContextMenu(page.id, event)}
             draggable
             onDragStart={(event) => {
@@ -593,179 +563,137 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
             </div>
 
-            <div className={`relative transition-opacity ${isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="flex h-6 w-6 items-center justify-center p-1 hover:bg-accent"
-                onClick={(event: React.MouseEvent) => handleMenuClick(page.id, event)}
-                title="페이지 메뉴"
-                aria-label="페이지 메뉴"
-              >
-                <MoreHorizontal className="h-3 w-3" />
-              </Button>
-
-              {isMenuOpen && (
-                <div
-                  className={ACTION_MENU_CLASS}
-                  onMouseDown={(event) => {
-                    event.stopPropagation();
-                  }}
+            <DropdownMenu
+              open={isMenuOpen}
+              onOpenChange={(open) => setOpenMenu(open ? page.id : null)}
+            >
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={`flex h-6 w-6 flex-shrink-0 items-center justify-center p-1 transition-opacity hover:bg-accent ${
+                    isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                  }`}
+                  onClick={(event: React.MouseEvent) => event.stopPropagation()}
+                  title="페이지 메뉴"
+                  aria-label="페이지 메뉴"
                 >
-                  <button
-                    className={ACTION_BUTTON_CLASS}
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      startEditing(page);
-                    }}
-                    title="수정"
-                    aria-label="수정"
+                  <MoreHorizontal className="h-3 w-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                sideOffset={4}
+                collisionPadding={8}
+                className={ACTION_MENU_CONTENT_CLASS}
+                onCloseAutoFocus={(event) => event.preventDefault()}
+              >
+                <DropdownMenuGroup>
+                  <DropdownMenuItem
+                    className={ACTION_MENU_ITEM_CLASS}
+                    onSelect={() => startEditingAfterMenuClose(page)}
                   >
                     <ActionGlyph name="edit" />
-                  </button>
-
-                  <button
-                    className={ACTION_BUTTON_CLASS}
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
+                    이름 수정
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={ACTION_MENU_ITEM_CLASS}
+                    onSelect={() => {
                       onProjectPageCreate('하위 페이지', page.id);
                       setExpandedPages(prev => new Set(prev).add(page.id));
                       setOpenMenu(null);
                     }}
-                    title="하위 페이지 추가"
-                    aria-label="하위 페이지 추가"
                   >
                     <ActionGlyph name="page-add" />
-                  </button>
-
-                  <button
-                    className={ACTION_BUTTON_CLASS}
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
+                    하위 페이지 추가
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={ACTION_MENU_ITEM_CLASS}
+                    onSelect={() => {
                       onProjectFolderCreate('하위 폴더', page.id);
                       setExpandedPages(prev => new Set(prev).add(page.id));
                       setOpenMenu(null);
                     }}
-                    title="하위 폴더 추가"
-                    aria-label="하위 폴더 추가"
                   >
                     <ActionGlyph name="folder-add" />
-                  </button>
+                    하위 폴더 추가
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
 
-                  <div className={ACTION_DIVIDER_CLASS} />
+                <DropdownMenuSeparator />
 
-                  <button
-                    className={canMoveIntoPreviousFolder ? ACTION_BUTTON_CLASS : ACTION_BUTTON_DISABLED_CLASS}
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      if (previousSiblingFolder) {
-                        moveIntoFolder(page.id, previousSiblingFolder.id);
-                      }
-                    }}
+                <DropdownMenuGroup>
+                  <DropdownMenuItem
+                    className={ACTION_MENU_ITEM_CLASS}
                     disabled={!canMoveIntoPreviousFolder}
-                    title={previousSiblingFolder ? `'${previousSiblingFolder.title}' 안으로 이동` : '앞쪽 폴더 안으로 이동'}
-                    aria-label="앞쪽 폴더 안으로 이동"
+                    onSelect={() => {
+                      if (previousSiblingFolder) moveIntoFolder(page.id, previousSiblingFolder.id);
+                    }}
                   >
                     <ActionGlyph name="folder-in" />
-                  </button>
-
-                  <button
-                    className={canMoveOut ? ACTION_BUTTON_CLASS : ACTION_BUTTON_DISABLED_CLASS}
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
+                    {previousSiblingFolder ? `'${previousSiblingFolder.title}' 안으로` : '앞쪽 폴더 안으로'}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={ACTION_MENU_ITEM_CLASS}
+                    disabled={!canMoveOut}
+                    onSelect={() => {
                       if (canMoveOut) {
                         onPageParentChange(page.id, parentPage ? getProjectParentId(parentPage) : null);
                         setOpenMenu(null);
                       }
                     }}
-                    disabled={!canMoveOut}
-                    title="상위 폴더로 빼기"
-                    aria-label="상위 폴더로 빼기"
                   >
                     <ActionGlyph name="folder-out" />
-                  </button>
+                    상위 폴더로 빼기
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
 
-                  <div className={ACTION_DIVIDER_CLASS} />
+                <DropdownMenuSeparator />
 
-                  <button
-                    className={canMoveUp ? ACTION_BUTTON_CLASS : ACTION_BUTTON_DISABLED_CLASS}
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
+                <DropdownMenuGroup>
+                  <DropdownMenuItem
+                    className={ACTION_MENU_ITEM_CLASS}
+                    disabled={!canMoveUp}
+                    onSelect={() => {
                       if (canMoveUp) {
                         onPageMove(page.id, 'up');
                         setOpenMenu(null);
                       }
                     }}
-                    disabled={!canMoveUp}
-                    title="위로 이동"
-                    aria-label="위로 이동"
                   >
                     <ActionGlyph name="up" />
-                  </button>
-
-                  <button
-                    className={canMoveDown ? ACTION_BUTTON_CLASS : ACTION_BUTTON_DISABLED_CLASS}
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
+                    위로 이동
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={ACTION_MENU_ITEM_CLASS}
+                    disabled={!canMoveDown}
+                    onSelect={() => {
                       if (canMoveDown) {
                         onPageMove(page.id, 'down');
                         setOpenMenu(null);
                       }
                     }}
-                    disabled={!canMoveDown}
-                    title="아래로 이동"
-                    aria-label="아래로 이동"
                   >
                     <ActionGlyph name="down" />
-                  </button>
+                    아래로 이동
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
 
-                  <div className={ACTION_DIVIDER_CLASS} />
+                <DropdownMenuSeparator />
 
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <button
-                        className={`${ACTION_BUTTON_CLASS} hover:text-destructive`}
-                        onMouseDown={(event) => {
-                          event.stopPropagation();
-                        }}
-                        title="삭제"
-                        aria-label="삭제"
-                      >
-                        <ActionGlyph name="delete" />
-                      </button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>페이지 삭제</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          '{page.title}' 페이지를 정말 삭제하시겠습니까?<br />
-                          하위 페이지도 함께 삭제되며, 이 작업은 되돌릴 수 없습니다.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel onClick={() => setOpenMenu(null)}>취소</AlertDialogCancel>
-                        <AlertDialogAction
-                          onClick={() => {
-                            onPageDelete(page.id);
-                            setOpenMenu(null);
-                          }}
-                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                        >
-                          삭제
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </div>
-              )}
-            </div>
+                <DropdownMenuItem
+                  className={ACTION_MENU_ITEM_CLASS}
+                  variant="destructive"
+                  onSelect={() => {
+                    setOpenMenu(null);
+                    setPendingDeletePage(page);
+                  }}
+                >
+                  <ActionGlyph name="delete" />
+                  삭제
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           {hasChildren && isExpanded && (
@@ -878,6 +806,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {activeIndex === 'daily' ? renderDailyIndex() : renderProjectIndex()}
         </div>
       </div>
+      <AlertDialog
+        open={pendingDeletePage !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeletePage(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingDeletePage?.type === 'folder' ? '폴더 삭제' : '페이지 삭제'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              '{pendingDeletePage?.title ?? ''}'을(를) 정말 삭제하시겠습니까?<br />
+              {pendingDeletePage && projectPageById.has(pendingDeletePage.id)
+                ? '하위 페이지도 함께 삭제되며, 이 작업은 되돌릴 수 없습니다.'
+                : '이 작업은 되돌릴 수 없습니다.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingDeletePage) onPageDelete(pendingDeletePage.id);
+                setPendingDeletePage(null);
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              삭제
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

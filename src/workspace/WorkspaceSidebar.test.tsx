@@ -123,14 +123,26 @@ describe('WorkspaceSidebar', () => {
     expect(container.querySelector('[data-sidebar-wide-layout]')).not.toBeInTheDocument();
   });
 
+  it('keeps the title action visible outside the clipped sidebar at narrow widths', async () => {
+    renderWithProviders(<SidebarHarness />);
+
+    await userEvent.click(screen.getByRole('button', { name: '프로젝트' }));
+    const sidebar = screen.getByRole('complementary', { name: 'Workspace navigation' });
+    fireEvent.contextMenu(screen.getByText('GA 자료'));
+
+    const renameAction = await screen.findByRole('menuitem', { name: '이름 수정' });
+    expect(renameAction).toBeVisible();
+    expect(sidebar).not.toContainElement(renameAction);
+  });
+
   it('opens title editing from right click for daily pages and project folders', async () => {
     handlers.onPageUpdate.mockClear();
     renderWithProviders(<SidebarHarness />);
 
     await userEvent.click(screen.getByRole('button', { name: '데일리' }));
     fireEvent.contextMenu(screen.getByText('오늘 메모'));
-    await userEvent.click(screen.getByRole('button', { name: '수정' }));
-    const dailyTitleInput = screen.getByDisplayValue('오늘 메모');
+    await userEvent.click(screen.getByRole('menuitem', { name: '이름 수정' }));
+    const dailyTitleInput = await screen.findByDisplayValue('오늘 메모');
     await userEvent.clear(dailyTitleInput);
     await userEvent.type(dailyTitleInput, '오늘 제목 수정{Enter}');
     expect(handlers.onPageUpdate).toHaveBeenCalledWith(
@@ -139,8 +151,8 @@ describe('WorkspaceSidebar', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '프로젝트' }));
     fireEvent.contextMenu(screen.getByText('GA 자료'));
-    await userEvent.click(screen.getByRole('button', { name: '수정' }));
-    const folderTitleInput = screen.getByDisplayValue('GA 자료');
+    await userEvent.click(screen.getByRole('menuitem', { name: '이름 수정' }));
+    const folderTitleInput = await screen.findByDisplayValue('GA 자료');
     await userEvent.clear(folderTitleInput);
     await userEvent.type(folderTitleInput, '출품 자료{Enter}');
     expect(handlers.onPageUpdate).toHaveBeenCalledWith(
